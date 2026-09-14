@@ -18,7 +18,9 @@
 # - El trabajador copia esos mismos valores de la api (`fromService`), para no
 #   escribirlos dos veces. Se refrescan en cada sincronizacion del Blueprint.
 #
-# El trabajador (background worker) no tiene plan gratuito en Render.
+# El trabajador (background worker) no tiene plan gratuito en Render, y los
+# Blueprints piden tarjeta. Sin plan de pago se usa un solo web service
+# gratuito con `bash arranque_plan_gratuito.sh` (ver README, Despliegue).
 services:
   - type: web
     name: proyecto2-api

@@ -30,6 +30,8 @@ COPY --from=constructor /app/.venv /app/.venv
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
+# Solo lo usa el plan gratuito de Render (API y trabajador en un contenedor).
+COPY arranque_plan_gratuito.sh ./
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \

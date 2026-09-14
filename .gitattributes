@@ -1,0 +1,3 @@
+# Los scripts de shell corren en Linux (imagen Docker): siempre con LF, aunque
+# se editen en Windows con core.autocrlf=true.
+*.sh text eol=lf

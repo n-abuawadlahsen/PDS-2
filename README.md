@@ -104,6 +104,15 @@ Tres piezas:
 - En Render, `COOKIE_DOMINIO` no se declara.
 - Si el servicio de Render no queda en `https://proyecto2-api.onrender.com`, se corrige la URL en `frontend/vercel.json`.
 
+**Plan gratuito de Render (el que usamos, sin tarjeta):** los Blueprints y los *background workers* piden tarjeta, así que se crea a mano **un solo web service gratuito**:
+
+- **Name** `proyecto2-api`, **Language** Docker, **Root Directory** `backend`, instancia **Free**.
+- **Docker Command** `bash arranque_plan_gratuito.sh`: corre la API y el trabajador en el mismo contenedor. Si uno de los dos muere, el contenedor termina y Render lo reinicia.
+- **Health Check Path** `/salud`.
+- **Variables:** todas en *Environment → Add from .env* (no hay grupo compartido).
+- **Se duerme** tras 15 minutos sin tráfico, y con él el trabajador. Un ping externo gratuito a `/salud` cada 10 minutos (cron-job.org o UptimeRobot) lo mantiene despierto; las 750 horas gratis al mes alcanzan para un servicio encendido todo el mes.
+- `infra/render.yaml` queda para cuando haya plan de pago (dos servicios, como pide el SPEC).
+
 **Migraciones:** las aplica el trabajador al arrancar, con un cerrojo. La API nunca migra; `GET /estado` muestra la revisión actual y la esperada.
 
 **Supabase:** Render no tiene IPv6, así que se usa el *pooler* compartido en **modo sesión**:
