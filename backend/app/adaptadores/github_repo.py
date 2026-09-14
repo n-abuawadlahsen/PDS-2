@@ -101,12 +101,9 @@ def vincular_instalacion(
     `installation_id` en la misma transaccion, sin tocar repositorios."""
     info = cliente.obtener_instalacion(installation_id)
 
-    if es_cuenta_de_organizacion(
-        existe_como_usuario=cliente.existe_como_usuario(info.account_login),
+    if not es_cuenta_de_organizacion(
         existe_como_organizacion=cliente.existe_como_organizacion(info.account_login),
     ):
-        pass  # es organizacion: continua
-    else:
         raise RechazoInstalacion(MotivoRechazoInstalacion.CUENTA_PERSONAL)
 
     ocupante = (

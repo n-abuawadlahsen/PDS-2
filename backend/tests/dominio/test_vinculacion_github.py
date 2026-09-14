@@ -11,16 +11,14 @@ from app.dominio.vinculacion_github import (
 )
 
 
-def test_es_cuenta_de_organizacion_cuando_solo_existe_como_org():
-    assert es_cuenta_de_organizacion(existe_como_usuario=False, existe_como_organizacion=True)
+def test_es_organizacion_cuando_existe_en_orgs():
+    # En GitHub real una organizacion responde 200 en /orgs y TAMBIEN en /users.
+    assert es_cuenta_de_organizacion(existe_como_organizacion=True)
 
 
-def test_no_es_organizacion_cuando_existe_como_usuario():
-    assert not es_cuenta_de_organizacion(existe_como_usuario=True, existe_como_organizacion=True)
-
-
-def test_no_es_organizacion_cuando_no_existe_como_ninguno():
-    assert not es_cuenta_de_organizacion(existe_como_usuario=False, existe_como_organizacion=False)
+def test_cuenta_personal_no_es_organizacion():
+    # Cuenta personal: 200 en /users, 404 en /orgs.
+    assert not es_cuenta_de_organizacion(existe_como_organizacion=False)
 
 
 def _instalacion_valida() -> InstalacionInfo:

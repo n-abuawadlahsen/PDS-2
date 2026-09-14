@@ -25,10 +25,15 @@ class RechazoInstalacion(Exception):
         super().__init__(motivo.value)
 
 
-def es_cuenta_de_organizacion(*, existe_como_usuario: bool, existe_como_organizacion: bool) -> bool:
-    """S6.2.4: se detecta comparando GET /users/{login} con GET /orgs/{login},
-    sin confiar en el campo `type` de la respuesta."""
-    return existe_como_organizacion and not existe_como_usuario
+def es_cuenta_de_organizacion(*, existe_como_organizacion: bool) -> bool:
+    """S6.2.4: se detecta por los endpoints, sin confiar en el campo `type`.
+
+    En GitHub real `GET /users/{login}` responde 200 tambien para una
+    organizacion, asi que no distingue nada; lo que distingue es
+    `GET /orgs/{login}`: 200 solo para organizaciones, 404 para una cuenta
+    personal. Una cuenta personal es la que existe en `/users` y no en `/orgs`.
+    """
+    return existe_como_organizacion
 
 
 @dataclass(frozen=True)

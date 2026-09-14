@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.adaptadores.base import ahora_utc
-from app.adaptadores.cliente_github import crear_cliente_github_desde_config
+from app.adaptadores.cliente_github import FalloProveedorGithub, crear_cliente_github_desde_config
 from app.adaptadores.modelos_identidad import Sesion, Usuario
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, usuario_actual
 from app.dominio.cuenta import puede_cerrar_cuenta
@@ -107,11 +107,12 @@ def declarar_cuenta_github(
         raise HTTPException(status_code=422, detail="falta el consentimiento")
 
     cliente = crear_cliente_github_desde_config(settings)
-    existe_usuario = cliente.existe_como_usuario(datos.login)
-    existe_org = cliente.existe_como_organizacion(datos.login)
-    if not existe_usuario or es_cuenta_de_organizacion(
-        existe_como_usuario=existe_usuario, existe_como_organizacion=existe_org
-    ):
+    try:
+        existe_usuario = cliente.existe_como_usuario(datos.login)
+        existe_org = cliente.existe_como_organizacion(datos.login)
+    except FalloProveedorGithub as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    if not existe_usuario or es_cuenta_de_organizacion(existe_como_organizacion=existe_org):
         raise HTTPException(
             status_code=422, detail="esa cuenta de GitHub no existe o es una organizacion"
         )

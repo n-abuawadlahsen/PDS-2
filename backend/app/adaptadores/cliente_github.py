@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import threading
 import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -89,13 +90,21 @@ def _repo_desde_json(d: dict[str, Any]) -> RepoGithubInfo:
     )
 
 
-def _cabeceras(token: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {token}",
+def _cabeceras(token: str | None) -> dict[str, str]:
+    cabeceras = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": _GITHUB_API_VERSION,
         "User-Agent": "proyecto2-icc4201",
     }
+    if token is not None:
+        cabeceras["Authorization"] = f"Bearer {token}"
+    return cabeceras
+
+
+# Token de instalacion para consultar cuentas publicas, por App: (token, vence).
+_tokens_consulta: dict[str, tuple[str, datetime]] = {}
+_cerrojo_tokens_consulta = threading.Lock()
+_MARGEN_VENCIMIENTO_TOKEN = timedelta(minutes=5)
 
 
 def emitir_jwt_de_app(*, app_id: str, private_key_pem_base64: str) -> str:
@@ -352,7 +361,7 @@ class ClienteGitHubReal:
         metodo: str,
         url: str,
         *,
-        token: str,
+        token: str | None,
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
     ) -> httpx.Response:
@@ -368,27 +377,63 @@ class ClienteGitHubReal:
         except httpx.TimeoutException as exc:
             raise FalloProveedorGithub("tiempo de espera agotado") from exc
 
-    def existe_como_usuario(self, login: str) -> bool:
-        respuesta = self._peticion(
-            "GET", f"https://api.github.com/users/{login}", token=self._jwt_app()
-        )
-        return respuesta.status_code == 200
+    def _token_consultas_publicas(self) -> str | None:
+        """Token para `GET /users/{login}` y `GET /orgs/{login}`.
 
-    def existe_como_organizacion(self, login: str) -> bool:
-        respuesta = self._peticion(
-            "GET", f"https://api.github.com/orgs/{login}", token=self._jwt_app()
-        )
-        return respuesta.status_code == 200
+        GitHub responde 401 al JWT de la App fuera de las rutas `/app/...`, asi
+        que estas consultas usan un token de instalacion de cualquier
+        instalacion activa de la App (limite de 5000 peticiones por hora),
+        cacheado en memoria de proceso hasta poco antes de vencer (A-038: no se
+        persiste). Sin ninguna instalacion todavia, `None`: la consulta viaja
+        sin autenticar (60 por hora).
+        """
+        ahora = datetime.now(UTC)
+        with _cerrojo_tokens_consulta:
+            cacheado = _tokens_consulta.get(self._app_id)
+        if cacheado is not None and cacheado[1] - _MARGEN_VENCIMIENTO_TOKEN > ahora:
+            return cacheado[0]
 
-    def obtener_cuenta_usuario(self, login: str) -> CuentaUsuarioInfo | None:
-        respuesta = self._peticion(
-            "GET", f"https://api.github.com/users/{login}", token=self._jwt_app()
-        )
-        if respuesta.status_code == 404:
+        activas = [i for i in self.listar_instalaciones() if not i.suspendida]
+        if not activas:
             return None
+        respuesta = self._peticion(
+            "POST",
+            f"https://api.github.com/app/installations/{activas[0].installation_id}/access_tokens",
+            token=self._jwt_app(),
+        )
         if respuesta.status_code >= 500:
             raise FalloProveedorGithub(f"GitHub respondio {respuesta.status_code}")
         respuesta.raise_for_status()
+        datos = respuesta.json()
+        token = str(datos["token"])
+        vence = datetime.fromisoformat(str(datos["expires_at"]).replace("Z", "+00:00"))
+        with _cerrojo_tokens_consulta:
+            _tokens_consulta[self._app_id] = (token, vence)
+        return token
+
+    def _consultar_cuenta(self, ruta: str) -> httpx.Response | None:
+        """`None` si la cuenta no existe (404). Cualquier otra respuesta que no
+        sea 200 (401, limite de peticiones, 5xx) es un fallo del proveedor y
+        nunca se traduce a "no existe" (Ley 5)."""
+        respuesta = self._peticion(
+            "GET", f"https://api.github.com{ruta}", token=self._token_consultas_publicas()
+        )
+        if respuesta.status_code == 404:
+            return None
+        if respuesta.status_code != 200:
+            raise FalloProveedorGithub(f"GitHub respondio {respuesta.status_code} a GET {ruta}")
+        return respuesta
+
+    def existe_como_usuario(self, login: str) -> bool:
+        return self._consultar_cuenta(f"/users/{quote(login, safe='')}") is not None
+
+    def existe_como_organizacion(self, login: str) -> bool:
+        return self._consultar_cuenta(f"/orgs/{quote(login, safe='')}") is not None
+
+    def obtener_cuenta_usuario(self, login: str) -> CuentaUsuarioInfo | None:
+        respuesta = self._consultar_cuenta(f"/users/{quote(login, safe='')}")
+        if respuesta is None:
+            return None
         datos = respuesta.json()
         return CuentaUsuarioInfo(github_user_id=datos["id"], login=datos["login"])
 
@@ -874,7 +919,13 @@ class ClienteGitHubDoble:
         return "proyecto2-icc4201-doble"
 
     def existe_como_usuario(self, login: str) -> bool:
-        return login == self._CUENTA_PERSONAL or login.lower() in self._CUENTAS_ESTUDIANTE
+        # Como GitHub real: `GET /users/{login}` tambien responde 200 para una
+        # organizacion. Un doble que lo negara esconderia errores de deteccion.
+        return (
+            login == self._CUENTA_PERSONAL
+            or login == self._ORG_LOGIN
+            or login.lower() in self._CUENTAS_ESTUDIANTE
+        )
 
     def existe_como_organizacion(self, login: str) -> bool:
         return login == self._ORG_LOGIN

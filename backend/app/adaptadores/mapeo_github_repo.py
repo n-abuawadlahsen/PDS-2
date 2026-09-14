@@ -265,9 +265,7 @@ def procesar_candidato(
 
     existe_usuario = cliente_github.existe_como_usuario(login)
     existe_org = cliente_github.existe_como_organizacion(login)
-    es_org = es_cuenta_de_organizacion(
-        existe_como_usuario=existe_usuario, existe_como_organizacion=existe_org
-    )
+    es_org = es_cuenta_de_organizacion(existe_como_organizacion=existe_org)
 
     cuenta_info = (
         cliente_github.obtener_cuenta_usuario(login) if existe_usuario and not es_org else None
