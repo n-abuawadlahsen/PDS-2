@@ -102,7 +102,7 @@ Tres piezas:
 - En Vercel, `VITE_API_BASE_URL` va vacía o no se declara.
 - En Render, `FRONTEND_ORIGEN` y `VITE_API_BASE_URL` valen la URL pública de Vercel.
 - En Render, `COOKIE_DOMINIO` no se declara.
-- Si el servicio de Render no queda en `https://proyecto2-api.onrender.com`, se corrige la URL en `frontend/vercel.json`.
+- La URL de Render está fija en `frontend/vercel.json` (hoy `https://proyecto2-api-oyxf.onrender.com`); si el servicio cambia de URL, se corrige ahí.
 
 **Plan gratuito de Render (el que usamos, sin tarjeta):** los Blueprints y los *background workers* piden tarjeta, así que se crea a mano **un solo web service gratuito**:
 
