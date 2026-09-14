@@ -1,0 +1,132 @@
+# Los dos servicios de Render como codigo (SPEC 14 S14.5.1, S14.2.1). Nunca se
+# edita a mano en el panel. Despliegue disparado unicamente por integracion a
+# `main` (nunca por deploy hook).
+#
+# Los dos comandos de arranque son literales y fijos (S14.5.1 "[DECISION
+# NUEVA]"): `uvicorn app.main:app` para `api`, `python -m app.trabajos.ejecutor`
+# para `trabajador`. No debe existir un tercer comando de arranque en el repo.
+# En un servicio `runtime: docker` el comando va en `dockerCommand`
+# (`startCommand` es solo para runtimes nativos).
+#
+# Blueprint: en el panel de Render, New > Blueprint, apuntando a este fichero
+# (`infra/render.yaml`). Tres clases de variables:
+# - `proyecto2-comun` (grupo): valores fijos no secretos y dos secretos que
+#   Render genera solo (`generateValue`). Se cambian aqui, nunca en el panel.
+# - `sync: false` en `proyecto2-api`: Render los pide UNA vez al crear el
+#   Blueprint (secretos y URLs que dependen del despliegue). Despues se
+#   cambian en el panel del servicio `proyecto2-api`.
+# - El trabajador copia esos mismos valores de la api (`fromService`), para no
+#   escribirlos dos veces. Se refrescan en cada sincronizacion del Blueprint.
+#
+# El trabajador (background worker) no tiene plan gratuito en Render.
+services:
+  - type: web
+    name: proyecto2-api
+    runtime: docker
+    region: virginia
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /salud
+    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000 --timeout-graceful-shutdown 25
+    envVars:
+      - key: PORT
+        value: "10000"
+      - fromGroup: proyecto2-comun
+      # --- Se piden al crear el Blueprint ---
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_ENCRYPTION_KEYS
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_APP_PRIVATE_KEY
+        sync: false
+      - key: FRONTEND_ORIGEN
+        sync: false
+      - key: VITE_API_BASE_URL
+        sync: false
+      - key: CANVAS_MODO
+        sync: false
+      - key: CANVAS_BASE_URL
+        sync: false
+      - key: CANVAS_INSTANCIAS
+        sync: false
+
+  - type: worker
+    name: proyecto2-trabajador
+    runtime: docker
+    region: virginia
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    branch: main
+    autoDeploy: true
+    dockerCommand: python -m app.trabajos.ejecutor
+    envVars:
+      - fromGroup: proyecto2-comun
+      - key: DATABASE_URL
+        fromService: { type: web, name: proyecto2-api, envVarKey: DATABASE_URL }
+      - key: APP_ENCRYPTION_KEYS
+        fromService: { type: web, name: proyecto2-api, envVarKey: APP_ENCRYPTION_KEYS }
+      - key: GOOGLE_CLIENT_ID
+        fromService: { type: web, name: proyecto2-api, envVarKey: GOOGLE_CLIENT_ID }
+      - key: GOOGLE_CLIENT_SECRET
+        fromService: { type: web, name: proyecto2-api, envVarKey: GOOGLE_CLIENT_SECRET }
+      - key: GITHUB_APP_ID
+        fromService: { type: web, name: proyecto2-api, envVarKey: GITHUB_APP_ID }
+      - key: GITHUB_APP_PRIVATE_KEY
+        fromService: { type: web, name: proyecto2-api, envVarKey: GITHUB_APP_PRIVATE_KEY }
+      - key: FRONTEND_ORIGEN
+        fromService: { type: web, name: proyecto2-api, envVarKey: FRONTEND_ORIGEN }
+      - key: VITE_API_BASE_URL
+        fromService: { type: web, name: proyecto2-api, envVarKey: VITE_API_BASE_URL }
+      - key: CANVAS_MODO
+        fromService: { type: web, name: proyecto2-api, envVarKey: CANVAS_MODO }
+      - key: CANVAS_BASE_URL
+        fromService: { type: web, name: proyecto2-api, envVarKey: CANVAS_BASE_URL }
+      - key: CANVAS_INSTANCIAS
+        fromService: { type: web, name: proyecto2-api, envVarKey: CANVAS_INSTANCIAS }
+
+envVarGroups:
+  - name: proyecto2-comun
+    envVars:
+      - key: ENTORNO
+        value: produccion
+      - key: PERFIL_ALCANCE
+        value: parcial
+      - key: GITHUB_MODO
+        value: real
+      - key: COMUNICACIONES_SALIENTES
+        value: activadas
+      - key: APP_ENCRYPTION_KEY_ACTIVA
+        value: "1"
+      # Uvicorn detras del proxy de Render (y de Vercel): confia en
+      # X-Forwarded-For/-Proto para la IP truncada de la bitacora.
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"
+      # El correo saliente no entra en la entrega parcial: valores de relleno
+      # hasta configurar el proveedor (S14.6.3).
+      - key: EMAIL_FROM
+        value: informes@proyecto2.invalid
+      - key: EMAIL_FROM_NOMBRE
+        value: Proyecto 2
+      - key: EMAIL_REPLY_TO
+        value: contacto@proyecto2.invalid
+      - key: EMAIL_DOMINIO_VERIFICADO
+        value: proyecto2.invalid
+      - key: EMAIL_PROVIDER_API_KEY
+        value: sin-proveedor-en-la-parcial
+      # Secretos que Render genera una vez (base64 de 256 bits) y comparte con
+      # los dos servicios. El del webhook se copia desde el panel al configurar
+      # el webhook de la GitHub App.
+      - key: SIGNING_KEY
+        generateValue: true
+      - key: GITHUB_WEBHOOK_SECRET
+        generateValue: true

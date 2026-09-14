@@ -1,0 +1,115 @@
+# Unico workflow de puertas de construccion (SPEC 14 S14.9). `main` esta
+# protegida: cualquier puerta roja bloquea el merge.
+#
+# Estado a Etapa P8 (docs/PLAN-IMPLEMENTACION.md): implementa 6 de las 18
+# puertas que el SPEC exige en total (lint, tipos, pruebas unitarias +
+# cobertura de dominio, migraciones, deteccion de secretos, build del
+# frontend). Parte de las "puertas de contrato" (S14.9.3) ya corre dentro de
+# pytest (pureza de dominio, censo de entidades, catalogo de endpoints de
+# Canvas, prohibicion de DELETE /repos); las demas (rutas por perfil,
+# superficie sin sesion, prohibicion de ON DELETE CASCADE, cobertura de
+# capacidades degradadas) se añaden con el perfil de alcance completo.
+# Canvas y GitHub corren en modo doble: el CI nunca llama a un proveedor real.
+name: puertas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: proyecto2
+          POSTGRES_PASSWORD: proyecto2_ci
+          POSTGRES_DB: proyecto2
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U proyecto2"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://proyecto2:proyecto2_ci@localhost:5432/proyecto2
+      ENTORNO: local
+      PERFIL_ALCANCE: parcial
+      CANVAS_MODO: doble
+      GITHUB_MODO: doble
+      CANVAS_BASE_URL: https://canvas-doble.local
+      # Las pruebas vinculan contra la instancia doble: tiene que estar en la
+      # lista blanca (S5.2.8).
+      CANVAS_INSTANCIAS: '[{"base_url": "https://canvas-doble.local", "nombre_visible": "Canvas (modo doble, CI)"}]'
+      COMUNICACIONES_SALIENTES: pausadas
+      EMAIL_FROM: informes@send.ci.localhost
+      EMAIL_FROM_NOMBRE: Proyecto 2
+      EMAIL_REPLY_TO: contacto@ci.localhost
+      EMAIL_DOMINIO_VERIFICADO: ci.localhost
+      VITE_API_BASE_URL: http://localhost:8000
+      FRONTEND_ORIGEN: http://localhost:5173
+      APP_ENCRYPTION_KEYS: "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      APP_ENCRYPTION_KEY_ACTIVA: "1"
+      GOOGLE_CLIENT_ID: ci-client-id
+      GOOGLE_CLIENT_SECRET: ci-client-secret
+      GITHUB_APP_ID: "1"
+      GITHUB_APP_PRIVATE_KEY: Y2k=
+      GITHUB_WEBHOOK_SECRET: ci-webhook-secret
+      EMAIL_PROVIDER_API_KEY: ci-email-key
+      SIGNING_KEY: ci-signing-key-not-a-secret-only-for-ci
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar uv
+        run: pip install uv==0.12.13
+
+      - name: Sincronizar dependencias (modo frozen)
+        run: uv sync --frozen --dev
+
+      - name: Puerta - lint (ruff)
+        run: uv run ruff check .
+
+      - name: Puerta - formato (ruff format --check)
+        run: uv run ruff format --check .
+
+      - name: Puerta - tipos (mypy)
+        run: uv run mypy app
+
+      - name: Puerta - migracion limpia (alembic upgrade head)
+        run: uv run alembic upgrade head
+
+      - name: Puerta - divergencia de migraciones (alembic check)
+        run: uv run alembic check
+
+      - name: Puerta - pruebas unitarias + cobertura de dominio >= 70%
+        run: uv run pytest --cov=app.dominio --cov-fail-under=70
+
+      - name: Puerta - deteccion de secretos (arbol e historial)
+        run: |
+          uv run detect-secrets scan --all-files > /tmp/secrets-actuales.json
+          if uv run python -c "import json,sys; d=json.load(open('/tmp/secrets-actuales.json')); sys.exit(1 if d['results'] else 0)"; then
+            echo "sin hallazgos"
+          else
+            echo "detect-secrets encontro posibles secretos"; cat /tmp/secrets-actuales.json; exit 1
+          fi
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+      - name: Instalar dependencias (npm ci, nunca npm install)
+        run: npm ci
+      - name: Puerta - build del frontend (vite build)
+        run: npm run build

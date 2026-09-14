@@ -1,0 +1,38 @@
+# Entornos y secretos locales (S14.6: ningun secreto entra al repositorio)
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Editores y SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Artefactos locales
+*.log
+*.pem
+backend/.doble_registro_github.json
+
+# Material de trabajo que no va al repositorio (solo lo necesario para la app)
+.claude/
+.workflow/
+PARA-EL-EQUIPO/

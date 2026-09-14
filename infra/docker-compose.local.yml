@@ -1,0 +1,17 @@
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: proyecto2_db_local
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: proyecto2
+      POSTGRES_PASSWORD: proyecto2_local
+      POSTGRES_DB: proyecto2
+    ports:
+      - "5434:5432"
+    volumes:
+      - proyecto2_db_local:/var/lib/postgresql/data
+
+volumes:
+  proyecto2_db_local:

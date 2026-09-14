@@ -1,0 +1,15 @@
+# La imagen solo copia pyproject.toml, uv.lock, app/, alembic/ y alembic.ini.
+# Esto evita subir al contexto de build el entorno virtual local y los secretos.
+.venv
+.env
+.env.*
+!.env.example
+*.pem
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+tests
+.doble_registro_github.json
