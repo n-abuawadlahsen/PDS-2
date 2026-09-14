@@ -81,7 +81,7 @@ def test_el_identificador_numerico_nunca_se_trunca():
         tarea_slug="b" * 24,
         sujeto=SujetoNombre(tipo="e", canvas_id=1234567890, texto_legible="x" * 40),
     )
-    assert "e1234567890" in nombre
+    assert "e1234567890" in nombre  # pragma: allowlist secret
     assert len(nombre) <= 90
 
 

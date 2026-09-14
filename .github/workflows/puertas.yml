@@ -90,9 +90,11 @@ jobs:
       - name: Puerta - pruebas unitarias + cobertura de dominio >= 70%
         run: uv run pytest --cov=app.dominio --cov-fail-under=70
 
-      - name: Puerta - deteccion de secretos (arbol e historial)
+      # Solo archivos versionados: `--all-files` tambien leeria `.venv/` y
+      # `.mypy_cache/`, que los pasos anteriores crean y estan llenos de hashes.
+      - name: Puerta - deteccion de secretos (archivos versionados)
         run: |
-          uv run detect-secrets scan --all-files > /tmp/secrets-actuales.json
+          uv run detect-secrets scan > /tmp/secrets-actuales.json
           if uv run python -c "import json,sys; d=json.load(open('/tmp/secrets-actuales.json')); sys.exit(1 if d['results'] else 0)"; then
             echo "sin hallazgos"
           else

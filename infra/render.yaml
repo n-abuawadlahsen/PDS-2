@@ -28,7 +28,11 @@ services:
     dockerContext: ./backend
     plan: starter
     branch: main
-    autoDeploy: true
+    autoDeployTrigger: commit
+    # Monorepo: solo un cambio en backend/ redespliega (frontend/ es de Vercel).
+    buildFilter:
+      paths:
+        - backend/**
     healthCheckPath: /salud
     dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000 --timeout-graceful-shutdown 25
     envVars:
@@ -67,7 +71,10 @@ services:
     dockerContext: ./backend
     plan: starter
     branch: main
-    autoDeploy: true
+    autoDeployTrigger: commit
+    buildFilter:
+      paths:
+        - backend/**
     dockerCommand: python -m app.trabajos.ejecutor
     envVars:
       - fromGroup: proyecto2-comun
