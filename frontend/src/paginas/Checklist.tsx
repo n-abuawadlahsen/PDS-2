@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   ejecutarPruebaEscritura,
   encolarChecklist,
@@ -9,10 +9,18 @@ import {
   reejecutarItem,
   type ItemVerificacion,
 } from "../lib/api";
-
-/** Los 19 items numerados, en el orden en que se muestran (S4.7.2). El
- * carril de Canvas corre en serie y el de GitHub en paralelo; aqui solo
- * importa el orden de lectura para la persona, no el de ejecucion. */
+import { useCurso } from "../components/Layout";
+import {
+  Aviso,
+  Cabecera,
+  Cargando,
+  ErrorCarga,
+  Estado,
+  Mensajes,
+  Tabla,
+  useConfirmar,
+} from "../components/ui";
+import { useConsulta, useOperacion } from "../hooks/useConsulta";
 const NOMBRES_ITEMS: Record<string, string> = {
   "1": "El token es válido y es tuyo",
   "2": "El curso existe, es visible y está publicado",
@@ -36,176 +44,291 @@ const NOMBRES_ITEMS: Record<string, string> = {
 };
 
 const ORDEN_VISUAL = [
-  "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-  "11", "12", "13", "14", "15", "16", "17", "18", "19",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11",
+  "12",
+  "13",
+  "14",
+  "15",
+  "16",
+  "17",
+  "18",
+  "19",
 ];
 
-const COLOR_RESULTADO: Record<string, string> = {
-  CORRECTO: "#1a7f37",
-  ADVERTENCIA: "#9a6700",
-  BLOQUEANTE: "#cf222e",
-  NO_VERIFICADO: "#57606a",
-  VERIFICADO_A_MANO: "#8250df",
-};
-
-function Insignia({ resultado }: { resultado: string }) {
-  return (
-    <span
-      style={{
-        color: "white",
-        background: COLOR_RESULTADO[resultado] ?? "#57606a",
-        borderRadius: 4,
-        padding: "0.1rem 0.5rem",
-        fontSize: "0.85rem",
-      }}
-    >
-      {resultado}
-    </span>
-  );
-}
-
 export function Checklist() {
-  const { cursoId } = useParams<{ cursoId: string }>();
+  const { curso, puede, recargar } = useCurso();
+  const administra = puede("curso.administrar");
+  const [ejecucion, setEjecucion] = useState<{
+    id: string;
+    cantidad: number;
+  } | null>(null);
   const [items, setItems] = useState<Record<string, ItemVerificacion>>({});
-  const [corriendo, setCorriendo] = useState(false);
-  const [consiento5bis, setConsiento5bis] = useState(false);
-  const [consiento17bis, setConsiento17bis] = useState(false);
-  const intervalo = useRef<number | undefined>(undefined);
-
-  const cargarUltima = useCallback(() => {
-    if (!cursoId) return;
-    obtenerUltimaVerificacion(cursoId).then((lista) => {
-      setItems((previo) => {
-        const siguiente = { ...previo };
-        for (const item of lista) if (item.item) siguiente[item.item] = item;
-        return siguiente;
-      });
+  const [consentimientos, setConsentimientos] = useState({
+    "5-bis": false,
+    "17-bis": false,
+  });
+  const op = useOperacion();
+  const confirmar = useConfirmar();
+  const ultima = useConsulta(`verificacion-${curso.id}`, (signal) =>
+    obtenerUltimaVerificacion(curso.id, signal),
+  );
+  const corrida = useConsulta(
+    `ejecucion-${curso.id}-${ejecucion?.id ?? "ninguna"}`,
+    (signal) =>
+      ejecucion
+        ? obtenerEjecucionVerificacion(curso.id, ejecucion.id, signal)
+        : Promise.resolve([]),
+    ejecucion ? 2000 : 0,
+  );
+  function incorporar(lista: ItemVerificacion[]) {
+    setItems((prev) => {
+      const siguientes = { ...prev };
+      for (const i of lista) if (i.item) siguientes[i.item] = i;
+      return siguientes;
     });
-  }, [cursoId]);
-
+  }
   useEffect(() => {
-    cargarUltima();
-  }, [cargarUltima]);
-
-  useEffect(() => () => window.clearInterval(intervalo.current), []);
-
-  function sondear(cursoIdActual: string, ejecucionId: string, cantidadEsperada: number) {
-    setCorriendo(true);
-    let intentos = 0;
-    intervalo.current = window.setInterval(async () => {
-      intentos += 1;
-      const lista = await obtenerEjecucionVerificacion(cursoIdActual, ejecucionId);
-      setItems((previo) => {
-        const siguiente = { ...previo };
-        for (const item of lista) if (item.item) siguiente[item.item] = item;
-        return siguiente;
-      });
-      // Tope 180s (S4.7.1): a 2s por sondeo, no hay razon para pasar de 95 vueltas.
-      if (lista.length >= cantidadEsperada || intentos >= 95) {
-        window.clearInterval(intervalo.current);
-        setCorriendo(false);
+    if (ultima.datos) incorporar(ultima.datos);
+  }, [ultima.datos]);
+  useEffect(() => {
+    if (corrida.datos && ejecucion) {
+      incorporar(corrida.datos);
+      if (corrida.datos.length >= ejecucion.cantidad) {
+        setEjecucion(null);
+        recargar();
       }
-    }, 2000);
-  }
-
-  async function ejecutarTodo() {
-    if (!cursoId) return;
-    const { ejecucion_id } = await encolarChecklist(cursoId);
-    sondear(cursoId, ejecucion_id, 19);
-  }
-
-  async function reejecutar(item: string) {
-    if (!cursoId) return;
-    const { ejecucion_id } = await reejecutarItem(cursoId, item);
-    sondear(cursoId, ejecucion_id, 1);
-  }
-
-  async function firmarAMano() {
-    if (!cursoId) return;
-    const fila = await firmarItem14AMano(cursoId);
-    setItems((previo) => ({ ...previo, "14": fila }));
-  }
-
-  async function probarEscritura(item: "5-bis" | "17-bis", consiento: boolean) {
-    if (!cursoId) return;
-    const fila = await ejecutarPruebaEscritura(cursoId, item, consiento);
-    setItems((previo) => ({ ...previo, [item]: fila }));
-  }
-
-  const item14 = items["14"];
-  const requiereFirma = Boolean(item14 && (item14.detalle as { requiere_firma_manual?: boolean }).requiere_firma_manual);
-
+    }
+  }, [corrida.datos, ejecucion, recargar]);
+  useEffect(() => {
+    if (!ejecucion) return;
+    const timer = setTimeout(() => {
+      setEjecucion(null);
+      op.setError(
+        "La verificación está tardando más de lo esperado. Los ítems sin respuesta siguen sin verificar. Actualiza los resultados o reintenta.",
+      );
+    }, 180_000);
+    return () => clearTimeout(timer);
+  }, [ejecucion]);
+  const ocupado = op.ocupado || ejecucion !== null;
+  const filas = Object.values(items).filter(
+    (i) => i.item && !i.item.includes("bis"),
+  );
   return (
-    <main style={{ maxWidth: 760, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Paso 4: checklist de verificación</h1>
-      <p>
-        <button onClick={ejecutarTodo} disabled={corriendo}>
-          {corriendo ? "Ejecutando…" : "Ejecutar checklist completo"}
-        </button>
-      </p>
-
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <tbody>
-          {ORDEN_VISUAL.map((id) => {
-            const fila = items[id];
-            return (
-              <tr key={id} style={{ borderBottom: "1px solid #ddd" }}>
-                <td style={{ padding: "0.4rem 0.5rem", width: "2rem" }}>{id}</td>
-                <td style={{ padding: "0.4rem 0.5rem" }}>{NOMBRES_ITEMS[id]}</td>
-                <td style={{ padding: "0.4rem 0.5rem", whiteSpace: "nowrap" }}>
-                  {fila ? <Insignia resultado={fila.resultado} /> : <em>sin ejecutar</em>}
-                </td>
-                <td style={{ padding: "0.4rem 0.5rem" }}>
-                  <button onClick={() => reejecutar(id)} disabled={corriendo}>
-                    Reejecutar
-                  </button>
-                  {id === "14" && requiereFirma && (
-                    <button onClick={firmarAMano} style={{ marginLeft: "0.5rem" }}>
-                      Firmar a mano
-                    </button>
-                  )}
-                </td>
+    <>
+      <Cabecera
+        titulo="Verificación de conexiones"
+        descripcion="Comprueba los permisos de Canvas y GitHub antes de continuar con las tareas."
+        acciones={
+          <button disabled={ocupado} onClick={ultima.recargar}>
+            Actualizar resultados
+          </button>
+        }
+      />
+      <nav className="tabs" aria-label="Configuración">
+        <Link to={`/cursos/${curso.id}/vinculacion`}>Conexiones</Link>
+        <Link aria-current="page" to={`/cursos/${curso.id}/verificacion`}>
+          Verificación
+        </Link>
+      </nav>
+      <Mensajes {...op} />
+      {ultima.error && (
+        <ErrorCarga error={ultima.error} reintentar={ultima.recargar} />
+      )}
+      {corrida.error && (
+        <ErrorCarga error={corrida.error} reintentar={corrida.recargar} />
+      )}
+      <div className="metrics">
+        {[
+          ["CORRECTO", "Correctas"],
+          ["VERIFICADO_A_MANO", "Manuales"],
+          ["ADVERTENCIA", "Advertencias"],
+          ["BLOQUEANTE", "Bloqueantes"],
+          ["NO_VERIFICADO", "Sin verificar"],
+        ].map(([codigo, texto]) => (
+          <div className="metric" key={codigo}>
+            <strong>
+              {codigo === "NO_VERIFICADO"
+                ? 19 -
+                  filas.filter((i) => i.resultado !== "NO_VERIFICADO").length
+                : filas.filter((i) => i.resultado === codigo).length}
+            </strong>
+            <span>{texto} · de 19</span>
+          </div>
+        ))}
+      </div>
+      <section className="panel">
+        <div className="panel-header">
+          <h2>Comprobaciones del curso</h2>
+          {administra && (
+            <button
+              className="primary"
+              disabled={ocupado}
+              onClick={() =>
+                void op.ejecutar(async () => {
+                  const r = await encolarChecklist(curso.id);
+                  setItems({});
+                  setEjecucion({ id: r.ejecucion_id, cantidad: 19 });
+                }, "Verificación solicitada. Los resultados aparecerán a medida que se completen.")
+              }
+            >
+              {ocupado ? "Verificando…" : "Ejecutar checklist completo"}
+            </button>
+          )}
+        </div>
+        {!administra && (
+          <Aviso>
+            Solo un profesor puede ejecutar comprobaciones. Los resultados están
+            disponibles para consulta.
+          </Aviso>
+        )}
+        {ejecucion && <Cargando texto="La verificación sigue en curso…" />}
+        <Tabla etiqueta="Comprobaciones de Canvas y GitHub" fija={false}>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Comprobación</th>
+                <th scope="col">Resultado</th>
+                <th scope="col">Acciones</th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      <section style={{ marginTop: "2rem" }}>
-        <h2>Pruebas de escritura opcionales</h2>
-        <p>
-          Se ejecutan de inmediato (no forman parte del checklist encolado) y solo si marcás la
-          casilla correspondiente.
-        </p>
-        <p>
-          <label>
-            <input
-              type="checkbox"
-              checked={consiento5bis}
-              onChange={(e) => setConsiento5bis(e.target.checked)}
-            />{" "}
-            Autorizo la prueba de anuncio de sección (5-bis)
-          </label>{" "}
-          <button onClick={() => probarEscritura("5-bis", consiento5bis)}>Probar</button>{" "}
-          {items["5-bis"] && <Insignia resultado={items["5-bis"].resultado} />}
-        </p>
-        <p>
-          <label>
-            <input
-              type="checkbox"
-              checked={consiento17bis}
-              onChange={(e) => setConsiento17bis(e.target.checked)}
-            />{" "}
-            Autorizo la prueba de comentario en una entrega (17-bis)
-          </label>{" "}
-          <button onClick={() => probarEscritura("17-bis", consiento17bis)}>Probar</button>{" "}
-          {items["17-bis"] && <Insignia resultado={items["17-bis"].resultado} />}
-        </p>
+            </thead>
+            <tbody>
+              {ORDEN_VISUAL.map((id) => (
+                <tr key={id}>
+                  <td>
+                    <strong>
+                      {id}. {NOMBRES_ITEMS[id]}
+                    </strong>
+                    <p className="help">
+                      {["14", "18"].includes(id) ? "GitHub" : "Canvas"}
+                    </p>
+                    {items[id]?.detalle &&
+                      Object.keys(items[id].detalle).length > 0 && (
+                        <details>
+                          <summary>Ver motivo y detalles</summary>
+                          <pre>
+                            {JSON.stringify(items[id].detalle, null, 2)}
+                          </pre>
+                        </details>
+                      )}
+                  </td>
+                  <td>
+                    <Estado valor={items[id]?.resultado ?? "NO_VERIFICADO"} />
+                  </td>
+                  <td>
+                    {administra && (
+                      <div className="actions">
+                        <button
+                          disabled={ocupado}
+                          onClick={() =>
+                            void op.ejecutar(async () => {
+                              const r = await reejecutarItem(curso.id, id);
+                              setEjecucion({ id: r.ejecucion_id, cantidad: 1 });
+                            })
+                          }
+                        >
+                          Reintentar{" "}
+                          <span className="sr-only">comprobación {id}</span>
+                        </button>
+                        {id === "14" &&
+                          Boolean(items[id]?.detalle.requiere_firma_manual) && (
+                            <button
+                              disabled={ocupado}
+                              onClick={async () => {
+                                if (
+                                  await confirmar({
+                                    titulo: "Registrar verificación manual",
+                                    descripcion:
+                                      "Confirma que revisaste la configuración indicada de la organización. Quedará registrada como verificación manual con tu identidad.",
+                                    accion: "Registrar verificación",
+                                  })
+                                )
+                                  void op.ejecutar(async () =>
+                                    incorporar([
+                                      await firmarItem14AMano(curso.id),
+                                    ]),
+                                  );
+                              }}
+                            >
+                              Verificar manualmente
+                            </button>
+                          )}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Tabla>
       </section>
-
-      <p>
-        {cursoId && <Link to={`/cursos/${cursoId}/vinculacion`}>Volver al asistente de vinculación</Link>}
-      </p>
-    </main>
+      <section className="panel">
+        <h2>Pruebas opcionales de escritura</h2>
+        <p>
+          Estas pruebas realizan acciones en Canvas y requieren tu autorización
+          por separado. No se incluyen al ejecutar el checklist completo.
+        </p>
+        {(["5-bis", "17-bis"] as const).map((id) => (
+          <div className="panel" key={id}>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={consentimientos[id]}
+                disabled={!administra || ocupado}
+                onChange={(e) =>
+                  setConsentimientos({
+                    ...consentimientos,
+                    [id]: e.target.checked,
+                  })
+                }
+              />
+              {id === "5-bis"
+                ? "Autorizo crear y borrar un anuncio de prueba en Canvas."
+                : "Autorizo escribir un comentario de prueba en una entrega de Canvas."}
+            </label>
+            <div className="actions">
+              <button
+                disabled={!administra || ocupado || !consentimientos[id]}
+                onClick={() =>
+                  void op.ejecutar(async () => {
+                    incorporar([
+                      await ejecutarPruebaEscritura(curso.id, id, true),
+                    ]);
+                    setConsentimientos((prev) => ({ ...prev, [id]: false }));
+                  })
+                }
+              >
+                Probar {id === "5-bis" ? "anuncio" : "comentario"}
+              </button>
+              {items[id] && <Estado valor={items[id].resultado} />}
+            </div>
+            {!consentimientos[id] && (
+              <p className="help">
+                Marca la autorización para habilitar esta prueba.
+              </p>
+            )}
+          </div>
+        ))}
+      </section>
+      <section className="panel next-step">
+        <h2>Continúa con los estudiantes</h2>
+        <p>
+          Revisa la información sincronizada desde Canvas y las cuentas de
+          GitHub asociadas.
+        </p>
+        <Link className="button primary" to={`/cursos/${curso.id}/personas`}>
+          Ir a Personas
+        </Link>
+      </section>
+    </>
   );
 }

@@ -68,6 +68,10 @@ cp .env.example .env   # en local: VITE_API_BASE_URL=http://localhost:8000
 npm run dev
 ```
 
+## Frontend y apariencia
+
+El frontend de la parcial usa una navegación compartida para cursos, un resumen de preparación y tres paletas seleccionables desde Perfil. La guía [`docs/FRONTEND-DISENO.md`](docs/FRONTEND-DISENO.md) explica la estructura, cómo editar todos los colores en `frontend/src/styles/themes.css`, cómo cambiar el tema predeterminado en `frontend/src/config/theme.ts` y qué límites de integración siguen presentes.
+
 ## Pruebas y calidad
 
 > **Cuidado:** las pruebas borran todas las tablas después de cada caso. Córrelas siempre contra una base aparte (por ejemplo `proyecto2_test`), nunca contra la de desarrollo.

@@ -1,0 +1,65 @@
+/* Única definición de colores. Las paletas comparten estados y neutrales. */
+:root {
+  --color-background: #f6f7f8;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f0f2f4;
+  --color-surface-hover: #e9edf0;
+  --color-text: #232c35;
+  --color-text-secondary: #56616d;
+  --color-text-disabled: #687380;
+  --color-border: #d6dce1;
+  --color-border-strong: #7d8994;
+  --color-sidebar: #27323c;
+  --color-sidebar-text: #f5f7f8;
+  --color-sidebar-hover: #354451;
+  --color-sidebar-active: #ffffff;
+  --color-sidebar-active-text: #232c35;
+  --color-input-background: var(--color-surface);
+  --color-input-border: var(--color-border-strong);
+  --color-placeholder: #626f7a;
+  --color-disabled-background: #e9edf0;
+  --color-overlay: #17212db3;
+  --shadow-dialog: 0 16px 64px #17212d33;
+  --shadow-popover: 0 4px 20px #17212d1f;
+  --color-success: #216044;
+  --color-success-background: #edf6f0;
+  --color-success-border: #63977a;
+  --color-warning: #79510b;
+  --color-warning-background: #fff6e5;
+  --color-warning-border: #ac7b20;
+  --color-error: #a1222c;
+  --color-error-background: #fdf0f0;
+  --color-error-border: #bc6971;
+  --color-info: #245a81;
+  --color-info-background: #edf5fa;
+  --color-info-border: #62889f;
+  --color-neutral: var(--color-text-secondary);
+  --color-neutral-background: var(--color-surface-muted);
+  --color-neutral-border: var(--color-border-strong);
+  --color-link: var(--color-primary);
+  --color-link-hover: var(--color-primary-hover);
+  --color-focus-ring: var(--color-primary);
+  --color-selection: var(--color-primary-subtle);
+}
+:root,
+:root[data-theme="institucional"] {
+  --color-primary: #b4232d;
+  --color-primary-hover: #951d26;
+  --color-primary-active: #78151e;
+  --color-primary-subtle: #fbebed;
+  --color-on-primary: #ffffff;
+}
+:root[data-theme="azul"] {
+  --color-primary: #245a81;
+  --color-primary-hover: #1b4564;
+  --color-primary-active: #15354d;
+  --color-primary-subtle: #eaf2f8;
+  --color-on-primary: #ffffff;
+}
+:root[data-theme="verde"] {
+  --color-primary: #236b58;
+  --color-primary-hover: #1a5142;
+  --color-primary-active: #133e32;
+  --color-primary-subtle: #e9f5ef;
+  --color-on-primary: #ffffff;
+}

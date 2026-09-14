@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   activarTarea,
   borrarArchivoBase,
@@ -22,354 +22,624 @@ import {
   textoModalidad,
   textoTipoEntrega,
 } from "../lib/textosTarea";
+import { useCurso } from "../components/Layout";
+import {
+  Aviso,
+  Cabecera,
+  Cargando,
+  ErrorCarga,
+  Estado,
+  Mensajes,
+  Tabla,
+  Vacio,
+  useConfirmar,
+} from "../components/ui";
+import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { BloqueRepositorios, LineaFechas } from "./RepositoriosTarea";
-
-const ESTILO_MOTIVO = { fontSize: "0.85rem", color: "#666" } as const;
-const ESTILO_ERROR = { background: "#fee", padding: "0.75rem" } as const;
-
 function leerComoBase64(archivo: File): Promise<string> {
-  return new Promise((resolver, rechazar) => {
+  return new Promise((resolve, reject) => {
     const lector = new FileReader();
-    lector.onload = () => resolver(String(lector.result).split(",", 2)[1] ?? "");
-    lector.onerror = () => rechazar(lector.error);
+    lector.onload = () => resolve(String(lector.result).split(",", 2)[1] ?? "");
+    lector.onerror = () =>
+      reject(new Error("No pudimos leer el archivo seleccionado."));
     lector.readAsDataURL(archivo);
   });
 }
-
-/** `/cursos/{id}/tareas/{tid}` (SPEC 13 S13.5.2): entregas, repositorio base
- * (R2.3.5, R2.3.6) y activacion con su guarda escrita (A-208). */
 export function Tarea() {
-  const { cursoId, tareaId } = useParams<{ cursoId: string; tareaId: string }>();
-  const [tarea, setTarea] = useState<TareaDetalle | null>(null);
-  const [mensaje, setMensaje] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [ocupado, setOcupado] = useState(false);
-
+  const { tareaId = "" } = useParams();
+  return <EditorTarea key={tareaId} tareaId={tareaId} />;
+}
+function EditorTarea({ tareaId }: { tareaId: string }) {
+  const { curso, puede } = useCurso();
+  const cursoId = curso.id;
+  const administra = puede("tarea.administrar");
+  const consulta = useConsulta(`tarea-${cursoId}-${tareaId}`, (signal) =>
+    obtenerTarea(cursoId, tareaId, signal),
+  );
+  const [params, setParams] = useSearchParams();
+  const pestana = params.get("vista") ?? "resumen";
   const [rutaNueva, setRutaNueva] = useState("");
-  const [archivoNuevo, setArchivoNuevo] = useState<File | null>(null);
-  const [renombrando, setRenombrando] = useState<{ desde: string; hacia: string } | null>(null);
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [renombrando, setRenombrando] = useState<{
+    desde: string;
+    hacia: string;
+  } | null>(null);
   const [vista, setVista] = useState<PrevisualizacionArchivo | null>(null);
   const reemplazoRef = useRef<HTMLInputElement>(null);
-  const [rutaReemplazo, setRutaReemplazo] = useState<string | null>(null);
-
-  async function cargar() {
-    if (!cursoId || !tareaId) return;
-    setTarea(await obtenerTarea(cursoId, tareaId));
-  }
-
-  useEffect(() => {
-    cargar();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursoId, tareaId]);
-
-  async function ejecutar(accion: () => Promise<Resultado<TareaDetalle>>, exito: string) {
-    setOcupado(true);
-    setMensaje(null);
-    setError(null);
+  const nuevoRef = useRef<HTMLInputElement>(null);
+  const rutaReemplazo = useRef("");
+  const op = useOperacion();
+  const confirmar = useConfirmar();
+  const tarea = consulta.datos;
+  async function cambiar(accion: () => Promise<Resultado<TareaDetalle>>) {
     const r = await accion();
-    setOcupado(false);
-    if (r.ok && r.datos) {
-      setTarea(r.datos);
-      setMensaje(exito);
-    } else {
-      setError(r.error);
-      await cargar();
-    }
+    if (!r.ok || !r.datos)
+      throw new Error(r.error ?? "No se pudo completar la operación.");
+    consulta.actualizar(r.datos);
+    return true;
   }
-
-  if (!cursoId || !tareaId || !tarea) {
-    return (
-      <main style={{ maxWidth: 900, margin: "4rem auto", fontFamily: "sans-serif" }}>
-        <p>Cargando…</p>
-      </main>
+  if (!tarea)
+    return consulta.error ? (
+      <ErrorCarga error={consulta.error} reintentar={consulta.recargar} />
+    ) : (
+      <Cargando texto="Consultando la tarea…" />
     );
-  }
-
   const base = tarea.repositorio_base;
-  const baseOperable = base !== null && (base.estado === "CREADO_VACIO" || base.estado === "LISTO");
-
-  async function onSubir(evento: React.FormEvent) {
-    evento.preventDefault();
-    if (!archivoNuevo || !cursoId || !tareaId) return;
-    const ruta = rutaNueva.trim() || archivoNuevo.name;
-    const contenido = await leerComoBase64(archivoNuevo);
-    await ejecutar(() => escribirArchivoBase(cursoId, tareaId, ruta, contenido), `Se subió ${ruta}.`);
-    setArchivoNuevo(null);
-    setRutaNueva("");
-  }
-
-  async function onReemplazo(archivos: FileList | null) {
-    const archivo = archivos?.[0];
-    if (!archivo || !rutaReemplazo || !cursoId || !tareaId) return;
-    const ruta = rutaReemplazo;
-    const contenido = await leerComoBase64(archivo);
-    await ejecutar(() => escribirArchivoBase(cursoId, tareaId, ruta, contenido), `Se reemplazó ${ruta}.`);
-    setRutaReemplazo(null);
-    if (reemplazoRef.current) reemplazoRef.current.value = "";
-  }
-
-  async function onPrevisualizar(ruta: string) {
-    if (!cursoId || !tareaId) return;
-    setError(null);
-    const r = await previsualizarArchivoBase(cursoId, tareaId, ruta);
-    if (r.ok && r.datos) setVista(r.datos);
-    else setError(r.error);
-  }
-
+  const baseOperable = base && ["LISTO", "CREADO_VACIO"].includes(base.estado);
+  const pestanas = [
+    ["resumen", "Resumen"],
+    ["entrega", "Entrega y fechas"],
+    ["base", "Repositorio base"],
+    ["repositorios", "Repositorios de estudiantes"],
+  ];
+  const pestanaValida = pestanas.some(([p]) => p === pestana)
+    ? pestana
+    : "resumen";
   return (
-    <main style={{ maxWidth: 900, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <p>
-        <Link to={`/cursos/${cursoId}/tareas`}>← Tareas</Link>
+    <>
+      <p className="help">
+        <Link to={`/cursos/${cursoId}/tareas`}>← Todas las tareas</Link>
       </p>
-      <h1>{tarea.nombre}</h1>
-      <p>
-        <code>{tarea.slug}</code> · {textoModalidad(tarea.modalidad)} · <strong>{textoEstadoTarea(tarea.estado)}</strong>
-        {tarea.activada_en && ` desde el ${fechaLegible(tarea.activada_en)}`}
-      </p>
-
-      {mensaje && <p role="status">{mensaje}</p>}
-      {error && (
-        <div role="alert" style={ESTILO_ERROR}>
-          {error}
-        </div>
+      <Cabecera
+        titulo={tarea.nombre}
+        descripcion={`${textoModalidad(tarea.modalidad)} · ${tarea.slug}`}
+        acciones={
+          <Estado valor={tarea.estado} texto={textoEstadoTarea(tarea.estado)} />
+        }
+      />
+      <Mensajes {...op} />
+      {consulta.error && (
+        <ErrorCarga error={consulta.error} reintentar={consulta.recargar} />
       )}
-
-      {tarea.estado === "BORRADOR" && (
-        <section>
-          <h2>Activar la tarea</h2>
-          <p style={ESTILO_MOTIVO}>
-            Activar es el único paso manual: después, los repositorios de los estudiantes se crean solos, a medida que
-            cada uno tiene su información completa.
-          </p>
-          <button
-            disabled={!tarea.activar.habilitada || ocupado}
-            onClick={() => ejecutar(() => activarTarea(cursoId, tareaId), "La tarea quedó activa.")}
+      <nav className="tabs" aria-label="Secciones de la tarea">
+        {pestanas.map(([clave, nombre]) => (
+          <Link
+            key={clave}
+            to={`?vista=${clave}`}
+            aria-current={pestanaValida === clave ? "page" : undefined}
           >
-            Activar tarea
-          </button>
-          {tarea.activar.motivo && <p style={ESTILO_MOTIVO}>{tarea.activar.motivo}</p>}
-        </section>
+            {nombre}
+          </Link>
+        ))}
+      </nav>
+      {!administra && (
+        <Aviso>
+          Estás consultando esta tarea. No tienes permiso para administrarla.
+        </Aviso>
       )}
-
-      {tarea.estado !== "BORRADOR" && <BloqueRepositorios cursoId={cursoId} tareaId={tareaId} />}
-
-      <section>
-        <h2>Entregas</h2>
-        {tarea.entregas.length === 0 ? (
-          <p>Esta tarea no tiene entregas vinculadas.</p>
+      <div hidden={pestanaValida !== "resumen"} className="stack">
+        <section className="panel">
+          <h2>
+            {tarea.estado === "BORRADOR"
+              ? "Preparar y activar"
+              : "Estado de la tarea"}
+          </h2>
+          <p>
+            {tarea.entregas.length} entrega vinculada ·{" "}
+            {base
+              ? `Repositorio base: ${textoEstadoBase(base.estado)}`
+              : "Sin repositorio base"}
+          </p>
+          {tarea.activada_en && (
+            <p>
+              Activada el {fechaLegible(tarea.activada_en, curso.zona_horaria)}.
+            </p>
+          )}
+          {tarea.estado === "BORRADOR" ? (
+            <>
+              <p>
+                Al activar esta tarea, los repositorios se crearán
+                automáticamente a medida que cada estudiante tenga la
+                información necesaria. Quienes aún no tengan una cuenta GitHub
+                asociada quedarán pendientes y continuarán cuando la completen.
+              </p>
+              {administra && (
+                <button
+                  className="primary"
+                  disabled={op.ocupado || !tarea.activar.habilitada}
+                  onClick={() =>
+                    void op.ejecutar(async () => {
+                      await cambiar(() => activarTarea(cursoId, tareaId));
+                      setParams({ vista: "repositorios" });
+                    }, "La tarea está activa. Comenzó el proceso automático de creación; los repositorios aparecerán progresivamente.")
+                  }
+                >
+                  {op.ocupado ? "Activando…" : "Activar tarea"}
+                </button>
+              )}
+              {tarea.activar.motivo && (
+                <p className="help">{tarea.activar.motivo}</p>
+              )}
+              <p className="help">
+                Puedes añadir archivos iniciales en{" "}
+                <Link to="?vista=base">Repositorio base</Link> antes de activar.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                La creación y la configuración de accesos se realizan
+                automáticamente. Consulta por separado el estado de cada
+                repositorio y sus invitaciones.
+              </p>
+              <Link className="button primary" to="?vista=repositorios">
+                Ver progreso de repositorios
+              </Link>
+            </>
+          )}
+        </section>
+        <section className="panel">
+          <h2>Información académica</h2>
+          <p>
+            Las fechas provienen de Canvas y se consultan en la zona horaria{" "}
+            {curso.zona_horaria}. En esta versión hay una entrega por tarea.
+          </p>
+          <Link to="?vista=entrega">Consultar entrega y fechas</Link>
+        </section>
+      </div>
+      <section hidden={pestanaValida !== "entrega"} className="panel">
+        <h2>Entrega y fechas</h2>
+        <p className="help">
+          Solo lectura desde Canvas · {curso.zona_horaria}. «Final» identifica
+          la entrega de esta tarea.
+        </p>
+        {!tarea.entregas.length ? (
+          <Vacio>No hay entregas vinculadas a esta tarea.</Vacio>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Orden</th>
-                <th>Tipo</th>
-                <th>Tarea de Canvas</th>
-                <th>Cierre en Canvas</th>
-                <th>Estado</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {tarea.entregas.map((e) => (
-                <tr key={e.id}>
-                  <td>{e.orden}</td>
-                  <td>{textoTipoEntrega(e.tipo)}</td>
-                  <td>
-                    {e.nombre}
-                    {!e.publicada && <span style={ESTILO_MOTIVO}> (sin publicar)</span>}
-                  </td>
-                  <td>{fechaLegible(e.due_at_base)}</td>
-                  <td>{textoEstadoEntrega(e.estado_validacion)}</td>
-                  <td>
-                    <button
-                      disabled={ocupado}
-                      onClick={() => {
-                        if (window.confirm(`¿Desvincular «${e.nombre}» de esta tarea?`)) {
-                          ejecutar(() => desvincularEntrega(cursoId, tareaId, e.id), "Entrega desvinculada.");
-                        }
-                      }}
-                    >
-                      Desvincular
-                    </button>
-                  </td>
+          <Tabla etiqueta="Entrega de la tarea">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Tarea de Canvas</th>
+                  <th scope="col">Entrega</th>
+                  <th scope="col">Cierre</th>
+                  <th scope="col">Estado</th>
+                  <th scope="col">Acción</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {tarea.entregas.map((e) => (
+                  <tr key={e.id}>
+                    <td>
+                      {e.nombre}
+                      {!e.publicada && (
+                        <p className="help">Sin publicar en Canvas</p>
+                      )}
+                    </td>
+                    <td>
+                      {textoTipoEntrega(e.tipo)} · {e.orden}
+                    </td>
+                    <td>{fechaLegible(e.due_at_base, curso.zona_horaria)}</td>
+                    <td>{textoEstadoEntrega(e.estado_validacion)}</td>
+                    <td>
+                      {administra && (
+                        <button
+                          className="danger"
+                          disabled={op.ocupado}
+                          onClick={async () => {
+                            if (
+                              await confirmar({
+                                titulo: "Desvincular entrega",
+                                descripcion: `Se quitará la relación con «${e.nombre}» en esta tarea. El servidor verificará si esta acción está permitida.`,
+                                accion: "Desvincular",
+                                peligro: true,
+                              })
+                            )
+                              void op.ejecutar(
+                                () =>
+                                  cambiar(() =>
+                                    desvincularEntrega(cursoId, tareaId, e.id),
+                                  ),
+                                "Entrega desvinculada.",
+                              );
+                          }}
+                        >
+                          Desvincular
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Tabla>
         )}
         <LineaFechas cursoId={cursoId} tareaId={tareaId} />
-        <p>
-          <button disabled>Vincular otra entrega</button>{" "}
-          {tarea.vincular_otra_entrega.motivo && (
-            <span style={ESTILO_MOTIVO}>{tarea.vincular_otra_entrega.motivo}</span>
-          )}
+        <div className="actions">
+          <button disabled>Vincular otra entrega</button>
+        </div>
+        <p className="help">
+          {tarea.vincular_otra_entrega.motivo ??
+            "Esta versión permite una sola entrega por tarea."}
         </p>
       </section>
-
-      <section>
-        <h2>Repositorio base</h2>
-        {base === null ? (
+      <section hidden={pestanaValida !== "base"} className="panel">
+        <h2>Repositorio base opcional</h2>
+        <p>
+          Contiene los archivos iniciales que se copian al crear cada
+          repositorio. Cambiar la base no modifica los repositorios de
+          estudiantes ya creados.
+        </p>
+        {!base ? (
           <>
             <p>
-              Opcional. Si lo creas, cada repositorio de estudiante se genera a partir de él. Se llamará{" "}
-              <code>{tarea.nombre_repositorio_base}</code>.
+              Nombre previsto: <code>{tarea.nombre_repositorio_base}</code>.
             </p>
-            <button
-              disabled={!tarea.crear_repositorio_base.habilitada || ocupado}
-              onClick={() =>
-                ejecutar(() => crearRepositorioBase(cursoId, tareaId), "Repositorio base creado en GitHub.")
-              }
-            >
-              {ocupado ? "Creando en GitHub…" : "Crear repositorio base"}
-            </button>
+            {administra && (
+              <button
+                className="primary"
+                disabled={
+                  op.ocupado || !tarea.crear_repositorio_base.habilitada
+                }
+                onClick={() =>
+                  void op.ejecutar(
+                    () => cambiar(() => crearRepositorioBase(cursoId, tareaId)),
+                    "Repositorio base creado en GitHub.",
+                  )
+                }
+              >
+                {op.ocupado ? "Creando base…" : "Crear repositorio base"}
+              </button>
+            )}
             {tarea.crear_repositorio_base.motivo && (
-              <p style={ESTILO_MOTIVO}>{tarea.crear_repositorio_base.motivo}</p>
+              <p className="help">{tarea.crear_repositorio_base.motivo}</p>
             )}
           </>
         ) : (
           <>
-            <p>
-              {base.url_html ? (
-                <a href={base.url_html} target="_blank" rel="noreferrer">
-                  {base.full_name ?? base.nombre}
-                </a>
-              ) : (
-                <code>{base.nombre}</code>
-              )}{" "}
-              · <strong>{textoEstadoBase(base.estado)}</strong>
-              {base.rama_por_defecto && ` · rama ${base.rama_por_defecto}`}
-            </p>
-            {base.error_mensaje_literal && (
-              <div role="alert" style={ESTILO_ERROR}>
-                {base.error_mensaje_literal}
+            <div className="panel-header">
+              <div>
+                {base.url_html ? (
+                  <a href={base.url_html} target="_blank" rel="noreferrer">
+                    {base.full_name ?? base.nombre}
+                    <span className="sr-only">
+                      {" "}
+                      (abre GitHub en otra pestaña)
+                    </span>
+                  </a>
+                ) : (
+                  <code>{base.nombre}</code>
+                )}
+                <p className="help">
+                  Rama: {base.rama_por_defecto ?? "Todavía no informada"}
+                </p>
               </div>
+              <Estado
+                valor={base.estado}
+                texto={textoEstadoBase(base.estado)}
+              />
+            </div>
+            {base.error_mensaje_literal && (
+              <ErrorCarga error={base.error_mensaje_literal} />
             )}
-            {(base.estado === "ERROR" || base.estado === "CREANDO") && tarea.crear_repositorio_base.habilitada && (
-              <button
-                disabled={ocupado}
-                onClick={() => ejecutar(() => crearRepositorioBase(cursoId, tareaId), "Repositorio base creado.")}
-              >
-                Reintentar la creación
-              </button>
-            )}
-
+            {administra &&
+              ["ERROR", "CREANDO"].includes(base.estado) &&
+              tarea.crear_repositorio_base.habilitada && (
+                <button
+                  disabled={op.ocupado}
+                  onClick={() =>
+                    void op.ejecutar(
+                      () =>
+                        cambiar(() => crearRepositorioBase(cursoId, tareaId)),
+                      "Estado del repositorio base actualizado.",
+                    )
+                  }
+                >
+                  Reintentar creación de base
+                </button>
+              )}
             {baseOperable && (
               <>
-                <p style={ESTILO_MOTIVO}>
-                  Los cambios en el repositorio base no se propagan a los repositorios de estudiantes que ya se hayan
-                  creado: cada uno copia el base una sola vez, al crearse.
-                </p>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Archivo</th>
-                      <th>Tamaño</th>
-                      <th>Actualizado</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {base.archivos.map((a) => (
-                      <tr key={a.ruta}>
-                        <td>
-                          {renombrando?.desde === a.ruta ? (
-                            <input
-                              value={renombrando.hacia}
-                              onChange={(e) => setRenombrando({ desde: a.ruta, hacia: e.target.value })}
-                            />
-                          ) : (
-                            <code>{a.ruta}</code>
-                          )}
-                        </td>
-                        <td>{tamanoLegible(a.tamano_bytes)}</td>
-                        <td>{fechaLegible(a.actualizado_en)}</td>
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          {renombrando?.desde === a.ruta ? (
-                            <>
-                              <button
-                                disabled={ocupado}
-                                onClick={() => {
-                                  const { desde, hacia } = renombrando;
-                                  setRenombrando(null);
-                                  ejecutar(
-                                    () => renombrarArchivoBase(cursoId, tareaId, desde, hacia),
-                                    `Se renombró ${desde} a ${hacia}.`,
-                                  );
-                                }}
-                              >
-                                Guardar
-                              </button>{" "}
-                              <button onClick={() => setRenombrando(null)}>Cancelar</button>
-                            </>
-                          ) : (
-                            <>
-                              <button onClick={() => onPrevisualizar(a.ruta)}>Ver</button>{" "}
-                              <button
-                                disabled={ocupado}
-                                onClick={() => {
-                                  setRutaReemplazo(a.ruta);
-                                  reemplazoRef.current?.click();
-                                }}
-                              >
-                                Reemplazar
-                              </button>{" "}
-                              <button disabled={ocupado} onClick={() => setRenombrando({ desde: a.ruta, hacia: a.ruta })}>
-                                Renombrar
-                              </button>{" "}
-                              <button
-                                disabled={ocupado}
-                                onClick={() => {
-                                  if (window.confirm(`¿Borrar ${a.ruta} del repositorio base?`)) {
-                                    ejecutar(() => borrarArchivoBase(cursoId, tareaId, a.ruta), `Se borró ${a.ruta}.`);
-                                  }
-                                }}
-                              >
-                                Borrar
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <input
-                  ref={reemplazoRef}
-                  type="file"
-                  style={{ display: "none" }}
-                  onChange={(e) => onReemplazo(e.target.files)}
-                />
-
-                <form onSubmit={onSubir} style={{ marginTop: "1rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <input type="file" onChange={(e) => setArchivoNuevo(e.target.files?.[0] ?? null)} required />
-                  <input
-                    value={rutaNueva}
-                    onChange={(e) => setRutaNueva(e.target.value)}
-                    placeholder={archivoNuevo ? archivoNuevo.name : "ruta en el repositorio, p. ej. src/main.py"}
-                  />
-                  <button type="submit" disabled={!archivoNuevo || ocupado}>
-                    {ocupado ? "Subiendo…" : "Subir archivo"}
-                  </button>
-                </form>
-                <p style={ESTILO_MOTIVO}>Máximo 1 MB por archivo. No se admiten archivos dentro de .github/workflows/.</p>
-
-                {vista && (
-                  <div style={{ marginTop: "1rem" }}>
-                    <h3>
-                      {vista.ruta} <button onClick={() => setVista(null)}>Cerrar</button>
-                    </h3>
-                    {vista.texto !== null ? (
-                      <pre style={{ background: "#f4f6f8", padding: "0.75rem", overflowX: "auto" }}>{vista.texto}</pre>
-                    ) : (
-                      <p>{vista.motivo_sin_texto}</p>
-                    )}
-                  </div>
+                {!base.archivos.length ? (
+                  <Vacio>
+                    La base aún no contiene archivos. Añade los archivos
+                    iniciales para prepararla.
+                  </Vacio>
+                ) : (
+                  <Tabla etiqueta="Archivos del repositorio base">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th scope="col">Archivo</th>
+                          <th scope="col">Tamaño</th>
+                          <th scope="col">Actualización</th>
+                          <th scope="col">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {base.archivos.map((a) => (
+                          <tr key={a.ruta}>
+                            <td>
+                              <code>{a.ruta}</code>
+                            </td>
+                            <td>{tamanoLegible(a.tamano_bytes)}</td>
+                            <td>
+                              {fechaLegible(
+                                a.actualizado_en,
+                                curso.zona_horaria,
+                              )}
+                            </td>
+                            <td>
+                              {renombrando?.desde === a.ruta ? (
+                                <form
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    const r = renombrando;
+                                    void op.ejecutar(async () => {
+                                      await cambiar(() =>
+                                        renombrarArchivoBase(
+                                          cursoId,
+                                          tareaId,
+                                          r.desde,
+                                          r.hacia,
+                                        ),
+                                      );
+                                      setRenombrando(null);
+                                    }, "Archivo renombrado.");
+                                  }}
+                                >
+                                  <label>
+                                    Nueva ruta
+                                    <input
+                                      value={renombrando.hacia}
+                                      onChange={(e) =>
+                                        setRenombrando({
+                                          ...renombrando,
+                                          hacia: e.target.value,
+                                        })
+                                      }
+                                      required
+                                      autoFocus
+                                    />
+                                  </label>
+                                  <div className="actions">
+                                    <button disabled={op.ocupado}>
+                                      Guardar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setRenombrando(null)}
+                                    >
+                                      Cancelar
+                                    </button>
+                                  </div>
+                                </form>
+                              ) : (
+                                <div className="actions">
+                                  <button
+                                    disabled={op.ocupado}
+                                    onClick={() =>
+                                      void op.ejecutar(async () => {
+                                        const r =
+                                          await previsualizarArchivoBase(
+                                            cursoId,
+                                            tareaId,
+                                            a.ruta,
+                                          );
+                                        if (!r.ok || !r.datos)
+                                          throw new Error(
+                                            r.error ??
+                                              "No se pudo abrir el archivo.",
+                                          );
+                                        setVista(r.datos);
+                                      })
+                                    }
+                                  >
+                                    Ver
+                                  </button>
+                                  {administra && (
+                                    <>
+                                      <button
+                                        disabled={op.ocupado}
+                                        onClick={() => {
+                                          rutaReemplazo.current = a.ruta;
+                                          reemplazoRef.current?.click();
+                                        }}
+                                      >
+                                        Reemplazar
+                                      </button>
+                                      <button
+                                        disabled={op.ocupado}
+                                        onClick={() =>
+                                          setRenombrando({
+                                            desde: a.ruta,
+                                            hacia: a.ruta,
+                                          })
+                                        }
+                                      >
+                                        Renombrar
+                                      </button>
+                                      <button
+                                        className="danger"
+                                        disabled={op.ocupado}
+                                        onClick={async () => {
+                                          if (
+                                            await confirmar({
+                                              titulo:
+                                                "Borrar archivo de la base",
+                                              descripcion: `Se borrará ${a.ruta} del repositorio base. Los repositorios de estudiantes ya creados no cambian.`,
+                                              accion: "Borrar archivo",
+                                              peligro: true,
+                                            })
+                                          )
+                                            void op.ejecutar(
+                                              () =>
+                                                cambiar(() =>
+                                                  borrarArchivoBase(
+                                                    cursoId,
+                                                    tareaId,
+                                                    a.ruta,
+                                                  ),
+                                                ),
+                                              "Archivo borrado de la base.",
+                                            );
+                                        }}
+                                      >
+                                        Borrar
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Tabla>
+                )}
+                {administra && (
+                  <>
+                    <input
+                      ref={reemplazoRef}
+                      type="file"
+                      className="sr-only"
+                      tabIndex={-1}
+                      aria-label="Archivo de reemplazo"
+                      onChange={async (e) => {
+                        const elegido = e.target.files?.[0];
+                        const ruta = rutaReemplazo.current;
+                        e.target.value = "";
+                        if (!elegido) return;
+                        if (
+                          await confirmar({
+                            titulo: "Reemplazar archivo",
+                            descripcion: `${ruta} se reemplazará con ${elegido.name}. Los repositorios ya creados no cambian.`,
+                            accion: "Reemplazar",
+                          })
+                        )
+                          void op.ejecutar(async () => {
+                            const contenido = await leerComoBase64(elegido);
+                            await cambiar(() =>
+                              escribirArchivoBase(
+                                cursoId,
+                                tareaId,
+                                ruta,
+                                contenido,
+                              ),
+                            );
+                          }, "Archivo reemplazado.");
+                      }}
+                    />
+                    <form
+                      className="form-stack"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!archivo) return;
+                        const ruta = rutaNueva.trim() || archivo.name;
+                        if (
+                          base.archivos.some((a) => a.ruta === ruta) &&
+                          !(await confirmar({
+                            titulo: "Reemplazar archivo existente",
+                            descripcion: `Ya existe ${ruta}. Se reemplazará su contenido en la base.`,
+                            accion: "Reemplazar",
+                          }))
+                        )
+                          return;
+                        void op.ejecutar(async () => {
+                          const contenido = await leerComoBase64(archivo);
+                          await cambiar(() =>
+                            escribirArchivoBase(
+                              cursoId,
+                              tareaId,
+                              ruta,
+                              contenido,
+                            ),
+                          );
+                          setArchivo(null);
+                          setRutaNueva("");
+                          if (nuevoRef.current) nuevoRef.current.value = "";
+                        }, "Archivo guardado en el repositorio base.");
+                      }}
+                    >
+                      <h3>Añadir archivo</h3>
+                      <label>
+                        Archivo inicial
+                        <input
+                          ref={nuevoRef}
+                          type="file"
+                          required
+                          disabled={op.ocupado}
+                          onChange={(e) =>
+                            setArchivo(e.target.files?.[0] ?? null)
+                          }
+                        />
+                      </label>
+                      <label>
+                        Ruta dentro del repositorio (opcional)
+                        <input
+                          value={rutaNueva}
+                          onChange={(e) => setRutaNueva(e.target.value)}
+                          placeholder={archivo?.name ?? "src/main.py"}
+                          disabled={op.ocupado}
+                        />
+                      </label>
+                      <p className="help">
+                        Máximo 1 MB por archivo. No se admiten archivos dentro
+                        de .github/workflows/.
+                      </p>
+                      <div>
+                        <button
+                          className="primary"
+                          disabled={op.ocupado || !archivo}
+                        >
+                          {op.ocupado ? "Guardando archivo…" : "Subir archivo"}
+                        </button>
+                      </div>
+                    </form>
+                  </>
                 )}
               </>
             )}
           </>
         )}
+        {vista && (
+          <section className="panel">
+            <div className="panel-header">
+              <h3>{vista.ruta}</h3>
+              <button onClick={() => setVista(null)}>
+                Cerrar vista previa
+              </button>
+            </div>
+            {vista.texto !== null ? (
+              <pre>{vista.texto}</pre>
+            ) : (
+              <p>{vista.motivo_sin_texto}</p>
+            )}
+          </section>
+        )}
       </section>
-    </main>
+      <section hidden={pestanaValida !== "repositorios"} className="panel">
+        {tarea.estado !== "BORRADOR" ? (
+          <BloqueRepositorios cursoId={cursoId} tareaId={tareaId} />
+        ) : (
+          <Vacio>
+            <h2>La tarea todavía es un borrador</h2>
+            <p>La creación automática comienza después de activarla.</p>
+            <Link to="?vista=resumen">Revisar y activar la tarea</Link>
+          </Vacio>
+        )}
+      </section>
+    </>
   );
 }
