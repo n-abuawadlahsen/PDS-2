@@ -113,6 +113,25 @@ def test_limite_de_peticiones_es_fallo_del_proveedor_no_cuenta_inexistente(clien
         cliente.existe_como_usuario("alguien")
 
 
+def test_crear_equipo_reutiliza_el_existente_si_github_responde_422(cliente, monkeypatch):
+    """Regresion: una organizacion que ya estuvo vinculada a otro curso conserva
+    su equipo `docentes`; volver a vincularla no puede fallar."""
+    llamadas: list[tuple[str, str]] = []
+
+    def github(metodo: str, url: str, **_: Any) -> httpx.Response:
+        llamadas.append((metodo, url))
+        peticion = httpx.Request(metodo, url)
+        if metodo == "POST":
+            cuerpo = {"message": "Validation Failed", "errors": [{"code": "already_exists"}]}
+            return httpx.Response(422, json=cuerpo, request=peticion)
+        return httpx.Response(200, json={"id": 19492858, "slug": "docentes"}, request=peticion)
+
+    monkeypatch.setattr(httpx, "request", github)
+
+    assert cliente.crear_equipo("PDS-2", "docentes", "ghs_x") == (19492858, "docentes")
+    assert llamadas[-1] == ("GET", "https://api.github.com/orgs/PDS-2/teams/docentes")
+
+
 def test_sin_instalaciones_consulta_sin_autenticar(cliente, monkeypatch):
     github = _instalar(monkeypatch, _GitHubFalso({"/orgs/PDS-2": 200}, instalaciones=False))
 

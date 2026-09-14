@@ -522,6 +522,9 @@ class ClienteGitHubReal:
         return len(respuesta.json())
 
     def crear_equipo(self, org_login: str, nombre: str, token_instalacion: str) -> tuple[int, str]:
+        """Idempotente, como el doble: si la organizacion ya tiene un equipo con
+        ese nombre (por ejemplo, de un curso anterior vinculado a la misma
+        organizacion), GitHub responde 422 y se reutiliza ese equipo."""
         respuesta = self._peticion(
             "POST",
             f"https://api.github.com/orgs/{org_login}/teams",
@@ -530,6 +533,16 @@ class ClienteGitHubReal:
         )
         if respuesta.status_code >= 500:
             raise FalloProveedorGithub(f"GitHub respondio {respuesta.status_code}")
+        if respuesta.status_code == 422:
+            slug = nombre.strip().lower().replace(" ", "-")
+            existente = self._peticion(
+                "GET",
+                f"https://api.github.com/orgs/{org_login}/teams/{quote(slug, safe='')}",
+                token=token_instalacion,
+            )
+            if existente.status_code == 200:
+                datos = existente.json()
+                return datos["id"], datos["slug"]
         respuesta.raise_for_status()
         datos = respuesta.json()
         return datos["id"], datos["slug"]
