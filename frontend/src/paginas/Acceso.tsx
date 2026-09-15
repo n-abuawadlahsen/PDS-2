@@ -1,12 +1,17 @@
-import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { API_BASE_URL } from "../lib/api";
+import { FormularioAcceso } from "../components/FormularioAcceso";
 import { descripcionDeMotivo } from "../lib/mensajes";
 import { Aviso } from "../components/ui";
 export function Acceso() {
   const [params] = useSearchParams();
-  const motivo = descripcionDeMotivo(params.get("motivo"));
-  const [enviando, setEnviando] = useState(false);
+  const motivo =
+    params.get("motivo") === "SERVICIO_REINICIADO"
+      ? {
+          titulo: "El servicio ya está disponible",
+          texto:
+            "La conexión se interrumpió mientras iniciaba. Vuelve a pulsar Entrar con Google. Si venías de una invitación, abre nuevamente su enlace.",
+        }
+      : descripcionDeMotivo(params.get("motivo"));
   return (
     <section className="panel access-card">
       <p className="eyebrow">Equipo docente</p>
@@ -21,15 +26,10 @@ export function Acceso() {
           <p>{motivo.texto}</p>
         </Aviso>
       )}
-      <form
-        method="POST"
-        action={`${API_BASE_URL}/auth/google/inicio`}
-        onSubmit={() => setEnviando(true)}
-      >
-        <button className="primary" type="submit" disabled={enviando}>
-          {enviando ? "Abriendo Google…" : "Entrar con Google"}
-        </button>
-      </form>
+      <FormularioAcceso
+        action="/auth/google/inicio"
+        texto="Entrar con Google"
+      />
       <p className="help">
         Usa una cuenta personal de <strong>gmail.com</strong>. Las cuentas
         institucionales gestionadas no están habilitadas.

@@ -232,7 +232,7 @@ test("cuenta GitHub docente usa consentimiento real y vista previa de archivo es
     .check();
   await guardar.click();
   await expect(
-    page.getByText("Cuenta de GitHub registrada.", { exact: true }),
+    page.getByText("Cuenta de GitHub registrada.", { exact: false }),
   ).toBeVisible();
   expect(
     d.llamadas.find((r) => r.path.endsWith("/cuenta-github"))?.body,

@@ -1,6 +1,5 @@
-import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { API_BASE_URL } from "../lib/api";
+import { FormularioAcceso } from "../components/FormularioAcceso";
 import { Aviso } from "../components/ui";
 function correoDelToken(token: string): string | null {
   try {
@@ -20,7 +19,6 @@ function correoDelToken(token: string): string | null {
 export function Confirmar() {
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
-  const [enviando, setEnviando] = useState(false);
   return (
     <section className="panel">
       <h1>Confirmar acceso</h1>
@@ -34,16 +32,9 @@ export function Confirmar() {
             Vas a entrar como{" "}
             <strong>{correoDelToken(token) ?? "tu cuenta de Google"}</strong>.
           </p>
-          <form
-            method="POST"
-            action={`${API_BASE_URL}/auth/confirmar`}
-            onSubmit={() => setEnviando(true)}
-          >
+          <FormularioAcceso action="/auth/confirmar" texto="Confirmar y entrar">
             <input type="hidden" name="token" value={token} />
-            <button className="primary" disabled={enviando}>
-              {enviando ? "Confirmando…" : "Confirmar y entrar"}
-            </button>
-          </form>
+          </FormularioAcceso>
         </>
       ) : (
         <Aviso tipo="error">

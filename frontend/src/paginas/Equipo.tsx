@@ -14,7 +14,6 @@ import {
 import { comprobar } from "../lib/errores";
 import { useCurso } from "../components/Layout";
 import {
-  Aviso,
   Cabecera,
   Cargando,
   ErrorCarga,
@@ -32,6 +31,10 @@ interface Invitacion {
   rol: string;
   estado: string;
   expira_en: string;
+  enlace: string | null;
+  correo_estado: string | null;
+  correo_motivo: string | null;
+  reenvios_restantes: number;
 }
 const PERMISOS_PARCIAL = [
   "tarea.administrar",
@@ -82,8 +85,10 @@ function Permisos({
 export function Equipo() {
   const { curso, puede, recargar } = useCurso();
   const administra = puede("equipo.administrar");
-  const c = useConsulta(`equipo-${curso.id}`, (signal) =>
-    listarEquipo(curso.id, signal),
+  const c = useConsulta(
+    `equipo-${curso.id}`,
+    (signal) => listarEquipo(curso.id, signal),
+    10000,
   );
   const op = useOperacion();
   const confirmar = useConfirmar();
@@ -94,7 +99,19 @@ export function Equipo() {
     PERMISOS_AYUDANTE_POR_DEFECTO,
   );
   const [editando, setEditando] = useState<Miembro | null>(null);
-  const [invitaciones, setInvitaciones] = useState<Invitacion[]>([]);
+  const invitaciones = useConsulta(
+    `invitaciones-${curso.id}-${administra}`,
+    async (signal) => {
+      if (!administra) return [] as Invitacion[];
+      const r = await apiFetch(`/api/cursos/${curso.id}/equipo/invitaciones`, {
+        signal,
+        cache: "no-store",
+      });
+      await comprobar(r);
+      return r.json() as Promise<Invitacion[]>;
+    },
+    10000,
+  );
   async function mutar(path: string, method: string, body?: object) {
     const r = await apiFetch(path, {
       method,
@@ -102,6 +119,7 @@ export function Equipo() {
     });
     await comprobar(r);
     c.recargar();
+    invitaciones.recargar();
     recargar();
   }
   return (
@@ -136,6 +154,7 @@ export function Equipo() {
                   <th scope="col">Persona</th>
                   <th scope="col">Rol</th>
                   <th scope="col">Estado</th>
+                  <th scope="col">GitHub</th>
                   <th scope="col">Permisos</th>
                   <th scope="col">Acciones</th>
                 </tr>
@@ -156,6 +175,32 @@ export function Equipo() {
                           {fechaLegible(m.retirada_en, curso.zona_horaria)}
                         </p>
                       )}
+                    </td>
+                    <td>
+                      <p>{m.github_login ?? "Sin cuenta declarada"}</p>
+                      {m.github_estado && <Estado valor={m.github_estado} />}
+                      {m.github_error && (
+                        <p className="help">{m.github_error}</p>
+                      )}
+                      {administra &&
+                        m.github_login &&
+                        m.estado === "ACTIVA" && (
+                          <button
+                            disabled={op.ocupado}
+                            onClick={() =>
+                              void op.ejecutar(
+                                () =>
+                                  mutar(
+                                    `/api/cursos/${curso.id}/equipo/${m.membresia_id}/github/reintentar`,
+                                    "POST",
+                                  ),
+                                "Actualización de acceso solicitada. Revisa el estado en unos momentos.",
+                              )
+                            }
+                          >
+                            Actualizar acceso GitHub
+                          </button>
+                        )}
                     </td>
                     <td>
                       {m.rol === "PROFESOR" ? (
@@ -338,10 +383,10 @@ export function Equipo() {
       {invitando && administra && (
         <section className="panel">
           <h2>Incorporar integrante</h2>
-          <Aviso tipo="warning">
-            El envío de invitaciones por correo no está habilitado en esta
-            versión. Registrar una invitación no notifica al destinatario.
-          </Aviso>
+          <p className="help">
+            La invitación quedará disponible para compartir. El correo se
+            procesa en segundo plano y su estado aparece en la lista.
+          </p>
           <form
             className="form-stack"
             onSubmit={(e) => {
@@ -353,11 +398,10 @@ export function Equipo() {
                   permisos: rol === "PROFESOR" ? [] : permisos,
                 });
                 await comprobar(r);
-                const creada = (await r.json()) as Invitacion;
-                setInvitaciones((prev) => [...prev, creada]);
+                invitaciones.recargar();
                 setInvitando(false);
                 setEmail("");
-              }, "Invitación registrada. No se envió correo; el servicio aún no entrega un enlace para compartir.");
+              }, "Invitación creada. Puedes copiar el enlace y consultar el estado del correo.");
             }}
           >
             <label>
@@ -403,54 +447,146 @@ export function Equipo() {
           </form>
         </section>
       )}
-      {administra && invitaciones.length > 0 && (
+      {administra && (
         <section className="panel">
-          <h2>Invitaciones registradas en esta visita</h2>
-          <p className="help">
-            Esta lista muestra únicamente las respuestas recibidas durante esta
-            visita.
-          </p>
-          <ul className="list-clean">
-            {invitaciones.map((i) => (
-              <li key={i.id}>
-                <strong>{i.email}</strong> · <Estado valor={i.estado} />
-                <p className="help">
-                  Vence: {fechaLegible(i.expira_en, curso.zona_horaria)}
-                </p>
-                {i.estado === "PENDIENTE" && (
-                  <button
-                    className="danger"
-                    disabled={op.ocupado}
-                    onClick={async () => {
-                      if (
-                        await confirmar({
-                          titulo: "Revocar invitación",
-                          descripcion: `La invitación para ${i.email} dejará de ser válida.`,
-                          accion: "Revocar",
-                          peligro: true,
-                        })
-                      )
-                        void op.ejecutar(async () => {
-                          await mutar(
-                            `/api/cursos/${curso.id}/equipo/invitaciones/${i.id}`,
-                            "DELETE",
-                          );
-                          setInvitaciones((prev) =>
-                            prev.map((v) =>
-                              v.id === i.id ? { ...v, estado: "REVOCADA" } : v,
-                            ),
-                          );
-                        }, "Invitación revocada.");
-                    }}
-                  >
-                    Revocar invitación
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <h2>Invitaciones</h2>
+          {invitaciones.error && (
+            <ErrorCarga
+              error={invitaciones.error}
+              reintentar={invitaciones.recargar}
+            />
+          )}
+          {!invitaciones.datos ? (
+            <Cargando />
+          ) : invitaciones.datos.length === 0 ? (
+            <p>No hay invitaciones registradas.</p>
+          ) : (
+            <ul className="list-clean">
+              {invitaciones.datos.map((i) => (
+                <li key={i.id}>
+                  <strong>{i.email}</strong> · {etiqueta(i.rol)} ·{" "}
+                  <Estado valor={i.estado} />
+                  <p className="help">
+                    Vence: {fechaLegible(i.expira_en, curso.zona_horaria)}
+                  </p>
+                  <p>{textoCorreo(i)}</p>
+                  {i.enlace && (
+                    <label>
+                      Enlace de invitación para {i.email}
+                      <input
+                        readOnly
+                        value={i.enlace}
+                        onFocus={(e) => e.target.select()}
+                      />
+                    </label>
+                  )}
+                  <div className="actions">
+                    {i.enlace && (
+                      <button
+                        onClick={() =>
+                          void op.ejecutar(async () => {
+                            if (!navigator.clipboard)
+                              throw new Error(
+                                "Selecciona el enlace y cópialo desde el campo.",
+                              );
+                            await navigator.clipboard.writeText(i.enlace!);
+                          }, "Enlace copiado.")
+                        }
+                      >
+                        Copiar enlace
+                      </button>
+                    )}
+                    {(i.estado === "PENDIENTE" || i.estado === "EXPIRADA") && (
+                      <>
+                        <button
+                          disabled={op.ocupado || i.reenvios_restantes <= 0}
+                          onClick={async () => {
+                            if (
+                              await confirmar({
+                                titulo: "Reenviar invitación",
+                                descripcion: `Se invalidará el enlace anterior de ${i.email} y se generará uno nuevo.`,
+                                accion: "Reenviar",
+                              })
+                            )
+                              void op.ejecutar(
+                                () =>
+                                  mutar(
+                                    `/api/cursos/${curso.id}/equipo/invitaciones/${i.id}/reenviar`,
+                                    "POST",
+                                  ),
+                                "Se generó una nueva invitación. El enlace anterior dejó de ser válido.",
+                              );
+                          }}
+                        >
+                          Reenviar invitación
+                        </button>
+                        <button
+                          className="danger"
+                          disabled={op.ocupado}
+                          onClick={async () => {
+                            if (
+                              await confirmar({
+                                titulo: "Revocar invitación",
+                                descripcion: `La invitación para ${i.email} dejará de ser válida.`,
+                                accion: "Revocar",
+                                peligro: true,
+                              })
+                            )
+                              void op.ejecutar(
+                                () =>
+                                  mutar(
+                                    `/api/cursos/${curso.id}/equipo/invitaciones/${i.id}`,
+                                    "DELETE",
+                                  ),
+                                "Invitación revocada.",
+                              );
+                          }}
+                        >
+                          Revocar invitación
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  {(i.estado === "PENDIENTE" || i.estado === "EXPIRADA") && (
+                    <p className="help">
+                      Reenvíos disponibles: {i.reenvios_restantes} de 3.
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
     </>
   );
+}
+
+function textoCorreo(i: Invitacion): string {
+  const motivos: Record<string, string> = {
+    COMUNICACIONES_PAUSADAS:
+      "El correo está pausado. Puedes compartir el enlace directamente.",
+    CORREO_SIN_CONFIGURAR:
+      "Falta configurar el correo del servicio. Puedes compartir el enlace.",
+    DESTINATARIO_NO_PERMITIDO:
+      "El envío a esta dirección está restringido por la configuración del servicio.",
+    CUOTA_AGOTADA:
+      "El correo quedó pendiente para el próximo día por el límite de envíos.",
+    SIMULADO_LOCAL: "Prueba local: no se envió correo real.",
+    ENLACE_ANTIGUO:
+      "Invitación anterior a esta actualización. Usa Reenviar para obtener un enlace nuevo.",
+    ENLACE_NO_RECUPERABLE:
+      "No se pudo recuperar el enlace. Reenvía la invitación para generar otro.",
+    ENVIO_INCIERTO:
+      "No pudimos confirmar el envío. Comparte el enlace o reenvía la invitación.",
+    INVITACION_NO_VIGENTE: "El envío pendiente fue cancelado.",
+  };
+  if (i.correo_motivo) return motivos[i.correo_motivo] ?? i.correo_motivo;
+  if (i.correo_estado === "ENVIADO")
+    return "Correo aceptado por el proveedor. Revisa también la carpeta de spam.";
+  if (i.correo_estado === "REQUIERE_ATENCION" || i.correo_estado === "FALLIDO")
+    return "No se pudo enviar el correo. Puedes compartir el enlace.";
+  if (i.correo_estado === "CADUCADO")
+    return "El envío caducó junto con la invitación.";
+  return "Correo pendiente de envío.";
 }

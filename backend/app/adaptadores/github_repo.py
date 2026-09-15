@@ -27,7 +27,6 @@ from app.adaptadores.modelos_identidad import Usuario
 from app.dominio.estados import (
     EstadoEquipoGithub,
     EstadoMembresia,
-    EstadoOrgGithubMembresia,
     ViaEfectivaEquipoGithub,
 )
 from app.dominio.vinculacion_github import (
@@ -35,6 +34,7 @@ from app.dominio.vinculacion_github import (
     RechazoInstalacion,
     es_cuenta_de_organizacion,
 )
+from app.infraestructura.cerrojos import bloquear_equipo
 
 _NOMBRE_EQUIPO_DOCENTES = "docentes"
 _VENTANA_ADOPCION = timedelta(minutes=30)
@@ -201,19 +201,7 @@ def crear_y_poblar_equipo_docente(
         .all()
     )
     for membresia in miembros_activos:
-        usuario = bd.query(Usuario).filter(Usuario.id == membresia.usuario_id).one()
-        if not usuario.github_login_declarado or usuario.consentimiento_github_en is None:
-            membresia.org_github_estado = EstadoOrgGithubMembresia.SIN_CONSENTIMIENTO.value
-            continue
-        cliente.agregar_miembro_organizacion(
-            curso.github_org_login, usuario.github_login_declarado, token
-        )
-        cliente.agregar_miembro_equipo(
-            curso.github_org_login, equipo.team_slug, usuario.github_login_declarado, token
-        )
-        membresia.org_github_alta_por_app = True
-        membresia.org_github_estado = EstadoOrgGithubMembresia.PENDIENTE.value
-        membresia.org_github_invitada_en = ahora
+        sincronizar_acceso_de_un_docente(bd, cliente, curso=curso, membresia=membresia)
     bd.flush()
     return equipo
 
@@ -223,73 +211,111 @@ def sincronizar_acceso_de_un_docente(
 ) -> None:
     """Incorpora a UN docente (nuevo o reincorporado) sin tocar a los demas
     (S2.9.6, S6.10.3): un ayudante nuevo no toca ningun repositorio."""
+    from app.adaptadores.acceso_docente_repo import motivo_no_elegible
+
+    bloquear_equipo(bd)
+    bd.refresh(membresia)
     if curso.github_org_login is None or curso.github_installation_id is None:
         return
-    usuario = bd.query(Usuario).filter(Usuario.id == membresia.usuario_id).one()
+    usuario = bd.query(Usuario).populate_existing().filter(Usuario.id == membresia.usuario_id).one()
+    if not usuario.activo or membresia.estado != "ACTIVA":
+        revocar_acceso_tres_planos(bd, cliente, membresia_id=membresia.id)
+        return
     if not usuario.github_login_declarado or usuario.consentimiento_github_en is None:
-        membresia.org_github_estado = EstadoOrgGithubMembresia.SIN_CONSENTIMIENTO.value
+        membresia.org_github_estado = (
+            "SIN_CONSENTIMIENTO" if usuario.github_login_declarado else "NO_APLICA"
+        )
         bd.flush()
         return
-
-    equipo = (
-        bd.query(EquipoGithubCurso).filter(EquipoGithubCurso.curso_id == curso.id).one_or_none()
+    info = cliente.obtener_cuenta_usuario(usuario.github_login_declarado)
+    motivo = (
+        "La cuenta de GitHub ya no está disponible."
+        if info is None
+        else motivo_no_elegible(
+            bd, usuario=usuario, github_id=info.github_user_id, login=info.login
+        )
     )
+    if (
+        info is not None
+        and usuario.cuenta_github_id is not None
+        and usuario.cuenta_github_id != info.github_user_id
+    ):
+        motivo = (
+            "El nombre de GitHub ahora corresponde a otra cuenta. "
+            "Declara nuevamente tu identidad en Perfil."
+        )
+    if motivo:
+        membresia.org_github_estado = "ERROR"
+        membresia.org_github_ultimo_error = motivo
+        bd.flush()
+        return
+    if info is not None:
+        usuario.cuenta_github_id = info.github_user_id
+    equipo = bd.query(EquipoGithubCurso).filter_by(curso_id=curso.id).one_or_none()
     if equipo is None or equipo.team_slug is None:
-        return  # el equipo se crea en el paso 3; nada que hacer todavia
-
+        membresia.org_github_estado = "ERROR"
+        membresia.org_github_ultimo_error = "Falta configurar el equipo docente de GitHub."
+        bd.flush()
+        return
     token = cliente.obtener_token_instalacion(curso.github_installation_id)
-    cliente.agregar_miembro_organizacion(
-        curso.github_org_login, usuario.github_login_declarado, token
-    )
-    cliente.agregar_miembro_equipo(
-        curso.github_org_login, equipo.team_slug, usuario.github_login_declarado, token
-    )
-    membresia.org_github_alta_por_app = True
-    membresia.org_github_estado = EstadoOrgGithubMembresia.PENDIENTE.value
-    membresia.org_github_invitada_en = ahora_utc()
+    login = usuario.github_login_declarado
+    estado = cliente.obtener_membresia_organizacion(curso.github_org_login, login, token)
+    if estado is None:
+        # Persistir la intencion antes de la llamada permite reintentar sin
+        # confundir un alta propia con una membresia preexistente.
+        membresia.org_github_alta_por_app = True
+        bd.flush()
+        cliente.agregar_miembro_organizacion(curso.github_org_login, login, token)
+        membresia.org_github_invitada_en = ahora_utc()
+    cliente.agregar_miembro_equipo(curso.github_org_login, equipo.team_slug, login, token)
+    membresia.org_github_estado = "ACTIVA" if estado == "active" else "PENDIENTE"
+    if estado == "active":
+        membresia.org_github_activa_en = ahora_utc()
+    membresia.org_github_ultimo_error = None
     bd.flush()
 
 
 def revocar_acceso_tres_planos(
-    bd: Session, cliente: ClienteGitHub, *, membresia_id: uuid.UUID
+    bd: Session,
+    cliente: ClienteGitHub,
+    *,
+    membresia_id: uuid.UUID,
+    login_anterior: str | None = None,
+    alta_anterior_por_app: bool | None = None,
 ) -> None:
-    """SPEC 02 S2.9.3: equipo (siempre), colaborador directo (por cada acceso
-    de respaldo), membresia de organizacion (solo si la app la dio de alta).
-    El plano 2 no tiene filas todavia: `acceso_docente_repositorio` nace en
-    P4 pero se llena recien en P8 (docs/PLAN-IMPLEMENTACION.md)."""
-    membresia = bd.query(MembresiaCurso).filter(MembresiaCurso.id == membresia_id).one_or_none()
+    """Retira la identidad capturada al encolar, aunque Perfil ya haya cambiado."""
+    from app.adaptadores.modelos_aprovisionamiento import Repositorio
+    from app.adaptadores.modelos_github import AccesoDocenteRepositorio
+
+    membresia = bd.get(MembresiaCurso, membresia_id)
     if membresia is None:
         return
-    curso = bd.query(Curso).filter(Curso.id == membresia.curso_id).one()
-    if curso.github_org_login is None or curso.github_installation_id is None:
+    curso = bd.get(Curso, membresia.curso_id)
+    usuario = bd.get(Usuario, membresia.usuario_id)
+    assert curso is not None and usuario is not None
+    login = login_anterior or usuario.github_login_declarado
+    if not login or not curso.github_org_login or curso.github_installation_id is None:
         return
-    usuario = bd.query(Usuario).filter(Usuario.id == membresia.usuario_id).one()
-    if not usuario.github_login_declarado:
-        return
-
-    token = cliente.obtener_token_instalacion(curso.github_installation_id)
-
-    # Plano 1: equipo (via principal), siempre.
-    equipo = (
-        bd.query(EquipoGithubCurso).filter(EquipoGithubCurso.curso_id == curso.id).one_or_none()
+    alta = (
+        membresia.org_github_alta_por_app
+        if alta_anterior_por_app is None
+        else alta_anterior_por_app
     )
+    token = cliente.obtener_token_instalacion(curso.github_installation_id)
+    equipo = bd.query(EquipoGithubCurso).filter_by(curso_id=curso.id).one_or_none()
     if equipo is not None and equipo.team_slug:
-        cliente.quitar_miembro_equipo(
-            curso.github_org_login, equipo.team_slug, usuario.github_login_declarado, token
-        )
-
-    # Plano 2: colaborador de respaldo, por cada repositorio con acceso concedido.
-    # TODO(Etapa P7/P8): `acceso_docente_repositorio` nace en P4 pero solo se
-    # llena cuando exista la tabla `repositorio` (S2.9.3 "via de respaldo");
-    # hasta entonces no hay filas que revocar por este plano.
-
-    # Plano 3: membresia de organizacion, solo si la app la dio de alta.
-    if membresia.org_github_alta_por_app:
-        cliente.quitar_miembro_organizacion(
-            curso.github_org_login, usuario.github_login_declarado, token
-        )
-
-    membresia.org_github_estado = EstadoOrgGithubMembresia.NO_APLICA.value
+        cliente.quitar_miembro_equipo(curso.github_org_login, equipo.team_slug, login, token)
+    for acceso in bd.query(AccesoDocenteRepositorio).filter_by(membresia_id=membresia.id).all():
+        repo = bd.get(Repositorio, acceso.repositorio_id)
+        if repo is not None:
+            cliente.quitar_colaborador_repo(curso.github_org_login, repo.nombre, login, token)
+            acceso.estado = "REVOCADO"
+            acceso.revocado_en = ahora_utc()
+    if alta:
+        cliente.quitar_miembro_organizacion(curso.github_org_login, login, token)
+    if login == usuario.github_login_declarado or usuario.github_login_declarado is None:
+        membresia.org_github_alta_por_app = False
+        membresia.org_github_estado = "NO_APLICA"
     bd.flush()
 
 

@@ -6,7 +6,7 @@ App web que coordina Canvas y GitHub para el equipo docente de un curso de progr
 
 Backend de la entrega parcial (`PERFIL_ALCANCE=parcial`) implementado, de la **Etapa 0** a la **Etapa P8**:
 
-- Etapa 0: infraestructura (motor de trabajos, migración única `0001`, cifrado, logs).
+- Etapa 0: infraestructura (motor de trabajos, esquema inicial `0001`, cifrado, logs).
 - P1 y P2: acceso con Google y equipo docente.
 - P3 a P5: vinculación de Canvas y GitHub, checklist, espejo de estudiantes, secciones y grupos.
 - P6: mapeo estudiante ↔ GitHub y Pendientes.
@@ -71,6 +71,8 @@ npm run dev
 ## Frontend y apariencia
 
 El frontend de la parcial usa una navegación compartida para cursos, un resumen de preparación y tres paletas seleccionables desde Perfil. La guía [`docs/FRONTEND-DISENO.md`](docs/FRONTEND-DISENO.md) explica la estructura, cómo editar todos los colores en `frontend/src/styles/themes.css`, cómo cambiar el tema predeterminado en `frontend/src/config/theme.ts` y qué límites de integración siguen presentes.
+
+Las correcciones de invitaciones, cierre de cuenta, sincronización docente GitHub y login tras el arranque de Render están documentadas en [`docs/CORRECCIONES-PARCIAL.md`](docs/CORRECCIONES-PARCIAL.md). Incluyen la migración incremental `0002` y la configuración de correo real.
 
 ## Pruebas y calidad
 

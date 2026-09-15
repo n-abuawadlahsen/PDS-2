@@ -119,6 +119,21 @@ def _establecer_cookies_sesion(
     )
 
 
+@router.get("/google/inicio", include_in_schema=False)
+@router.get("/confirmar", include_in_schema=False)
+def recuperar_navegacion_interrumpida(
+    settings: Settings = Depends(obtener_configuracion),
+) -> RedirectResponse:
+    """Un intersticial del alojamiento puede recargar como GET un POST perdido.
+
+    No inicia OAuth ni acepta confirmaciones mediante GET. Vuelve a la pantalla
+    de acceso para que la persona repita la accion con un formulario nuevo.
+    """
+    respuesta = _redirect_error(settings, "SERVICIO_REINICIADO")
+    respuesta.headers["Cache-Control"] = "no-store"
+    return respuesta
+
+
 @router.post("/google/inicio")
 def google_inicio(
     destino: str = Form(default=_DESTINO_POR_DEFECTO),

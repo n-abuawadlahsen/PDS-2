@@ -133,22 +133,20 @@ npm test
 
 Las capturas de la prueba visual institucional y las trazas de fallos se guardan en `frontend/test-results/`, excluido de Git. Los nombres y datos que aparecen allí son simulados.
 
-## Límites de integración identificados
+## Estado de las limitaciones de integración
 
-Estos puntos estaban presentes en el backend y no se solucionan mediante un rediseño:
+Las brechas de implementación de invitaciones, cierre del último profesor y sincronización de identidad GitHub se corrigieron en backend y frontend. La guía [CORRECCIONES-PARCIAL.md](CORRECCIONES-PARCIAL.md) describe los contratos, la migración `0002`, la recuperación del login tras el arranque de Render, las pruebas y la configuración para habilitar correo real.
 
-1. **Invitaciones docentes:** `POST /api/cursos/{id}/equipo/invitaciones` crea el registro, pero todavía tiene pendiente el envío de correo y no devuelve el token/enlace. Tampoco existe un endpoint de listado completo de invitaciones. La pantalla informa que no se envió correo, muestra solo las invitaciones creadas durante la visita y permite revocarlas. No inventa un enlace ni ofrece un reenvío que no entrega correo. Las invitaciones con token válido siguen teniendo pantalla de aceptación.
-2. **Cierre del último profesor:** `DELETE /api/perfil` aún llama `puede_cerrar_cuenta([])`. Perfil consulta los equipos de los cursos activos y bloquea el cierre cuando detecta al único profesor, con enlaces a esos cursos. Esto es una protección de experiencia, **no una garantía transaccional**; el backend necesita completar su propia comprobación para cubrir carreras o llamadas directas.
-3. **Cuenta GitHub docente:** la declaración y retiro del perfil utilizan los endpoints reales y el consentimiento exigido. Esto no certifica que todos los pasos de incorporación y reconciliación de accesos externos estén operativos en producción.
-4. **Registro de cuentas y sincronización:** el backend exige `curso.administrar`; la UI respeta esa condición aunque algunas secciones antiguas del plan nombren otro permiso.
-5. **Comunicaciones y operación:** no se agregaron interruptores, pantallas de operación ni rutas del SPEC sin contratos implementados.
+El correo requiere un proveedor y dominio configurados en Render. Mientras tanto, se puede compartir el enlace desde Equipo. La comprobación de Google OAuth, entrega de correo y permisos externos con cuentas reales sigue pendiente del despliegue.
+
+La referencia del plan al permiso de registro se alineó con `curso.administrar`. Las pantallas de la entrega final siguen fuera del alcance de la parcial.
 
 ## Qué prueba la validación
 
-Resultado local con Node 22: compilación TypeScript/Vite, lint y formato aprobados; **19 pruebas automatizadas aprobadas** (18 de navegador y una de centralización de colores y contraste). En las pantallas y paletas examinadas, axe no detectó infracciones críticas ni graves. Esto no constituye una certificación completa de accesibilidad.
+Resultado local con Node 22: compilación TypeScript/Vite, lint y formato aprobados; **25 pruebas automatizadas aprobadas** (24 de navegador y una de centralización de colores y contraste). En las pantallas y paletas examinadas, axe no detectó infracciones críticas ni graves. Esto no constituye una certificación completa de accesibilidad.
 
 Las pruebas de navegador cubren sesión ausente, curso vacío, permisos de ayudante y revocación posterior, revisión CSV y respuestas tardías, activación bloqueada/aceptada, errores estructurados, polling, sustitución con confirmación escrita, declaración GitHub docente, previsualización segura, canje OAuth único, checklist, navegación móvil y preferencias de tema válidas/inválidas o sin almacenamiento.
 
 Se comprueban las tres paletas con axe en pantallas de acceso, cursos, inicio, vinculación, personas, repositorios y Perfil, además del desbordamiento a 1920, 1366, 1024 y 390 px. La ampliación al 200 % se comprueba mediante `zoom` CSS en Chromium; no equivale a certificar el zoom nativo en todos los navegadores.
 
-Las pruebas usan Chromium y datos simulados. No se verificaron OAuth real, cookies de producción, permisos reales de proveedores, correo, creación real de repositorios, Safari/Firefox ni proyector físico. No se ejecutaron migraciones, despliegues, push ni operaciones en Canvas/GitHub por este trabajo.
+Las pruebas usan Chromium y datos simulados. No se verificaron OAuth real, cookies de producción, permisos reales de proveedores, correo, creación real de repositorios, Safari/Firefox ni proyector físico. Las migraciones se comprobaron únicamente en una base local de pruebas. No se hicieron despliegues, push ni operaciones reales en Canvas/GitHub.

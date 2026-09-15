@@ -128,6 +128,9 @@ export interface Miembro {
   permisos: string[];
   estado: "ACTIVA" | "RETIRADA";
   retirada_en: string | null;
+  github_login?: string | null;
+  github_estado?: string | null;
+  github_error?: string | null;
 }
 
 export async function listarEquipo(

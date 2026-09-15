@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { apiFetch, listarEquipo, type Perfil as PerfilTipo } from "../lib/api";
+import { apiFetch, type Perfil as PerfilTipo } from "../lib/api";
 import { comprobar } from "../lib/errores";
 import { useSesion } from "../components/Layout";
 import {
@@ -48,27 +48,15 @@ export function PerfilPagina() {
   }
   async function cerrarCuenta() {
     await op.ejecutar(async () => {
-      // El endpoint aún no protege al último profesor; esta comprobación evita ofrecer
-      // el cierre en ese caso, pero no sustituye la protección transaccional pendiente.
-      const equipos = await Promise.all(
-        sesion.cursos
-          .filter((c) => c.estado === "ACTIVO")
-          .map(async (c) => ({ curso: c, miembros: await listarEquipo(c.id) })),
-      );
-      const cursos = equipos
-        .filter(
-          ({ miembros }) =>
-            miembros.filter(
-              (m) => m.rol === "PROFESOR" && m.estado === "ACTIVA",
-            ).length === 1 &&
-            miembros.some(
-              (m) =>
-                m.usuario_id === perfil.id &&
-                m.rol === "PROFESOR" &&
-                m.estado === "ACTIVA",
-            ),
-        )
-        .map(({ curso }) => ({ id: curso.id, nombre: curso.nombre }));
+      const previa = await apiFetch("/api/perfil/cierre");
+      await comprobar(previa);
+      const datos = (await previa.json()) as {
+        cursos: { curso_id: string; nombre: string }[];
+      };
+      const cursos = datos.cursos.map((c) => ({
+        id: c.curso_id,
+        nombre: c.nombre,
+      }));
       setBloqueantes(cursos);
       if (cursos.length) return;
       if (
@@ -82,6 +70,17 @@ export function PerfilPagina() {
       )
         return;
       const r = await apiFetch("/api/perfil", { method: "DELETE" });
+      if (r.status === 409) {
+        const rechazo = (await r.clone().json()) as {
+          detail?: { cursos?: { curso_id: string; nombre: string }[] };
+        };
+        setBloqueantes(
+          (rechazo.detail?.cursos ?? []).map((c) => ({
+            id: c.curso_id,
+            nombre: c.nombre,
+          })),
+        );
+      }
       await comprobar(r);
       window.location.assign("/acceso");
     });
@@ -153,7 +152,7 @@ export function PerfilPagina() {
                   consiento,
                 });
                 setConsiento(false);
-              }, "Cuenta de GitHub registrada.");
+              }, "Cuenta de GitHub registrada. La actualización de accesos se procesará en segundo plano.");
             }}
           >
             <label>

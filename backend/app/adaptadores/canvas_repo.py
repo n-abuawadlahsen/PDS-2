@@ -233,6 +233,10 @@ def descifrar_token(llavero: Llavero, credencial: CredencialCanvas) -> str:
 def obtener_credencial_operativa(bd: Session, curso_id: uuid.UUID) -> CredencialCanvas | None:
     return (
         bd.query(CredencialCanvas)
-        .filter(CredencialCanvas.curso_id == curso_id, CredencialCanvas.orden_respaldo == 0)
+        .filter(
+            CredencialCanvas.curso_id == curso_id,
+            CredencialCanvas.orden_respaldo == 0,
+            CredencialCanvas.estado == "VALIDA",
+        )
         .one_or_none()
     )

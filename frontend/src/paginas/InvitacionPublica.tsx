@@ -1,7 +1,7 @@
+import { FormularioAcceso } from "../components/FormularioAcceso";
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
-  API_BASE_URL,
   aceptarInvitacionConSesion,
   obtenerInvitacionPublica,
   obtenerPerfil,
@@ -29,7 +29,6 @@ export function InvitacionPublica() {
   const [params] = useSearchParams();
   const op = useOperacion();
   const [consiento, setConsiento] = useState(false);
-  const [entrando, setEntrando] = useState(false);
   const c = useConsulta(`invitacion-${token}`, async (signal) => {
     const [invitacion, perfil] = await Promise.all([
       obtenerInvitacionPublica(token, signal),
@@ -118,17 +117,14 @@ export function InvitacionPublica() {
               </button>
             </>
           ) : (
-            <form
-              method="POST"
-              action={`${API_BASE_URL}/auth/google/inicio`}
-              onSubmit={() => setEntrando(true)}
+            <FormularioAcceso
+              action="/auth/google/inicio"
+              texto="Aceptar con Google"
+              disabled={!consiento}
             >
               <input type="hidden" name="invitacion_token" value={token} />
               <input type="hidden" name="destino" value="/cursos" />
-              <button className="primary" disabled={!consiento || entrando}>
-                {entrando ? "Abriendo Google…" : "Aceptar con Google"}
-              </button>
-            </form>
+            </FormularioAcceso>
           )}
           <p className="help">
             Entra con la cuenta personal Gmail a la que se envió esta

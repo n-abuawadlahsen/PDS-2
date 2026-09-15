@@ -205,6 +205,11 @@ export async function preparar(page: Page) {
     estado.llamadas.push({ path, method, body });
     const responder = (json: unknown, status = 200) =>
       route.fulfill({ status, json });
+    if (path === "/api/salud")
+      return responder({ estado: "ok", servicio: "api" });
+    if (path.endsWith("/equipo/invitaciones")) return responder([]);
+    if (path === "/api/perfil/cierre")
+      return responder({ puede_cerrar: true, cursos: [] });
     if (
       !estado.sesion &&
       path !== "/api/capacidades" &&
