@@ -8,13 +8,14 @@ escrito (A-089). «Reintentar» y «sustituir» solo marcan y encolan (A-226).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.adaptadores import aprovisionamiento_repo
+from app.adaptadores import aprovisionamiento_repo, trabajos_repo
+from app.adaptadores.base import ahora_utc
 from app.adaptadores.modelos_aprovisionamiento import (
     AccesoRepositorio,
     FechaEfectiva,
@@ -24,6 +25,7 @@ from app.adaptadores.modelos_aprovisionamiento import (
 )
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_github import AccesoDocenteRepositorio
+from app.adaptadores.modelos_infraestructura import Trabajo
 from app.adaptadores.modelos_mapeo import CuentaGithub
 from app.adaptadores.modelos_padron import Estudiante, Seccion
 from app.adaptadores.modelos_tarea import Entrega, Tarea
@@ -79,15 +81,49 @@ class FilaRepositorioSalida(BaseModel):
     cuenta_github: str | None
     acceso_estado: str | None
     acceso_error: str | None
+    acceso_verificado_en: datetime | None
     invitacion_url: str | None
     acceso_docente: str | None
     reemplaza_a_id: uuid.UUID | None
     listo_en: datetime | None
 
 
+class VerificacionAccesosSalida(BaseModel):
+    intervalo_segundos: int = 60
+    trabajo_id: uuid.UUID | None = None
+    estado: str | None = None
+    solicitado_en: datetime | None = None
+    disponible_en: datetime | None = None
+
+
 class RepositoriosSalida(BaseModel):
     resumen: ResumenSalida
     filas: list[FilaRepositorioSalida]
+    verificacion_accesos: VerificacionAccesosSalida
+
+
+def _ultima_verificacion(bd: Session, curso_id: uuid.UUID, tarea_id: uuid.UUID) -> Trabajo | None:
+    return (
+        bd.query(Trabajo)
+        .filter(
+            Trabajo.tipo == "reconciliar_accesos",
+            Trabajo.curso_id == curso_id,
+            Trabajo.payload["tarea_id"].astext == str(tarea_id),
+        )
+        .order_by(Trabajo.creado_en.desc())
+        .first()
+    )
+
+
+def _verificacion_salida(trabajo: Trabajo | None) -> VerificacionAccesosSalida:
+    if trabajo is None:
+        return VerificacionAccesosSalida()
+    return VerificacionAccesosSalida(
+        trabajo_id=trabajo.id,
+        estado=trabajo.estado,
+        solicitado_en=trabajo.creado_en,
+        disponible_en=trabajo.creado_en + timedelta(seconds=60),
+    )
 
 
 @router.get(
@@ -96,11 +132,13 @@ class RepositoriosSalida(BaseModel):
 def listar_repositorios(
     curso_id: uuid.UUID,
     tarea_id: uuid.UUID,
+    response: Response,
     bd: Session = Depends(obtener_sesion_bd),
     _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
 ) -> RepositoriosSalida:
     """R2.3.11: una fila por sujeto con su estado traducible y su motivo."""
     tarea = _tarea(bd, curso_id, tarea_id)
+    response.headers["Cache-Control"] = "no-store"
     resumen = aprovisionamiento_repo.resumen_repositorios(bd, tarea_id=tarea.id)
     filas = []
     consulta = (
@@ -144,13 +182,54 @@ def listar_repositorios(
                 cuenta_github=cuenta.login if cuenta is not None else None,
                 acceso_estado=acceso.estado if acceso is not None else None,
                 acceso_error=acceso.ultimo_error if acceso is not None else None,
+                acceso_verificado_en=acceso.verificado_en if acceso is not None else None,
                 invitacion_url=acceso.invitacion_html_url if acceso is not None else None,
                 acceso_docente=docente.estado if docente is not None else None,
                 reemplaza_a_id=repositorio.reemplaza_a_id,
                 listo_en=repositorio.listo_en,
             )
         )
-    return RepositoriosSalida(resumen=ResumenSalida(**resumen.__dict__), filas=filas)
+    return RepositoriosSalida(
+        resumen=ResumenSalida(**resumen.__dict__),
+        filas=filas,
+        verificacion_accesos=_verificacion_salida(_ultima_verificacion(bd, curso_id, tarea_id)),
+    )
+
+
+@router.post(
+    "/api/cursos/{curso_id}/tareas/{tarea_id}/repositorios/verificar-accesos",
+    status_code=202,
+    response_model=VerificacionAccesosSalida,
+    dependencies=[Depends(exigir_csrf)],
+)
+def verificar_accesos(
+    curso_id: uuid.UUID,
+    tarea_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    _membresia: MembresiaCurso = Depends(requiere(Permiso.TAREA_ADMINISTRAR)),
+) -> VerificacionAccesosSalida:
+    tarea = _tarea(bd, curso_id, tarea_id)
+    if tarea.estado != "ACTIVA":
+        raise HTTPException(
+            status_code=409, detail="La tarea debe estar activa para comprobar accesos."
+        )
+    # Serializa solicitudes concurrentes sin tocar GitHub desde la peticion HTTP.
+    bd.query(Curso).filter(Curso.id == curso_id).with_for_update().one()
+    anterior = _ultima_verificacion(bd, curso_id, tarea_id)
+    if anterior is not None and (
+        anterior.estado in ("PENDIENTE", "EN_CURSO", "REINTENTAR")
+        or anterior.creado_en > ahora_utc() - timedelta(seconds=60)
+    ):
+        return _verificacion_salida(anterior)
+    trabajo = trabajos_repo.encolar(
+        bd,
+        tipo="reconciliar_accesos",
+        curso_id=curso_id,
+        clave_idempotencia=f"verificar-accesos:{tarea_id}:{uuid.uuid4()}",
+        max_intentos=4,
+        payload={"tarea_id": str(tarea_id)},
+    )
+    return _verificacion_salida(trabajo)
 
 
 def _repositorio(bd: Session, tarea: Tarea, repositorio_id: uuid.UUID) -> Repositorio:

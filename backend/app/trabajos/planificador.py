@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adaptadores.base import ahora_utc
-from app.adaptadores.modelos_infraestructura import TrabajoPeriodico
+from app.adaptadores.modelos_infraestructura import Trabajo, TrabajoPeriodico
 from app.adaptadores.trabajos_repo import encolar
 from app.infraestructura.cerrojos import cerrojo_global
 from app.infraestructura.logs import obtener_logger
@@ -46,13 +46,28 @@ def tick(sesion: Session) -> int:
             # Etapa 0 es: solo se encola si hay un manejador implementado.
             if periodico.tipo not in tipos_implementados():
                 continue
+            # No acumular barridos si GitHub tarda o un docente ya solicito uno.
+            if (
+                periodico.tipo == "reconciliar_accesos"
+                and sesion.query(Trabajo.id)
+                .filter(
+                    Trabajo.tipo == periodico.tipo,
+                    Trabajo.curso_id == periodico.curso_id,
+                    Trabajo.estado.in_(["PENDIENTE", "EN_CURSO", "REINTENTAR"]),
+                )
+                .first()
+            ):
+                continue
             clave = f"tick:{periodico.tipo}:{periodico.curso_id}:{ahora.isoformat()}"
             trabajo = encolar(
                 sesion,
                 tipo=periodico.tipo,
                 clave_idempotencia=clave,
-                max_intentos=_MAX_INTENTOS_POR_DEFECTO,
+                max_intentos=4
+                if periodico.tipo == "reconciliar_accesos"
+                else _MAX_INTENTOS_POR_DEFECTO,
                 curso_id=periodico.curso_id,
+                payload={"periodico": True} if periodico.tipo == "reconciliar_accesos" else None,
             )
             if trabajo is not None:
                 encolados += 1

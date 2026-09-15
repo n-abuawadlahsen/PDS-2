@@ -977,6 +977,7 @@ export interface FilaRepositorio {
   cuenta_github: string | null;
   acceso_estado: string | null;
   acceso_error: string | null;
+  acceso_verificado_en?: string | null;
   invitacion_url: string | null;
   acceso_docente: string | null;
   reemplaza_a_id: string | null;
@@ -986,6 +987,27 @@ export interface FilaRepositorio {
 export interface RepositoriosTarea {
   resumen: ResumenRepositorios;
   filas: FilaRepositorio[];
+  verificacion_accesos?: VerificacionAccesos;
+}
+
+export interface VerificacionAccesos {
+  intervalo_segundos: number;
+  trabajo_id: string | null;
+  estado: string | null;
+  solicitado_en: string | null;
+  disponible_en: string | null;
+}
+
+export async function verificarAccesosRepositorios(
+  cursoId: string,
+  tareaId: string,
+): Promise<Resultado<VerificacionAccesos>> {
+  return resultado(
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/repositorios/verificar-accesos`,
+      { method: "POST" },
+    ),
+  );
 }
 
 export interface FechasEntrega {

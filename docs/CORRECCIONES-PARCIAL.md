@@ -80,7 +80,7 @@ Resend conserva las claves de idempotencia durante 24 horas. Un envío de result
 Esta corrección requiere actualizar **backend/trabajador y frontend**. Publicar solo Vercel dejaría el frontend llamando rutas que aún no existen en la versión anterior del backend.
 
 1. Publicar la misma revisión en Render. Su trabajador aplica `alembic upgrade head` al arrancar, incluido `0002`, según el arranque ya configurado.
-2. Comprobar en `/estado` que la revisión actual y esperada sean `0002`.
+2. Comprobar en `/estado` que la revisión actual y esperada coincidan con la última migración: ahora `0003`, por la [actualización de accesos de estudiantes](ACTUALIZACION-ACCESOS-GITHUB.md).
 3. Publicar el frontend en Vercel, conservando raíz `frontend`, Node 22 y `VITE_API_BASE_URL` vacía/ausente.
 4. Configurar el correo si se usará envío real. Compartir enlaces funciona aunque el correo esté pausado.
 

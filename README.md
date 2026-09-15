@@ -74,6 +74,8 @@ El frontend de la parcial usa una navegación compartida para cursos, un resumen
 
 Las correcciones de invitaciones, cierre de cuenta, sincronización docente GitHub y login tras el arranque de Render están documentadas en [`docs/CORRECCIONES-PARCIAL.md`](docs/CORRECCIONES-PARCIAL.md). Incluyen la migración incremental `0002` y la configuración de correo real.
 
+La [actualización de accesos de estudiantes en GitHub](docs/ACTUALIZACION-ACCESOS-GITHUB.md) reduce la espera para detectar aceptaciones, añade comprobación manual y fecha visible por acceso. Incluye la migración incremental `0003`.
+
 ## Pruebas y calidad
 
 > **Cuidado:** las pruebas borran todas las tablas después de cada caso. Córrelas siempre contra una base aparte (por ejemplo `proyecto2_test`), nunca contra la de desarrollo.

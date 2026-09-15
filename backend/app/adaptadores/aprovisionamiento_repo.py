@@ -22,6 +22,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adaptadores import fechas_repo, incidencia_repo, outbox_repo, trabajos_repo
@@ -84,6 +85,7 @@ from app.dominio.repositorio_github import RepoGithubInfo
 from app.dominio.tareas import condiciones_adopcion_fallidas
 
 TIPO_TRABAJO = "aprovisionar_repositorios"
+MAX_REPOSITORIOS_POR_RECONCILIACION = 20
 _ESTADOS_QUE_EL_TRABAJO_AVANZA = frozenset(
     {
         EstadoRepositorio.LISTO_PARA_CREAR.value,
@@ -668,6 +670,7 @@ def _asegurar_acceso_estudiante(
                 acceso.github_invitation_id = resultado.invitation_id
                 acceso.invitacion_html_url = resultado.html_url
             acceso.invitado_en = ahora
+            acceso.verificado_en = ahora_utc()
             acceso.ultimo_error = None
         except RechazoProveedorGithub as exc:
             clasificacion = clasificar_rechazo_github(
@@ -884,17 +887,26 @@ def barrido_aprovisionamiento(
     return len(candidatos)
 
 
-def reconciliar_accesos(bd: Session, cliente: ClienteGitHub, *, curso: Curso) -> int:
-    """`reconciliar_accesos` (15 min). Sin receptor de webhooks, es la unica
-    via por la que se detecta que un estudiante acepto su invitacion.
-    TODO(receptor-webhooks): el webhook `member/added` la adelantaria.
+def reconciliar_accesos(
+    bd: Session,
+    cliente: ClienteGitHub,
+    *,
+    curso: Curso,
+    tarea_id: uuid.UUID | None = None,
+    periodico: bool = False,
+) -> int:
+    """Pendientes cada minuto, resto cada 15 min; primero los pendientes mas antiguos.
+
+    El limite por lote evita multiplicar sin cota las llamadas a GitHub. Cada
+    intento mueve el repositorio al final de la ronda, incluso si falla.
+    Una comprobacion manual puede adelantar el lote de una tarea.
 
     Aplica el orden de S8.8.2 antes de tocar nada: ¿ya es colaborador?, ¿la
     invitacion sigue viva?, y solo si expiro o desaparecio se vuelve a invitar,
     con tope de 3 reenvios separados 24 h."""
     if curso.github_org_login is None or curso.github_installation_id is None:
         return 0
-    repositorios = (
+    consulta = (
         bd.query(Repositorio)
         .join(Tarea, Tarea.id == Repositorio.tarea_id)
         .join(Sujeto, Sujeto.id == Repositorio.sujeto_id)
@@ -904,11 +916,34 @@ def reconciliar_accesos(bd: Session, cliente: ClienteGitHub, *, curso: Curso) ->
             Tarea.estado == EstadoTarea.ACTIVA.value,
             Sujeto.activo.is_(True),
         )
+    )
+    ahora = ahora_utc()
+    if tarea_id is not None:
+        consulta = consulta.filter(Repositorio.tarea_id == tarea_id)
+    if periodico:
+        consulta = consulta.filter(
+            or_(
+                Repositorio.estado == EstadoRepositorio.DEGRADADO.value,
+                Repositorio.actualizado_en <= ahora - timedelta(minutes=15),
+            )
+        )
+    ordenada = consulta.order_by(Repositorio.actualizado_en, Repositorio.id)
+    consulta_otros = ordenada.filter(Repositorio.estado != EstadoRepositorio.DEGRADADO.value)
+    # Reservar espacio evita que muchos pendientes posterguen indefinidamente
+    # los avisos y revisiones de repositorios que ya estaban operativos.
+    otros = consulta_otros.limit(min(4, MAX_REPOSITORIOS_POR_RECONCILIACION)).all()
+    pendientes = (
+        ordenada.filter(Repositorio.estado == EstadoRepositorio.DEGRADADO.value)
+        .limit(MAX_REPOSITORIOS_POR_RECONCILIACION - len(otros))
         .all()
     )
+    if len(pendientes) + len(otros) < MAX_REPOSITORIOS_POR_RECONCILIACION:
+        otros = consulta_otros.limit(MAX_REPOSITORIOS_POR_RECONCILIACION - len(pendientes)).all()
+    repositorios = pendientes + otros
     if not repositorios:
         return 0
     token = cliente.obtener_token_instalacion(curso.github_installation_id)
+    fallidos = 0
     for repositorio in repositorios:
         sujeto = bd.get(Sujeto, repositorio.sujeto_id)
         tarea = bd.get(Tarea, repositorio.tarea_id)
@@ -926,12 +961,22 @@ def reconciliar_accesos(bd: Session, cliente: ClienteGitHub, *, curso: Curso) ->
         try:
             _reconciliar_repositorio(bd, cliente, c, repositorio)
         except RechazoProveedorGithub as exc:
+            fallidos += 1
             repositorio.error_mensaje_literal = (
                 f"GitHub respondió {exc.status_code}: {exc.mensaje_literal}"
             )
             bd.flush()
         except FalloProveedorGithub:
-            continue
+            fallidos += 1
+            repositorio.error_mensaje_literal = (
+                "No se pudo comprobar el acceso en GitHub. Se volverá a intentar."
+            )
+        finally:
+            repositorio.actualizado_en = ahora_utc()
+            bd.flush()
+    if fallidos:
+        # El trabajador conserva los avances, registra el fallo y reintenta.
+        raise FalloProveedorGithub(f"No se pudieron comprobar {fallidos} repositorios en GitHub.")
     return len(repositorios)
 
 
@@ -946,9 +991,14 @@ def _reconciliar_repositorio(
     for acceso in accesos:
         cuenta = bd.get(CuentaGithub, acceso.cuenta_github_id) if acceso.cuenta_github_id else None
         if acceso.estado == EstadoAccesoRepositorio.INVITADO.value and cuenta is not None:
-            if cliente.es_colaborador(c.org, repositorio.nombre, cuenta.login, c.token):
+            colaborador = cliente.es_colaborador(c.org, repositorio.nombre, cuenta.login, c.token)
+            acceso.verificado_en = ahora_utc()
+            acceso.ultimo_error = None
+            if colaborador:
                 acceso.estado = EstadoAccesoRepositorio.ACEPTADO.value
                 acceso.aceptado_en = ahora
+                acceso.github_invitation_id = None
+                acceso.invitacion_html_url = None
             else:
                 if invitaciones is None:
                     invitaciones = {

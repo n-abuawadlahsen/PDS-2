@@ -1,5 +1,76 @@
 import { expect, test } from "@playwright/test";
-import { preparar } from "./fixtures";
+import { preparar, repositorios } from "./fixtures";
+
+test("comprueba invitaciones y muestra la aceptación con su fecha real", async ({
+  page,
+}) => {
+  await preparar(page);
+  await page.clock.install();
+  const datos = structuredClone(repositorios);
+  let solicitudes = 0;
+  await page.route("**/repositorios", (route) =>
+    route.fulfill({ json: datos }),
+  );
+  await page.route("**/repositorios/verificar-accesos", (route) => {
+    expect(route.request().method()).toBe("POST");
+    solicitudes++;
+    datos.verificacion_accesos = {
+      intervalo_segundos: 60,
+      trabajo_id: "trabajo-1",
+      estado: "PENDIENTE",
+      solicitado_en: new Date().toISOString(),
+      disponible_en: new Date(Date.now() + 60_000).toISOString(),
+    };
+    return route.fulfill({ status: 202, json: datos.verificacion_accesos });
+  });
+  await page.goto("/cursos/curso-1/tareas/tarea-1?vista=repositorios");
+  await expect(
+    page.getByText("GitHub se consulta cada minuto", { exact: false }),
+  ).toBeVisible();
+  const fila = page.getByRole("row").filter({ hasText: "Estudiante 001" });
+  await expect(fila).toContainText("Invitado, sin aceptar");
+  await page
+    .getByRole("button", { name: "Comprobar invitaciones en GitHub" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Comprobando invitaciones…" }),
+  ).toBeDisabled();
+  expect(solicitudes).toBe(1);
+  datos.filas[1].estado = "OPERATIVO";
+  datos.filas[1].motivo = null;
+  datos.filas[1].acceso_estado = "ACEPTADO";
+  datos.filas[1].acceso_verificado_en = "2026-09-15T21:19:00Z";
+  datos.verificacion_accesos.estado = "OK";
+  await page.clock.runFor(10_100);
+  await expect(fila).toContainText("Aceptó la invitación");
+  await expect(fila).toContainText("Comprobado en GitHub:");
+  await expect(fila).toContainText(/18:19|6:19/);
+  await expect(fila).not.toContainText("Invitado, sin aceptar");
+});
+
+test("un fallo de comprobación conserva el estado conocido y ofrece reintentar", async ({
+  page,
+}) => {
+  await preparar(page);
+  const datos = structuredClone(repositorios);
+  datos.verificacion_accesos.estado = "REQUIERE_ATENCION";
+  datos.filas[1].acceso_verificado_en = null;
+  await page.route("**/repositorios", (route) =>
+    route.fulfill({ json: datos }),
+  );
+  await page.goto("/cursos/curso-1/tareas/tarea-1?vista=repositorios");
+  await expect(
+    page.getByText("No se pudo completar la comprobación de GitHub.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  const fila = page.getByRole("row").filter({ hasText: "Estudiante 001" });
+  await expect(fila).toContainText("Invitado, sin aceptar");
+  await expect(fila).toContainText("Sin fecha de comprobación registrada");
+  await expect(
+    page.getByRole("button", { name: "Comprobar invitaciones en GitHub" }),
+  ).toBeEnabled();
+});
 
 test("espera HTML de arranque y errores temporales antes del POST a Google", async ({
   page,

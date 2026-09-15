@@ -117,6 +117,13 @@ export const tarea = {
   },
 };
 export const repositorios = {
+  verificacion_accesos: {
+    intervalo_segundos: 60,
+    trabajo_id: null as string | null,
+    estado: null as string | null,
+    solicitado_en: null as string | null,
+    disponible_en: null as string | null,
+  },
   resumen: {
     operativos: 195,
     degradados: 1,
@@ -166,6 +173,7 @@ export const repositorios = {
     cuenta_github: i === 2 ? null : `estudiante-${i}`,
     acceso_estado: i === 1 ? "INVITADO" : i === 2 ? "SIN_MAPEO" : "ACEPTADO",
     acceso_error: null,
+    acceso_verificado_en: fecha as string | null,
     invitacion_url: null,
     acceso_docente: "CONCEDIDO",
     reemplaza_a_id: null,

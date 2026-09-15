@@ -11,13 +11,17 @@ volver a llamarlo no duplica filas (`UNIQUE (tipo, curso_id)`).
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.modelos_infraestructura import TrabajoPeriodico
 
-# Cadencias del catalogo cerrado de 31 (app/trabajos/catalogo.py), en segundos.
+# Ajuste tras la prueba del 15-sep: adelantar aceptaciones sin esperar 15 min.
+CADENCIA_ACCESOS_SEGUNDOS = 60
+
+# Cadencias en segundos; reconciliar_accesos prioriza pendientes en lotes acotados.
 PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
     ("sync_roster", 600),
     ("sync_grupos", 600),
@@ -25,7 +29,7 @@ PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
     ("recolector_mapeos", 900),
     ("materializar_sujetos", 300),
     ("aprovisionar_repositorios", 120),
-    ("reconciliar_accesos", 900),
+    ("reconciliar_accesos", CADENCIA_ACCESOS_SEGUNDOS),
 )
 
 PERIODICOS_GLOBALES: tuple[tuple[str, int], ...] = (
@@ -66,4 +70,17 @@ def asegurar_periodicos_globales(bd: Session) -> None:
         # `UNIQUE (tipo, curso_id)` no impide dos filas con `curso_id` nulo en
         # Postgres: la comprobacion previa de `_asegurar` es la que lo evita.
         _asegurar(bd, tipo=tipo, curso_id=None, cadencia=cadencia)
+    bd.flush()
+
+
+def actualizar_cadencia_accesos(bd: Session) -> None:
+    """Aplica tambien a cursos ya activados, sin reactivar programaciones pausadas."""
+    ahora = ahora_utc()
+    for fila in bd.query(TrabajoPeriodico).filter(
+        TrabajoPeriodico.tipo == "reconciliar_accesos", TrabajoPeriodico.activo.is_(True)
+    ):
+        fila.cadencia_segundos = CADENCIA_ACCESOS_SEGUNDOS
+        fila.proxima_ejecucion = min(
+            fila.proxima_ejecucion, ahora + timedelta(seconds=CADENCIA_ACCESOS_SEGUNDOS)
+        )
     bd.flush()

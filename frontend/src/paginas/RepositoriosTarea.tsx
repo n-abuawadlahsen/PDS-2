@@ -4,6 +4,7 @@ import {
   obtenerRepositoriosTarea,
   reintentarRepositorio,
   sustituirRepositorio,
+  verificarAccesosRepositorios,
   type FilaRepositorio,
 } from "../lib/api";
 import { useCurso } from "../components/Layout";
@@ -83,6 +84,24 @@ export function BloqueRepositorios({
       <Cargando texto="Consultando repositorios…" />
     );
   const r = c.datos.resumen;
+  const verificacion = c.datos.verificacion_accesos;
+  const comprobando = ["PENDIENTE", "EN_CURSO", "REINTENTAR"].includes(
+    verificacion?.estado ?? "",
+  );
+  const enEspera =
+    !!verificacion?.disponible_en &&
+    new Date(verificacion.disponible_en).getTime() > Date.now();
+  async function comprobarAccesos() {
+    await op.ejecutar(async () => {
+      const resultado = await verificarAccesosRepositorios(cursoId, tareaId);
+      if (!resultado.ok || !resultado.datos)
+        throw new Error(
+          resultado.error ?? "No se pudo solicitar la comprobación.",
+        );
+      if (c.datos)
+        c.actualizar({ ...c.datos, verificacion_accesos: resultado.datos });
+    }, "Comprobación solicitada. Los accesos se actualizarán en esta tabla.");
+  }
   const filas = c.datos.filas.filter(
     (f) =>
       (!estado || f.estado === estado) &&
@@ -114,10 +133,52 @@ export function BloqueRepositorios({
         <span className="help">
           {c.cargando
             ? "Actualizando…"
-            : "Actualización automática cada 10 segundos"}
+            : "La tabla se refresca cada 10 segundos"}
         </span>
       </div>
       <Mensajes {...op} />
+      <p className="help">
+        {verificacion
+          ? "GitHub se consulta cada minuto para comprobar invitaciones pendientes. Si hay muchas, se revisan por turnos y pueden tardar más."
+          : "Las invitaciones se comprueban en GitHub en segundo plano."}{" "}
+        La última comprobación de cada acceso aparece en su fila.
+      </p>
+      {verificacion && puede("tarea.administrar") && (
+        <div className="actions">
+          <button
+            type="button"
+            className="button secondary"
+            disabled={
+              op.ocupado ||
+              comprobando ||
+              enEspera ||
+              !c.datos.filas.some((f) => f.sujeto_activo && f.url_html)
+            }
+            onClick={() => void comprobarAccesos()}
+          >
+            {comprobando
+              ? "Comprobando invitaciones…"
+              : "Comprobar invitaciones en GitHub"}
+          </button>
+          {!comprobando && enEspera && (
+            <span className="help">
+              Podrás solicitar otra comprobación en menos de un minuto.
+            </span>
+          )}
+        </div>
+      )}
+      {comprobando && (
+        <Aviso>
+          La comprobación está pendiente o en curso. La tabla mostrará el
+          resultado automáticamente.
+        </Aviso>
+      )}
+      {verificacion?.estado === "REQUIERE_ATENCION" && (
+        <Aviso tipo="error">
+          No se pudo completar la comprobación de GitHub. Revisa el detalle de
+          los repositorios e inténtalo de nuevo.
+        </Aviso>
+      )}
       {c.error && <ErrorCarga error={c.error} reintentar={c.recargar} />}
       {r.en_curso && (
         <Aviso>
@@ -260,6 +321,13 @@ export function BloqueRepositorios({
                         {f.acceso_estado
                           ? textoEstadoAcceso(f.acceso_estado)
                           : "Sin acceso informado"}
+                        {f.cuenta_github && f.acceso_estado && (
+                          <p className="help">
+                            {f.acceso_verificado_en
+                              ? `Comprobado en GitHub: ${fechaLegible(f.acceso_verificado_en, curso.zona_horaria)}`
+                              : "Sin fecha de comprobación registrada"}
+                          </p>
+                        )}
                         {f.acceso_error && (
                           <p className="help">{f.acceso_error}</p>
                         )}

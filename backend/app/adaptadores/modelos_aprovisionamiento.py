@@ -197,6 +197,8 @@ class AccesoRepositorio(Base, ConId):
     invitacion_html_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     invitado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     aceptado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
+    # Solo se escribe tras una respuesta de GitHub, nunca al refrescar la pantalla.
+    verificado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     reenvios: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     ultimo_reenvio_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     ultimo_error: Mapped[str | None] = mapped_column(Text, nullable=True)

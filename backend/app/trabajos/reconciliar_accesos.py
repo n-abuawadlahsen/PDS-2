@@ -1,6 +1,8 @@
-"""Trabajo `reconciliar_accesos` (SPEC 08 S8.8; A-212). Cerrojo 2, 15 min, 4 reintentos."""
+"""Comprueba invitaciones cada minuto y bajo demanda, con cerrojo 2 y lotes acotados."""
 
 from __future__ import annotations
+
+import uuid
 
 from sqlalchemy.orm import Session
 
@@ -19,4 +21,11 @@ def ejecutar(sesion: Session, trabajo: Trabajo) -> None:
     curso = sesion.query(Curso).filter(Curso.id == trabajo.curso_id).one()
     cliente = crear_cliente_github_desde_config(obtener_configuracion())
     with cerrojo_github(sesion, curso.id):
-        aprovisionamiento_repo.reconciliar_accesos(sesion, cliente, curso=curso)
+        tarea_id = trabajo.payload.get("tarea_id")
+        aprovisionamiento_repo.reconciliar_accesos(
+            sesion,
+            cliente,
+            curso=curso,
+            tarea_id=uuid.UUID(tarea_id) if tarea_id else None,
+            periodico=bool(trabajo.payload.get("periodico")),
+        )
