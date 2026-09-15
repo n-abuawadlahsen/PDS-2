@@ -1,43 +1,44 @@
-import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { API_BASE_URL } from "../lib/api";
+import { FormularioAcceso } from "../components/FormularioAcceso";
 import { descripcionDeMotivo } from "../lib/mensajes";
-
-/** S2.2.3: Safari en navegacion privada esta fuera de la matriz declarada (A-019). */
-function esSafariPrivadaProbable(): boolean {
-  const ua = navigator.userAgent;
-  const esSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
-  return esSafari;
-}
-
+import { Aviso } from "../components/ui";
 export function Acceso() {
-  const [parametros] = useSearchParams();
-  const motivo = descripcionDeMotivo(parametros.get("motivo"));
-  const avisoSafari = useMemo(esSafariPrivadaProbable, []);
-
+  const [params] = useSearchParams();
+  const motivo =
+    params.get("motivo") === "SERVICIO_REINICIADO"
+      ? {
+          titulo: "El servicio ya está disponible",
+          texto:
+            "La conexión se interrumpió mientras iniciaba. Vuelve a pulsar Entrar con Google. Si venías de una invitación, abre nuevamente su enlace.",
+        }
+      : descripcionDeMotivo(params.get("motivo"));
   return (
-    <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Proyecto 2</h1>
-
+    <section className="panel access-card">
+      <p className="eyebrow">Equipo docente</p>
+      <h1>Tus cursos, conectados</h1>
+      <p>
+        Coordina estudiantes, tareas y repositorios de programación entre Canvas
+        y GitHub.
+      </p>
       {motivo && (
-        <div role="alert" style={{ background: "#fee", padding: "1rem", marginBottom: "1rem" }}>
+        <Aviso tipo="error">
           <strong>{motivo.titulo}</strong>
           <p>{motivo.texto}</p>
-        </div>
+        </Aviso>
       )}
-
-      {avisoSafari && (
-        <p style={{ fontSize: "0.85rem", color: "#666" }}>
-          Si estás en Safari en navegación privada, ese modo está fuera de la matriz de navegadores
-          declarada. Te recomendamos abrir la aplicación en una ventana normal.
-        </p>
-      )}
-
-      <form method="POST" action={`${API_BASE_URL}/auth/google/inicio`}>
-        <button type="submit" style={{ padding: "0.75rem 1.5rem", fontSize: "1rem" }}>
-          Entrar con Google
-        </button>
-      </form>
-    </main>
+      <FormularioAcceso
+        action="/auth/google/inicio"
+        texto="Entrar con Google"
+      />
+      <p className="help">
+        Usa una cuenta personal de <strong>gmail.com</strong>. Las cuentas
+        institucionales gestionadas no están habilitadas.
+      </p>
+      <hr />
+      <p className="help">
+        Este espacio es para profesores y ayudantes. Los estudiantes participan
+        a través de Canvas y GitHub.
+      </p>
+    </section>
   );
 }

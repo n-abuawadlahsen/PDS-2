@@ -13,6 +13,7 @@ router = APIRouter(tags=["salud"])
 
 
 @router.get("/salud")
+@router.get("/api/salud")
 def salud(settings: Settings = Depends(obtener_configuracion)) -> dict[str, Any]:
     return {
         "estado": "ok",

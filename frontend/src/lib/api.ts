@@ -1,14 +1,21 @@
+import { errorRespuesta, detalleLegible } from "./errores";
 /**
  * Origen de la API, sin barra final. En produccion va vacio: Vercel hace de
  * proxy de `/api` y `/auth` hacia la API (`vercel.json`), las peticiones son del
  * mismo origen y las cookies de sesion quedan first-party. En local apunta a
  * `http://localhost:8000`. Ausente cuenta como vacio, nunca como "undefined".
  */
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "")
+  .trim()
+  .replace(/\/+$/, "");
 
 function leerCookie(nombre: string): string | null {
-  const partes = document.cookie.split("; ").find((fila) => fila.startsWith(`${nombre}=`));
-  return partes ? decodeURIComponent(partes.split("=").slice(1).join("=")) : null;
+  const partes = document.cookie
+    .split("; ")
+    .find((fila) => fila.startsWith(`${nombre}=`));
+  return partes
+    ? decodeURIComponent(partes.split("=").slice(1).join("="))
+    : null;
 }
 
 /**
@@ -16,7 +23,10 @@ function leerCookie(nombre: string): string | null {
  * SPEC 02 S2.2.6). Las mutaciones agregan `X-CSRF-Token` desde la cookie de
  * doble envio `csrf_token`, que el backend exige (S2.2.6).
  */
-export async function apiFetch(path: string, opciones: RequestInit = {}): Promise<Response> {
+export async function apiFetch(
+  path: string,
+  opciones: RequestInit = {},
+): Promise<Response> {
   const metodo = (opciones.method ?? "GET").toUpperCase();
   const cabeceras = new Headers(opciones.headers);
 
@@ -28,11 +38,19 @@ export async function apiFetch(path: string, opciones: RequestInit = {}): Promis
     }
   }
 
-  return fetch(`${API_BASE_URL}${path}`, {
+  const respuesta = await fetch(`${API_BASE_URL}${path}`, {
     ...opciones,
     credentials: "include",
     headers: cabeceras,
   });
+  if (respuesta.status === 401 || respuesta.status === 403) {
+    window.dispatchEvent(
+      new CustomEvent("pds2:acceso", {
+        detail: { status: respuesta.status, path },
+      }),
+    );
+  }
+  return respuesta;
 }
 
 export interface Perfil {
@@ -40,13 +58,16 @@ export interface Perfil {
   email: string;
   nombre: string;
   avatar_url: string | null;
+  github_login_declarado: string | null;
   activo: boolean;
 }
 
-export async function obtenerPerfil(): Promise<Perfil | null> {
-  const respuesta = await apiFetch("/api/perfil");
+export async function obtenerPerfil(
+  signal?: AbortSignal,
+): Promise<Perfil | null> {
+  const respuesta = await apiFetch("/api/perfil", { signal });
   if (respuesta.status === 401) return null;
-  if (!respuesta.ok) throw new Error(`GET /api/perfil -> ${respuesta.status}`);
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -55,9 +76,11 @@ export interface Capacidades {
   banderas: string[];
 }
 
-export async function obtenerCapacidades(): Promise<Capacidades> {
-  const respuesta = await apiFetch("/api/capacidades");
-  if (!respuesta.ok) throw new Error(`GET /api/capacidades -> ${respuesta.status}`);
+export async function obtenerCapacidades(
+  signal?: AbortSignal,
+): Promise<Capacidades> {
+  const respuesta = await apiFetch("/api/capacidades", { signal });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -73,9 +96,9 @@ export interface Curso {
   zona_horaria: string;
 }
 
-export async function listarCursos(): Promise<Curso[]> {
-  const respuesta = await apiFetch("/api/cursos");
-  if (!respuesta.ok) throw new Error(`GET /api/cursos -> ${respuesta.status}`);
+export async function listarCursos(signal?: AbortSignal): Promise<Curso[]> {
+  const respuesta = await apiFetch("/api/cursos", { signal });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -88,8 +111,11 @@ export interface CursoEntrada {
 }
 
 export async function crearCurso(datos: CursoEntrada): Promise<Curso> {
-  const respuesta = await apiFetch("/api/cursos", { method: "POST", body: JSON.stringify(datos) });
-  if (!respuesta.ok) throw new Error(`POST /api/cursos -> ${respuesta.status}`);
+  const respuesta = await apiFetch("/api/cursos", {
+    method: "POST",
+    body: JSON.stringify(datos),
+  });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -102,11 +128,17 @@ export interface Miembro {
   permisos: string[];
   estado: "ACTIVA" | "RETIRADA";
   retirada_en: string | null;
+  github_login?: string | null;
+  github_estado?: string | null;
+  github_error?: string | null;
 }
 
-export async function listarEquipo(cursoId: string): Promise<Miembro[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/equipo`);
-  if (!respuesta.ok) throw new Error(`GET equipo -> ${respuesta.status}`);
+export async function listarEquipo(
+  cursoId: string,
+  signal?: AbortSignal,
+): Promise<Miembro[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/equipo`, { signal });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -115,9 +147,14 @@ export interface Contexto {
   permisos_efectivos: string[];
 }
 
-export async function obtenerContexto(cursoId: string): Promise<Contexto> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/contexto`);
-  if (!respuesta.ok) throw new Error(`GET contexto -> ${respuesta.status}`);
+export async function obtenerContexto(
+  cursoId: string,
+  signal?: AbortSignal,
+): Promise<Contexto> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/contexto`, {
+    signal,
+  });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -131,8 +168,13 @@ export async function invitarMiembro(
   });
 }
 
-export async function retirarMiembro(cursoId: string, membresiaId: string): Promise<Response> {
-  return apiFetch(`/api/cursos/${cursoId}/equipo/${membresiaId}/retiro`, { method: "POST" });
+export async function retirarMiembro(
+  cursoId: string,
+  membresiaId: string,
+): Promise<Response> {
+  return apiFetch(`/api/cursos/${cursoId}/equipo/${membresiaId}/retiro`, {
+    method: "POST",
+  });
 }
 
 export async function reincorporarMiembro(
@@ -140,10 +182,13 @@ export async function reincorporarMiembro(
   membresiaId: string,
   permisos: string[],
 ): Promise<Response> {
-  return apiFetch(`/api/cursos/${cursoId}/equipo/${membresiaId}/reincorporacion`, {
-    method: "POST",
-    body: JSON.stringify({ permisos }),
-  });
+  return apiFetch(
+    `/api/cursos/${cursoId}/equipo/${membresiaId}/reincorporacion`,
+    {
+      method: "POST",
+      body: JSON.stringify({ permisos }),
+    },
+  );
 }
 
 export interface InvitacionPublica {
@@ -154,13 +199,18 @@ export interface InvitacionPublica {
   estado: string;
 }
 
-export async function obtenerInvitacionPublica(token: string): Promise<InvitacionPublica> {
-  const respuesta = await apiFetch(`/api/invitaciones/${token}`);
-  if (!respuesta.ok) throw new Error(`GET invitacion -> ${respuesta.status}`);
+export async function obtenerInvitacionPublica(
+  token: string,
+  signal?: AbortSignal,
+): Promise<InvitacionPublica> {
+  const respuesta = await apiFetch(`/api/invitaciones/${token}`, { signal });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function aceptarInvitacionConSesion(token: string): Promise<Response> {
+export async function aceptarInvitacionConSesion(
+  token: string,
+): Promise<Response> {
   return apiFetch(`/api/invitaciones/${token}/aceptar`, { method: "POST" });
 }
 
@@ -171,9 +221,11 @@ export interface InstanciaCanvas {
   nombre_visible: string;
 }
 
-export async function listarInstanciasCanvas(): Promise<InstanciaCanvas[]> {
-  const respuesta = await apiFetch("/api/canvas/instancias");
-  if (!respuesta.ok) throw new Error(`GET instancias -> ${respuesta.status}`);
+export async function listarInstanciasCanvas(
+  signal?: AbortSignal,
+): Promise<InstanciaCanvas[]> {
+  const respuesta = await apiFetch("/api/canvas/instancias", { signal });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -190,12 +242,20 @@ export async function listarCursosCanvasDisponibles(
   cursoId: string,
   datos: { token: string; canvas_base_url: string },
 ): Promise<{ ok: boolean; cursos: CursoCanvasDisponible[]; error?: string }> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/vinculacion/canvas/cursos-disponibles`, {
-    method: "POST",
-    body: JSON.stringify(datos),
-  });
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/vinculacion/canvas/cursos-disponibles`,
+    {
+      method: "POST",
+      body: JSON.stringify(datos),
+    },
+  );
   const cuerpo = await respuesta.json().catch(() => []);
-  if (!respuesta.ok) return { ok: false, cursos: [], error: cuerpo.detail ?? String(respuesta.status) };
+  if (!respuesta.ok)
+    return {
+      ok: false,
+      cursos: [],
+      error: detalleLegible(cuerpo.detail) || String(respuesta.status),
+    };
   return { ok: true, cursos: cuerpo };
 }
 
@@ -217,9 +277,15 @@ export interface CredencialCanvasEstado {
   ultimo_chequeo_en: string | null;
 }
 
-export async function obtenerEstadoVinculacionCanvas(cursoId: string): Promise<CredencialCanvasEstado[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/vinculacion/canvas`);
-  if (!respuesta.ok) throw new Error(`GET vinculacion canvas -> ${respuesta.status}`);
+export async function obtenerEstadoVinculacionCanvas(
+  cursoId: string,
+  signal?: AbortSignal,
+): Promise<CredencialCanvasEstado[]> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/vinculacion/canvas`,
+    { signal },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -229,16 +295,23 @@ export async function iniciarInstalacionGithub(
   cursoId: string,
   orgLoginSugerido?: string,
 ): Promise<{ instalar_url: string }> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/vinculacion/github/iniciar`, {
-    method: "POST",
-    body: JSON.stringify({ org_login_sugerido: orgLoginSugerido ?? null }),
-  });
-  if (!respuesta.ok) throw new Error(`POST iniciar instalacion -> ${respuesta.status}`);
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/vinculacion/github/iniciar`,
+    {
+      method: "POST",
+      body: JSON.stringify({ org_login_sugerido: orgLoginSugerido ?? null }),
+    },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
 export interface CallbackInstalacionResultado {
-  resultado: "VINCULADO" | "SOLICITUD_PENDIENTE" | "SIN_INSTALLATION_ID" | "STATE_INVALIDO";
+  resultado:
+    | "VINCULADO"
+    | "SOLICITUD_PENDIENTE"
+    | "SIN_INSTALLATION_ID"
+    | "STATE_INVALIDO";
   curso_id?: string;
   org_login?: string;
   equipo_docentes_slug?: string;
@@ -249,7 +322,10 @@ export async function confirmarCallbackGithub(datos: {
   state: string;
   installation_id?: number;
   setup_action?: string;
-}): Promise<{ ok: boolean; cuerpo: CallbackInstalacionResultado | { detail: unknown } }> {
+}): Promise<{
+  ok: boolean;
+  cuerpo: CallbackInstalacionResultado | { detail: unknown };
+}> {
   const respuesta = await apiFetch("/api/vinculacion/github/callback", {
     method: "POST",
     body: JSON.stringify(datos),
@@ -265,9 +341,15 @@ export interface EstadoVinculacionGithub {
   curso_estado: string;
 }
 
-export async function obtenerEstadoVinculacionGithub(cursoId: string): Promise<EstadoVinculacionGithub> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/vinculacion/github`);
-  if (!respuesta.ok) throw new Error(`GET vinculacion github -> ${respuesta.status}`);
+export async function obtenerEstadoVinculacionGithub(
+  cursoId: string,
+  signal?: AbortSignal,
+): Promise<EstadoVinculacionGithub> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/vinculacion/github`,
+    { signal },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -277,9 +359,15 @@ export interface InstalacionHuerfana {
   actualizada_en: string;
 }
 
-export async function listarInstalacionesHuerfanas(cursoId: string): Promise<InstalacionHuerfana[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/vinculacion/github/huerfanas`);
-  if (!respuesta.ok) throw new Error(`GET huerfanas -> ${respuesta.status}`);
+export async function listarInstalacionesHuerfanas(
+  cursoId: string,
+  signal?: AbortSignal,
+): Promise<InstalacionHuerfana[]> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/vinculacion/github/huerfanas`,
+    { signal },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -287,53 +375,86 @@ export async function adoptarInstalacionHuerfana(
   cursoId: string,
   datos: { installation_id: number; org_login_confirmado: string },
 ): Promise<Response> {
-  return apiFetch(`/api/cursos/${cursoId}/vinculacion/github/huerfanas/adoptar`, {
-    method: "POST",
-    body: JSON.stringify(datos),
-  });
+  return apiFetch(
+    `/api/cursos/${cursoId}/vinculacion/github/huerfanas/adoptar`,
+    {
+      method: "POST",
+      body: JSON.stringify(datos),
+    },
+  );
 }
 
 export interface ItemVerificacion {
   item: string | null;
-  resultado: "CORRECTO" | "ADVERTENCIA" | "BLOQUEANTE" | "NO_VERIFICADO" | "VERIFICADO_A_MANO";
+  resultado:
+    | "CORRECTO"
+    | "ADVERTENCIA"
+    | "BLOQUEANTE"
+    | "NO_VERIFICADO"
+    | "VERIFICADO_A_MANO";
   detalle: Record<string, unknown>;
   ejecutada_en: string;
 }
 
-export async function encolarChecklist(cursoId: string): Promise<{ ejecucion_id: string }> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/verificacion`, { method: "POST" });
-  if (!respuesta.ok) throw new Error(`POST verificacion -> ${respuesta.status}`);
+export async function encolarChecklist(
+  cursoId: string,
+): Promise<{ ejecucion_id: string }> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/verificacion`, {
+    method: "POST",
+  });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function reejecutarItem(cursoId: string, item: string): Promise<{ ejecucion_id: string }> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/verificacion/items/${item}`, {
-    method: "POST",
-  });
-  if (!respuesta.ok) throw new Error(`POST reejecutar item -> ${respuesta.status}`);
+export async function reejecutarItem(
+  cursoId: string,
+  item: string,
+): Promise<{ ejecucion_id: string }> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/verificacion/items/${item}`,
+    {
+      method: "POST",
+    },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
 export async function obtenerEjecucionVerificacion(
   cursoId: string,
   ejecucionId: string,
+  signal?: AbortSignal,
 ): Promise<ItemVerificacion[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/verificacion/${ejecucionId}`);
-  if (!respuesta.ok) throw new Error(`GET ejecucion -> ${respuesta.status}`);
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/verificacion/${ejecucionId}`,
+    { signal },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function obtenerUltimaVerificacion(cursoId: string): Promise<ItemVerificacion[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/verificacion/ultima`);
-  if (!respuesta.ok) throw new Error(`GET ultima verificacion -> ${respuesta.status}`);
+export async function obtenerUltimaVerificacion(
+  cursoId: string,
+  signal?: AbortSignal,
+): Promise<ItemVerificacion[]> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/verificacion/ultima`,
+    { signal },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function firmarItem14AMano(cursoId: string): Promise<ItemVerificacion> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/verificacion/items/14/firmar`, {
-    method: "POST",
-  });
-  if (!respuesta.ok) throw new Error(`POST firmar item 14 -> ${respuesta.status}`);
+export async function firmarItem14AMano(
+  cursoId: string,
+): Promise<ItemVerificacion> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/verificacion/items/14/firmar`,
+    {
+      method: "POST",
+    },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -342,11 +463,14 @@ export async function ejecutarPruebaEscritura(
   item: "5-bis" | "17-bis",
   consiento: boolean,
 ): Promise<ItemVerificacion> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/verificacion/items/${item}`, {
-    method: "POST",
-    body: JSON.stringify({ consiento }),
-  });
-  if (!respuesta.ok) throw new Error(`POST prueba ${item} -> ${respuesta.status}`);
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/verificacion/items/${item}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ consiento }),
+    },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -394,9 +518,14 @@ export interface Personas {
   registro_estado: string;
 }
 
-export async function obtenerPersonas(cursoId: string): Promise<Personas> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/personas`);
-  if (!respuesta.ok) throw new Error(`GET personas -> ${respuesta.status}`);
+export async function obtenerPersonas(
+  cursoId: string,
+  signal?: AbortSignal,
+): Promise<Personas> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/personas`, {
+    signal,
+  });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -405,14 +534,18 @@ export interface CabeceraPersonas {
   total: number;
 }
 
-export async function obtenerCabeceraPersonas(cursoId: string): Promise<CabeceraPersonas> {
+export async function obtenerCabeceraPersonas(
+  cursoId: string,
+): Promise<CabeceraPersonas> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/personas/cabecera`);
-  if (!respuesta.ok) throw new Error(`GET cabecera -> ${respuesta.status}`);
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
 export async function sincronizarAhora(cursoId: string): Promise<Response> {
-  return apiFetch(`/api/cursos/${cursoId}/sincronizaciones`, { method: "POST" });
+  return apiFetch(`/api/cursos/${cursoId}/sincronizaciones`, {
+    method: "POST",
+  });
 }
 
 // --- Etapa P6: mapeo estudiante <-> GitHub y Pendientes (SPEC 07 S7.4-S7.8) ---
@@ -421,11 +554,17 @@ export async function declararMapeoManual(
   cursoId: string,
   estudianteId: string,
   login: string,
-): Promise<{ ok: boolean; cuerpo: MapeoGithubEspejo | { detail: { motivo: string; detalle: string } } }> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/personas/${estudianteId}/mapeo`, {
-    method: "POST",
-    body: JSON.stringify({ login }),
-  });
+): Promise<{
+  ok: boolean;
+  cuerpo: MapeoGithubEspejo | { detail: { motivo: string; detalle: string } };
+}> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/personas/${estudianteId}/mapeo`,
+    {
+      method: "POST",
+      body: JSON.stringify({ login }),
+    },
+  );
   const cuerpo = await respuesta.json();
   return { ok: respuesta.ok, cuerpo };
 }
@@ -444,11 +583,14 @@ export async function importarMapeoCsv(
   csv: string,
   aplicar: boolean,
 ): Promise<{ filas: FilaCsvMapeo[] }> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/mapeo/importar-csv`, {
-    method: "POST",
-    body: JSON.stringify({ csv, aplicar: aplicar ? "true" : "false" }),
-  });
-  if (!respuesta.ok) throw new Error(`POST importar csv -> ${respuesta.status}`);
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/mapeo/importar-csv`,
+    {
+      method: "POST",
+      body: JSON.stringify({ csv, aplicar: aplicar ? "true" : "false" }),
+    },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -456,8 +598,12 @@ export async function crearRegistroGithub(cursoId: string): Promise<Response> {
   return apiFetch(`/api/cursos/${cursoId}/registro-github`, { method: "POST" });
 }
 
-export async function restaurarRegistroGithub(cursoId: string): Promise<Response> {
-  return apiFetch(`/api/cursos/${cursoId}/registro-github/restaurar`, { method: "POST" });
+export async function restaurarRegistroGithub(
+  cursoId: string,
+): Promise<Response> {
+  return apiFetch(`/api/cursos/${cursoId}/registro-github/restaurar`, {
+    method: "POST",
+  });
 }
 
 export interface FilaPendienteSinCuenta {
@@ -498,12 +644,18 @@ export interface Pendientes {
 
 export async function obtenerPendientes(cursoId: string): Promise<Pendientes> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/pendientes`);
-  if (!respuesta.ok) throw new Error(`GET pendientes -> ${respuesta.status}`);
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function enviarRecordatorio(cursoId: string, estudianteId: string): Promise<Response> {
-  return apiFetch(`/api/cursos/${cursoId}/pendientes/${estudianteId}/recordatorio`, { method: "POST" });
+export async function enviarRecordatorio(
+  cursoId: string,
+  estudianteId: string,
+): Promise<Response> {
+  return apiFetch(
+    `/api/cursos/${cursoId}/pendientes/${estudianteId}/recordatorio`,
+    { method: "POST" },
+  );
 }
 
 // --- Etapa P7: tareas, entregas y repositorio base (SPEC 08 S8.2-S8.3) ---
@@ -517,22 +669,22 @@ export interface Resultado<T> {
 }
 
 async function resultado<T>(respuesta: Response): Promise<Resultado<T>> {
-  let cuerpo: unknown = null;
-  try {
-    cuerpo = await respuesta.json();
-  } catch {
-    cuerpo = null;
+  if (!respuesta.ok) {
+    const error = await errorRespuesta(respuesta);
+    return {
+      ok: false,
+      status: respuesta.status,
+      datos: null,
+      error: error.message,
+    };
   }
-  if (respuesta.ok) {
-    return { ok: true, status: respuesta.status, datos: cuerpo as T, error: null };
-  }
-  const detalle = (cuerpo as { detail?: unknown } | null)?.detail;
-  let error = `La operación falló (${respuesta.status}).`;
-  if (typeof detalle === "string") error = detalle;
-  else if (detalle && typeof detalle === "object" && "detalle" in detalle) {
-    error = String((detalle as { detalle: unknown }).detalle);
-  }
-  return { ok: false, status: respuesta.status, datos: null, error };
+  const cuerpo: unknown = await respuesta.json().catch(() => null);
+  return {
+    ok: true,
+    status: respuesta.status,
+    datos: cuerpo as T,
+    error: null,
+  };
 }
 
 export interface AccionHabilitada {
@@ -631,15 +783,24 @@ export interface PrevisualizacionArchivo {
   motivo_sin_texto: string | null;
 }
 
-export async function listarTareas(cursoId: string): Promise<TareaResumen[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas`);
-  if (!respuesta.ok) throw new Error(`GET tareas -> ${respuesta.status}`);
+export async function listarTareas(
+  cursoId: string,
+  signal?: AbortSignal,
+): Promise<TareaResumen[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas`, { signal });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function obtenerAssignmentsCanvas(cursoId: string): Promise<AssignmentsCanvas> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/assignments-canvas`);
-  if (!respuesta.ok) throw new Error(`GET assignments-canvas -> ${respuesta.status}`);
+export async function obtenerAssignmentsCanvas(
+  cursoId: string,
+  signal?: AbortSignal,
+): Promise<AssignmentsCanvas> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/assignments-canvas`,
+    { signal },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -647,31 +808,56 @@ export async function obtenerVistaPreviaNombre(
   cursoId: string,
   nombre: string,
   slug: string,
+  signal?: AbortSignal,
 ): Promise<VistaPreviaNombre> {
   const parametros = new URLSearchParams({ nombre });
   if (slug.trim()) parametros.set("slug", slug.trim());
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/vista-previa-nombre?${parametros}`);
-  if (!respuesta.ok) throw new Error(`GET vista-previa-nombre -> ${respuesta.status}`);
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/vista-previa-nombre?${parametros}`,
+    { signal },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
 export async function crearTarea(
   cursoId: string,
-  datos: { nombre: string; slug: string | null; canvas_assignment_id: number; gitignore_template: string | null },
+  datos: {
+    nombre: string;
+    slug: string | null;
+    canvas_assignment_id: number;
+    gitignore_template: string | null;
+  },
 ): Promise<Resultado<TareaDetalle>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas`, { method: "POST", body: JSON.stringify(datos) }),
+    await apiFetch(`/api/cursos/${cursoId}/tareas`, {
+      method: "POST",
+      body: JSON.stringify(datos),
+    }),
   );
 }
 
-export async function obtenerTarea(cursoId: string, tareaId: string): Promise<TareaDetalle> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}`);
-  if (!respuesta.ok) throw new Error(`GET tarea -> ${respuesta.status}`);
+export async function obtenerTarea(
+  cursoId: string,
+  tareaId: string,
+  signal?: AbortSignal,
+): Promise<TareaDetalle> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}`, {
+    signal,
+  });
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function activarTarea(cursoId: string, tareaId: string): Promise<Resultado<TareaDetalle>> {
-  return resultado(await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/activar`, { method: "POST" }));
+export async function activarTarea(
+  cursoId: string,
+  tareaId: string,
+): Promise<Resultado<TareaDetalle>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/activar`, {
+      method: "POST",
+    }),
+  );
 }
 
 export async function desvincularEntrega(
@@ -680,13 +866,22 @@ export async function desvincularEntrega(
   entregaId: string,
 ): Promise<Resultado<TareaDetalle>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/entregas/${entregaId}`, { method: "DELETE" }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/entregas/${entregaId}`,
+      { method: "DELETE" },
+    ),
   );
 }
 
-export async function crearRepositorioBase(cursoId: string, tareaId: string): Promise<Resultado<TareaDetalle>> {
+export async function crearRepositorioBase(
+  cursoId: string,
+  tareaId: string,
+): Promise<Resultado<TareaDetalle>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base`, { method: "POST" }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base`,
+      { method: "POST" },
+    ),
   );
 }
 
@@ -701,10 +896,13 @@ export async function escribirArchivoBase(
   contenidoBase64: string,
 ): Promise<Resultado<TareaDetalle>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/archivos/${rutaCodificada(ruta)}`, {
-      method: "PUT",
-      body: JSON.stringify({ contenido_base64: contenidoBase64 }),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/archivos/${rutaCodificada(ruta)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ contenido_base64: contenidoBase64 }),
+      },
+    ),
   );
 }
 
@@ -714,9 +912,12 @@ export async function borrarArchivoBase(
   ruta: string,
 ): Promise<Resultado<TareaDetalle>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/archivos/${rutaCodificada(ruta)}`, {
-      method: "DELETE",
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/archivos/${rutaCodificada(ruta)}`,
+      {
+        method: "DELETE",
+      },
+    ),
   );
 }
 
@@ -727,10 +928,13 @@ export async function renombrarArchivoBase(
   hacia: string,
 ): Promise<Resultado<TareaDetalle>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/renombrar`, {
-      method: "POST",
-      body: JSON.stringify({ desde, hacia }),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/renombrar`,
+      {
+        method: "POST",
+        body: JSON.stringify({ desde, hacia }),
+      },
+    ),
   );
 }
 
@@ -796,15 +1000,29 @@ export interface FechasEntrega {
   sujetos_sin_fecha: number;
 }
 
-export async function obtenerRepositoriosTarea(cursoId: string, tareaId: string): Promise<RepositoriosTarea> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorios`);
-  if (!respuesta.ok) throw new Error(`GET repositorios -> ${respuesta.status}`);
+export async function obtenerRepositoriosTarea(
+  cursoId: string,
+  tareaId: string,
+  signal?: AbortSignal,
+): Promise<RepositoriosTarea> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/repositorios`,
+    { signal },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function obtenerFechasEntregas(cursoId: string, tareaId: string): Promise<FechasEntrega[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/entregas/fechas`);
-  if (!respuesta.ok) throw new Error(`GET fechas -> ${respuesta.status}`);
+export async function obtenerFechasEntregas(
+  cursoId: string,
+  tareaId: string,
+  signal?: AbortSignal,
+): Promise<FechasEntrega[]> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/entregas/fechas`,
+    { signal },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -814,9 +1032,12 @@ export async function reintentarRepositorio(
   repositorioId: string,
 ): Promise<Resultado<{ ok: boolean }>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorios/${repositorioId}/reintentar`, {
-      method: "POST",
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/repositorios/${repositorioId}/reintentar`,
+      {
+        method: "POST",
+      },
+    ),
   );
 }
 
@@ -827,10 +1048,13 @@ export async function sustituirRepositorio(
   confirmacion: string,
 ): Promise<Resultado<{ repositorio_id: string }>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorios/${repositorioId}/sustituir`, {
-      method: "POST",
-      body: JSON.stringify({ confirmacion }),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/repositorios/${repositorioId}/sustituir`,
+      {
+        method: "POST",
+        body: JSON.stringify({ confirmacion }),
+      },
+    ),
   );
 }
 
@@ -840,6 +1064,8 @@ export async function previsualizarArchivoBase(
   ruta: string,
 ): Promise<Resultado<PrevisualizacionArchivo>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/archivos/${rutaCodificada(ruta)}`),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/archivos/${rutaCodificada(ruta)}`,
+    ),
   );
 }

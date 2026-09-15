@@ -1,98 +1,146 @@
-import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { FormularioAcceso } from "../components/FormularioAcceso";
+import { useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
-  API_BASE_URL,
   aceptarInvitacionConSesion,
   obtenerInvitacionPublica,
   obtenerPerfil,
-  type InvitacionPublica,
 } from "../lib/api";
-
-const TEXTO_CONSENTIMIENTO =
-  "Al aceptar, das tu consentimiento para que el equipo docente de este curso pueda leer todo el código de los repositorios del curso a través de la aplicación.";
-
-/** `/invitaciones/{token}`, ruta publica sin sesion (SPEC 02 S2.5.4). */
+import { comprobar } from "../lib/errores";
+import { PERMISOS_CONCEDIBLES } from "../lib/permisos";
+import {
+  Aviso,
+  Cargando,
+  ErrorCarga,
+  Estado,
+  Mensajes,
+  etiqueta,
+} from "../components/ui";
+import { useConsulta, useOperacion } from "../hooks/useConsulta";
+const ERRORES: Record<string, string> = {
+  CORREO_NO_COINCIDE:
+    "La cuenta actual no coincide con la destinataria. Vuelve a entrar con la cuenta invitada.",
+  EXPIRADA: "Esta invitación venció. Solicita una nueva al profesor.",
+  REVOCADA: "Esta invitación fue revocada.",
+  YA_ACEPTADA: "Esta invitación ya fue aceptada.",
+};
 export function InvitacionPublica() {
-  const { token } = useParams<{ token: string }>();
-  const [parametros] = useSearchParams();
-  const errorUrl = parametros.get("error");
-  const [invitacion, setInvitacion] = useState<InvitacionPublica | null>(null);
-  const [tieneSesion, setTieneSesion] = useState(false);
-  const [error, setError] = useState<string | null>(errorUrl);
-  const [aceptando, setAceptando] = useState(false);
-
-  useEffect(() => {
-    if (!token) return;
-    obtenerInvitacionPublica(token).then(setInvitacion).catch(() => setError("NO_ENCONTRADA"));
-    obtenerPerfil().then((p) => setTieneSesion(p !== null));
-  }, [token]);
-
-  async function onAceptarConSesion() {
-    if (!token) return;
-    setAceptando(true);
-    const respuesta = await aceptarInvitacionConSesion(token);
-    if (respuesta.ok) {
-      window.location.href = "/cursos";
-    } else {
-      const cuerpo = await respuesta.json().catch(() => ({}));
-      setError(cuerpo.detail ?? "NO_ACEPTABLE");
-      setAceptando(false);
-    }
-  }
-
-  if (!invitacion && !error) return <p>Cargando...</p>;
-
-  if (!invitacion) {
+  const { token = "" } = useParams();
+  const [params] = useSearchParams();
+  const op = useOperacion();
+  const [consiento, setConsiento] = useState(false);
+  const c = useConsulta(`invitacion-${token}`, async (signal) => {
+    const [invitacion, perfil] = await Promise.all([
+      obtenerInvitacionPublica(token, signal),
+      obtenerPerfil(signal),
+    ]);
+    return { invitacion, perfil };
+  });
+  if (!c.datos)
     return (
-      <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "sans-serif" }}>
-        <h1>Invitación no encontrada</h1>
-        <p role="alert">Ese enlace de invitación no existe o ya no es válido.</p>
-      </main>
+      <section className="panel">
+        <h1>Invitación al curso</h1>
+        {c.error ? (
+          <ErrorCarga error={c.error} reintentar={c.recargar} />
+        ) : (
+          <Cargando />
+        )}
+      </section>
     );
-  }
-
-  const yaResuelta = invitacion.estado !== "PENDIENTE";
-
+  const { invitacion: i, perfil } = c.datos;
+  const pendiente = i.estado === "PENDIENTE";
   return (
-    <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Invitación al curso {invitacion.curso_nombre}</h1>
+    <section className="panel">
+      <p className="eyebrow">Equipo docente</p>
+      <h1>Invitación a {i.curso_nombre}</h1>
       <p>
-        Correo destinatario: <code>{invitacion.email_enmascarado}</code>
+        Destinatario: <strong>{i.email_enmascarado}</strong>
       </p>
       <p>
-        Rol: <strong>{invitacion.rol}</strong>
+        Rol: <strong>{etiqueta(i.rol)}</strong>
       </p>
-      <p>Permisos: {invitacion.permisos.length ? invitacion.permisos.join(", ") : "los del rol"}</p>
-
-      {error && (
-        <p role="alert">
-          {error === "CORREO_NO_COINCIDE" &&
-            `Esta invitación es para ${invitacion.email_enmascarado}. Entraste con otro correo. Cambiá de cuenta o pedí una invitación nueva.`}
-          {error === "EXPIRADA" && "Esta invitación caducó."}
-          {error === "REVOCADA" && "Esta invitación fue revocada."}
-          {error === "YA_ACEPTADA" && "Esta invitación ya fue aceptada."}
-          {!["CORREO_NO_COINCIDE", "EXPIRADA", "REVOCADA", "YA_ACEPTADA"].includes(error) && error}
-        </p>
+      <Estado valor={i.estado} />
+      <p>
+        Permisos:{" "}
+        {i.rol === "PROFESOR"
+          ? "Administración completa del curso"
+          : [
+              "Consultar el curso",
+              ...PERMISOS_CONCEDIBLES.filter((p) =>
+                i.permisos.includes(p.clave),
+              ).map((p) => p.etiqueta),
+            ].join(", ")}
+        .
+      </p>
+      {params.get("error") && (
+        <Aviso tipo="error">
+          {ERRORES[params.get("error")!] ??
+            "No pudimos completar la aceptación. Revisa tu cuenta e intenta nuevamente."}
+        </Aviso>
       )}
-
-      {yaResuelta && !error && <p>Esta invitación ya no está pendiente ({invitacion.estado}).</p>}
-
-      {!yaResuelta && (
+      <Mensajes {...op} />
+      {pendiente ? (
         <>
-          <p style={{ fontSize: "0.85rem", color: "#666" }}>{TEXTO_CONSENTIMIENTO}</p>
-          {tieneSesion ? (
-            <button onClick={onAceptarConSesion} disabled={aceptando}>
-              Aceptar la invitación
-            </button>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={consiento}
+              onChange={(e) => setConsiento(e.target.checked)}
+            />
+            Al aceptar, doy mi consentimiento para que el equipo docente de este
+            curso pueda leer todo el código de los repositorios del curso a
+            través de la aplicación.
+          </label>
+          {perfil ? (
+            <>
+              <p className="help">Sesión actual: {perfil.email}.</p>
+              <button
+                className="primary"
+                disabled={!consiento || op.ocupado}
+                onClick={() =>
+                  void op.ejecutar(async () => {
+                    const r = await aceptarInvitacionConSesion(token);
+                    if (!r.ok) {
+                      const cuerpo = (await r
+                        .clone()
+                        .json()
+                        .catch(() => null)) as { detail?: string } | null;
+                      if (cuerpo?.detail && ERRORES[cuerpo.detail])
+                        throw new Error(ERRORES[cuerpo.detail]);
+                    }
+                    await comprobar(r);
+                    window.location.assign("/cursos");
+                  })
+                }
+              >
+                Aceptar invitación
+              </button>
+            </>
           ) : (
-            <form method="POST" action={`${API_BASE_URL}/auth/google/inicio`}>
+            <FormularioAcceso
+              action="/auth/google/inicio"
+              texto="Aceptar con Google"
+              disabled={!consiento}
+            >
               <input type="hidden" name="invitacion_token" value={token} />
               <input type="hidden" name="destino" value="/cursos" />
-              <button type="submit">Aceptar la invitación</button>
-            </form>
+            </FormularioAcceso>
           )}
+          <p className="help">
+            Entra con la cuenta personal Gmail a la que se envió esta
+            invitación.
+          </p>
         </>
+      ) : (
+        <Aviso>
+          {ERRORES[i.estado === "ACEPTADA" ? "YA_ACEPTADA" : i.estado] ??
+            "Esta invitación ya no está pendiente."}
+        </Aviso>
       )}
-    </main>
+      <p className="help">
+        <Link to="/acceso">Entrar con otra cuenta de Google</Link> ·{" "}
+        <Link to="/cursos">Ir a mis cursos</Link>
+      </p>
+    </section>
   );
 }

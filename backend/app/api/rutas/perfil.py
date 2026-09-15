@@ -1,9 +1,4 @@
-"""`/perfil`, recorte de Etapa P1 (SPEC 02 S2.10). Exige sesion y ningun permiso.
-
-Solo lo que Etapa P1 necesita: identidad (GET/PATCH), sesiones (GET/DELETE) y
-cerrar cuenta (DELETE). El resto de `/perfil` (cuenta de GitHub, identidades de
-Canvas, regenerar enlaces) llega con las etapas que crean esas tablas.
-"""
+"""Perfil docente: identidad, sesiones, cierre y cuenta GitHub con consentimiento."""
 
 from __future__ import annotations
 
@@ -15,12 +10,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.adaptadores import acceso_docente_repo, cuenta_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.cliente_github import FalloProveedorGithub, crear_cliente_github_desde_config
 from app.adaptadores.modelos_identidad import Sesion, Usuario
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, usuario_actual
-from app.dominio.cuenta import puede_cerrar_cuenta
 from app.dominio.vinculacion_github import es_cuenta_de_organizacion
+from app.infraestructura.cerrojos import bloquear_equipo
 from app.infraestructura.config import Settings, obtener_configuracion
 
 router = APIRouter(tags=["perfil"], prefix="/api/perfil")
@@ -65,30 +61,35 @@ def cerrar_cuenta(
 ) -> dict[str, Any]:
     usuario, _ = actual
 
-    # Etapa P1: no existe aun `curso`/`membresia_curso` (Etapa P2), asi que la
-    # lista de cursos bloqueantes es siempre vacia -- ver app/dominio/cuenta.py.
-    bloqueantes = puede_cerrar_cuenta([])
+    bloqueantes = cuenta_repo.cerrar(bd, usuario)
     if bloqueantes:
         raise HTTPException(
             status_code=409,
             detail={
                 "motivo": "UNICA_PROFESORA_ACTIVA",
-                "cursos": [c.__dict__ for c in bloqueantes],
+                "cursos": [{"curso_id": str(c.curso_id), "nombre": c.nombre} for c in bloqueantes],
             },
         )
 
-    ahora = ahora_utc()
-    bd.query(Sesion).filter(Sesion.usuario_id == usuario.id, Sesion.revocada_en.is_(None)).update(
-        {"revocada_en": ahora}
-    )
-    usuario.activo = False
-    usuario.actualizado_en = ahora
-    bd.flush()
     return {"ok": True}
 
 
+@router.get("/cierre")
+def consultar_cierre(
+    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
+    bd: Session = Depends(obtener_sesion_bd),
+) -> dict[str, Any]:
+    cursos = cuenta_repo.cursos_bloqueantes(bd, actual[0])
+    return {
+        "puede_cerrar": not cursos,
+        "cursos": [{"curso_id": str(c.curso_id), "nombre": c.nombre} for c in cursos],
+    }
+
+
 class CuentaGithubEntrada(BaseModel):
-    login: str = Field(min_length=1)
+    login: str = Field(
+        min_length=1, max_length=39, pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$"
+    )
     consiento: bool
 
 
@@ -99,28 +100,38 @@ def declarar_cuenta_github(
     bd: Session = Depends(obtener_sesion_bd),
     settings: Settings = Depends(obtener_configuracion),
 ) -> Usuario:
-    """Simplificacion de Etapa P4 citada en app/adaptadores/modelos_identidad.py:
-    valida en vivo contra GitHub y guarda el login, sin esperar al catalogo
-    `cuenta_github` completo de Etapa P6 (elegibilidad global, fusion con
-    estudiantes, etc.)."""
+    """Valida identidad y elegibilidad global, y encola el cambio de accesos."""
     if not datos.consiento:
         raise HTTPException(status_code=422, detail="falta el consentimiento")
 
     cliente = crear_cliente_github_desde_config(settings)
     try:
-        existe_usuario = cliente.existe_como_usuario(datos.login)
+        info = cliente.obtener_cuenta_usuario(datos.login)
         existe_org = cliente.existe_como_organizacion(datos.login)
     except FalloProveedorGithub as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from None
-    if not existe_usuario or es_cuenta_de_organizacion(existe_como_organizacion=existe_org):
+    if info is None or es_cuenta_de_organizacion(existe_como_organizacion=existe_org):
         raise HTTPException(
             status_code=422, detail="esa cuenta de GitHub no existe o es una organizacion"
         )
 
     usuario, _ = actual
-    usuario.github_login_declarado = datos.login
+    bloquear_equipo(bd)
+    bd.refresh(usuario)
+    if not usuario.activo:
+        raise HTTPException(status_code=401, detail="cuenta cerrada")
+    assert info is not None
+    motivo = acceso_docente_repo.motivo_no_elegible(
+        bd, usuario=usuario, github_id=info.github_user_id, login=info.login
+    )
+    if motivo:
+        raise HTTPException(status_code=422, detail=motivo)
+    anterior = usuario.github_login_declarado
+    usuario.cuenta_github_id = info.github_user_id
+    usuario.github_login_declarado = info.login
     usuario.consentimiento_github_en = ahora_utc()
     usuario.actualizado_en = ahora_utc()
+    acceso_docente_repo.programar_cambio_cuenta(bd, usuario, anterior)
     bd.flush()
     return usuario
 
@@ -131,9 +142,14 @@ def desvincular_cuenta_github(
     bd: Session = Depends(obtener_sesion_bd),
 ) -> Usuario:
     usuario, _ = actual
+    bloquear_equipo(bd)
+    bd.refresh(usuario)
+    anterior = usuario.github_login_declarado
+    usuario.cuenta_github_id = None
     usuario.github_login_declarado = None
     usuario.consentimiento_github_en = None
     usuario.actualizado_en = ahora_utc()
+    acceso_docente_repo.programar_cambio_cuenta(bd, usuario, anterior)
     bd.flush()
     return usuario
 

@@ -397,7 +397,7 @@ El flujo que se demuestra ese día (§3.1 del enunciado): crear un usuario profe
 
 **Llamadas externas:** Canvas — creación de la tarea de registro "Registro de tu cuenta de GitHub" (`POST /courses/:id/assignments`), lectura de sus entregas (`GET /courses/:id/students/submissions`), comentario de respuesta sobre la entrega (`PUT .../submissions/:user_id` con sólo `comment[text_comment]`). GitHub — validación en vivo del `login` declarado (`GET /users/{login}` contrastado con `GET /orgs/{login}`, sin confiar en el campo `type`).
 
-**Pantallas:** `/cursos/{id}/personas` (crear/publicar la tarea de registro con `comunicacion.enviar`, ver mapeo vigente, corregirlo con `mapeo.editar`, importar CSV), `/cursos/{id}/pendientes` (todo lo que falta en un solo sitio, con acción y botón de recordatorio manual).
+**Pantallas:** `/cursos/{id}/personas` (crear/publicar la tarea de registro con `curso.administrar`, ver mapeo vigente, corregirlo con `mapeo.editar`, importar CSV), `/cursos/{id}/pendientes` (todo lo que falta en un solo sitio, con acción y botón de recordatorio manual).
 
 **Jobs:** `recolector_mapeos` (3 min con la tarea de registro abierta; 15 min si no; volcado completo cada hora), `revalidar_mapeos` (diario 04:00, revalida cuentas contra GitHub, nunca contra Canvas).
 

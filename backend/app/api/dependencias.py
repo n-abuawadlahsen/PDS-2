@@ -20,6 +20,7 @@ from app.adaptadores.modelos_curso import MembresiaCurso
 from app.adaptadores.modelos_identidad import Sesion, SesionMembresia, Usuario
 from app.dominio.estados import EstadoMembresia, RolMembresia
 from app.dominio.permisos import Permiso, permisos_efectivos
+from app.infraestructura.cerrojos import bloquear_equipo
 from app.infraestructura.config import Settings, obtener_configuracion
 
 NOMBRE_COOKIE_SESION = "sesion"
@@ -115,13 +116,20 @@ def requiere(
     """
 
     def dependencia(
+        request: Request,
         curso_id: uuid.UUID,
         actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
         bd: Session = Depends(obtener_sesion_bd),
     ) -> MembresiaCurso:
         usuario, sesion = actual
+        if permiso == Permiso.EQUIPO_ADMINISTRAR and request.method not in {"GET", "HEAD"}:
+            bloquear_equipo(bd)
+            bd.refresh(usuario)
+            if not usuario.activo:
+                raise HTTPException(status_code=401, detail="cuenta cerrada")
         membresia = (
             bd.query(MembresiaCurso)
+            .populate_existing()
             .filter(MembresiaCurso.curso_id == curso_id, MembresiaCurso.usuario_id == usuario.id)
             .one_or_none()
         )

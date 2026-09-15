@@ -28,7 +28,10 @@ PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
     ("reconciliar_accesos", 900),
 )
 
-PERIODICOS_GLOBALES: tuple[tuple[str, int], ...] = (("despachar_outbox", 30),)
+PERIODICOS_GLOBALES: tuple[tuple[str, int], ...] = (
+    ("despachar_outbox", 30),
+    ("sincronizar_acceso_docente", 3600),
+)
 
 
 def _asegurar(bd: Session, *, tipo: str, curso_id: uuid.UUID | None, cadencia: int) -> None:

@@ -17,6 +17,7 @@ from app.adaptadores.modelos_identidad import Usuario
 from app.dominio.estados import EstadoCurso, EstadoInvitacion, EstadoMembresia, RolMembresia
 from app.dominio.membresia import puede_retirar_o_degradar
 from app.dominio.permisos import Permiso
+from app.infraestructura.cerrojos import bloquear_equipo
 
 _CADUCIDAD_INVITACION = timedelta(days=7)
 _MAXIMO_REENVIOS = 3
@@ -37,6 +38,10 @@ def crear_curso(
     zona_horaria: str,
 ) -> Curso:
     """El creador queda como PROFESOR con los nueve implicitos, `permisos = []` (S2.3.10 #3)."""
+    bloquear_equipo(bd)
+    bd.refresh(creador)
+    if not creador.activo:
+        raise ValueError("cuenta cerrada")
     ahora = ahora_utc()
     curso = Curso(
         estado=EstadoCurso.BORRADOR.value,
@@ -94,7 +99,11 @@ def obtener_membresia(
 
 def contar_profesores_activos(bd: Session, curso_id: uuid.UUID) -> int:
     return bd.execute(
-        select(func.count()).where(
+        select(func.count())
+        .select_from(MembresiaCurso)
+        .join(Usuario, Usuario.id == MembresiaCurso.usuario_id)
+        .where(
+            Usuario.activo.is_(True),
             MembresiaCurso.curso_id == curso_id,
             MembresiaCurso.rol == RolMembresia.PROFESOR.value,
             MembresiaCurso.estado == EstadoMembresia.ACTIVA.value,
@@ -131,6 +140,7 @@ def cambiar_rol(
     permisos_si_ayudante: frozenset[Permiso],
 ) -> None:
     """S2.7.3: promover vacia `permisos`; degradar exige elegir el subconjunto, nunca hereda."""
+    bloquear_equipo(bd)
     membresia.rol = nuevo_rol.value
     membresia.permisos = (
         [] if nuevo_rol == RolMembresia.PROFESOR else sorted(p.value for p in permisos_si_ayudante)
@@ -145,8 +155,13 @@ def retirar_membresia(
     """S2.9.2, pasos 1-3, 7 (encolar) y 9. Los pasos 4/5/6/8 dependen de tablas de
     etapas posteriores (asignacion_correccion F11, suscripcion_informe F9,
     credencial_canvas P3) y se añaden con ellas."""
+    bloquear_equipo(bd)
+    bd.refresh(membresia)
     puede_retirar_o_degradar(
-        es_profesor_activo=membresia.rol == RolMembresia.PROFESOR.value,
+        es_profesor_activo=(
+            membresia.rol == RolMembresia.PROFESOR.value
+            and membresia.estado == EstadoMembresia.ACTIVA.value
+        ),
         cantidad_profesores_activos=contar_profesores_activos(bd, membresia.curso_id),
         curso_activo=curso_activo,
     )
@@ -163,6 +178,10 @@ def reincorporar_membresia(
     bd: Session, membresia: MembresiaCurso, *, permisos: frozenset[Permiso]
 ) -> None:
     """S2.9.6: reactiva la misma fila; los permisos se vuelven a elegir, nunca se restauran."""
+    bloquear_equipo(bd)
+    usuario = bd.get(Usuario, membresia.usuario_id)
+    if usuario is None or not usuario.activo:
+        raise InvitacionNoAceptable("CUENTA_CERRADA")
     membresia.estado = EstadoMembresia.ACTIVA.value
     membresia.retirada_en = None
     membresia.retirada_por = None
@@ -273,6 +292,11 @@ def aceptar_invitacion(
     bd: Session, invitacion: InvitacionEquipo, *, usuario: Usuario
 ) -> MembresiaCurso:
     """S2.5.5: en una sola transaccion, crea o reactiva la membresia."""
+    bloquear_equipo(bd)
+    bd.refresh(invitacion)
+    bd.refresh(usuario)
+    if not usuario.activo:
+        raise InvitacionNoAceptable("CUENTA_CERRADA")
     if invitacion.estado == EstadoInvitacion.REVOCADA.value:
         raise InvitacionNoAceptable("REVOCADA")
     if invitacion.estado == EstadoInvitacion.ACEPTADA.value:
@@ -297,6 +321,8 @@ def aceptar_invitacion(
         )
         bd.add(membresia)
     else:
+        if existente.estado == EstadoMembresia.ACTIVA.value:
+            raise InvitacionNoAceptable("YA_ES_MIEMBRO")
         # Reactiva la misma fila (invariante 1 de S2.4.2), nunca crea una nueva.
         existente.rol = invitacion.rol
         existente.permisos = list(invitacion.permisos)
@@ -309,4 +335,10 @@ def aceptar_invitacion(
     invitacion.estado = EstadoInvitacion.ACEPTADA.value
     invitacion.aceptada_en = ahora
     bd.flush()
+    from app.adaptadores.invitaciones_correo import cancelar
+
+    cancelar(bd, invitacion)
+    from app.adaptadores.acceso_docente_repo import encolar_sincronizacion
+
+    encolar_sincronizacion(bd, membresia)
     return membresia

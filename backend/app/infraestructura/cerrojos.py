@@ -31,6 +31,20 @@ _ESPACIO_CANVAS = 1
 _ESPACIO_GITHUB = 2
 
 
+def bloquear_equipo(sesion: Session) -> None:
+    """Serializa cambios de identidad/membresias hasta COMMIT o ROLLBACK.
+
+    El cierre puede abarcar varios cursos. Un cerrojo transaccional compartido
+    evita que dos cierres o una degradacion simultanea dejen cero profesores.
+    No se libera al salir de una funcion: la comprobacion y el cambio son atomicos.
+    """
+    sesion.execute(text("SELECT pg_advisory_xact_lock(hashtext('identidad_y_equipo'))"))
+
+
+def bloquear_cuota_correo(sesion: Session) -> None:
+    sesion.execute(text("SELECT pg_advisory_xact_lock(hashtext('cuota_correo'))"))
+
+
 def _clave_curso(curso_id: uuid.UUID) -> str:
     """`curso.id` es UUIDv7 (ARQUITECTURA.md S8), no cabe en el `int4` que pide
     la variante de dos claves de `pg_advisory_lock`. Se reduce con `hashtext`,
