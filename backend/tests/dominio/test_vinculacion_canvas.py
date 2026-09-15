@@ -9,6 +9,7 @@ from app.dominio.vinculacion_canvas import (
     MatriculaCanvas,
     MotivoRechazoVinculacion,
     RechazoVinculacion,
+    item_16_aprobado,
     tiene_matricula_profesor_activa,
     todas_las_matriculas_profesor_limitadas_a_seccion,
     verificar_identidad,
@@ -59,3 +60,37 @@ def test_2d_identidad_distinta_se_rechaza():
 
 def test_2e_sin_identidad_previa_no_se_rechaza():
     verificar_identidad(canvas_user_id_devuelto=42, identidad_previa=None)
+
+
+def test_item_16_permisos_granulares_aprueban_sin_el_permiso_antiguo():
+    """Regresion: respuesta real de uandes.test.instructure.com (15-sep-2026)
+    para un profesor del curso. `manage_assignments` ya no existe en Canvas y
+    responde `false`, igual que un nombre de permiso inventado."""
+    permisos = {
+        "manage_assignments": False,
+        "manage_assignments_add": True,
+        "manage_assignments_edit": True,
+    }
+    assert item_16_aprobado(permisos)
+
+
+def test_item_16_instancia_con_el_permiso_antiguo_aprueba():
+    permisos = {
+        "manage_assignments": True,
+        "manage_assignments_add": False,
+        "manage_assignments_edit": False,
+    }
+    assert item_16_aprobado(permisos)
+
+
+@pytest.mark.parametrize(
+    "permisos",
+    [
+        {"manage_assignments": False, "manage_assignments_add": True},
+        {"manage_assignments": False, "manage_assignments_edit": True},
+        {"manage_assignments": False, "manage_assignments_add": False},
+        {},
+    ],
+)
+def test_item_16_sin_crear_y_editar_no_aprueba(permisos: dict[str, bool]):
+    assert not item_16_aprobado(permisos)

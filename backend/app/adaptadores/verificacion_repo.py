@@ -47,7 +47,14 @@ from app.dominio.verificacion import (
     resultado_binario,
     resultado_item_17,
 )
-from app.dominio.vinculacion_canvas import DetalleCursoCanvas, RechazoVinculacion, item_3_aprobado
+from app.dominio.vinculacion_canvas import (
+    PERMISO_TAREAS_ANTIGUO,
+    PERMISOS_TAREAS_GRANULARES,
+    DetalleCursoCanvas,
+    RechazoVinculacion,
+    item_3_aprobado,
+    item_16_aprobado,
+)
 from app.dominio.vinculacion_github import evaluar_item_14
 from app.infraestructura.cerrojos import cerrojo_canvas, cerrojo_github
 from app.infraestructura.cifrado import Llavero
@@ -65,8 +72,8 @@ _PERMISOS_CANVAS: list[str] = [
     "send_messages",
     "send_messages_all",
     "read_email_addresses",
-    "manage_assignments",
-    "manage_assignments_add",
+    PERMISO_TAREAS_ANTIGUO,
+    *PERMISOS_TAREAS_GRANULARES,
     "comment_on_submissions",
     "moderate_forum",
 ]
@@ -160,7 +167,7 @@ def _evaluar_permiso(
     elif item == "7":
         aprobado = bool(p.get("read_email_addresses"))
     elif item == "16":
-        aprobado = bool(p.get("manage_assignments")) and bool(p.get("manage_assignments_add"))
+        aprobado = item_16_aprobado(p)
     elif item == "19":
         aprobado = bool(p.get("moderate_forum"))
     else:  # pragma: no cover - catalogo cerrado, ver ORDEN_CARRIL_CANVAS

@@ -308,7 +308,7 @@ El trabajo ejecuta **dos carriles simultáneos, cada uno bajo su propio cerrojo 
 | 13 | Zona horaria del curso | `course.time_zone` | Informativo |
 | 14 | La App está instalada, con sus permisos congelados y la organización presentable | `GET /app/installations/{id}` y `GET /orgs/{org}` — **seis sub-comprobaciones**, §4.7.3 | **Bloqueante** |
 | 15 | Estudiantes legibles | recuento del roster | Advertencia si el curso está vacío |
-| 16 | Puedes crear y editar tareas en Canvas | `permissions[]=manage_assignments`, `manage_assignments_add` | **Bloqueante**: vía principal de R2.2.4 y R2.2.5 |
+| 16 | Puedes crear y editar tareas en Canvas | `permissions[]=manage_assignments_add` **y** `manage_assignments_edit`; o `manage_assignments` en una instancia que aún use el permiso antiguo (Canvas lo partió en `_add`/`_edit`/`_delete` y hoy el nombre antiguo responde `false`, medido el 15-sep-2026) | **Bloqueante**: vía principal de R2.2.4 y R2.2.5 |
 | 17 | Puedes escribir comentarios en las entregas | `permissions[]=comment_on_submissions`, o prueba de escritura `17-bis` si la instancia no lo expone | Advertencia fuerte; **bloqueante si el ítem 6 salió rojo** |
 | 18 | Cada docente del curso tiene membresía activa en la organización | lectura de `membresia_curso.org_github_estado`, **no llama a GitHub** | Advertencia (RG-064) |
 | 19 | Puedes borrar anuncios propios | `permissions[]=moderate_forum` | Informativo: de él depende la limpieza de las pruebas de escritura |

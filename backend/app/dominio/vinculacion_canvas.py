@@ -116,6 +116,21 @@ def item_3_aprobado(matriculas: list[MatriculaCanvas]) -> bool:
     )
 
 
+# Canvas partio `manage_assignments` en `_add`/`_edit`/`_delete`; en una
+# instancia actual el nombre antiguo responde `false`, igual que un permiso
+# inexistente (medido en uandes.test.instructure.com el 15-sep-2026).
+PERMISO_TAREAS_ANTIGUO = "manage_assignments"
+PERMISOS_TAREAS_GRANULARES = ("manage_assignments_add", "manage_assignments_edit")
+
+
+def item_16_aprobado(permisos: dict[str, bool]) -> bool:
+    """S4.7.2 item 16: crear y editar tareas. Vale el permiso antiguo o, en su
+    lugar, los dos granulares (crear y editar) a la vez."""
+    if permisos.get(PERMISO_TAREAS_ANTIGUO):
+        return True
+    return all(permisos.get(p) for p in PERMISOS_TAREAS_GRANULARES)
+
+
 @dataclass(frozen=True)
 class IdentidadExistente:
     canvas_user_id: int
