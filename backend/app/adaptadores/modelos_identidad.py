@@ -12,7 +12,17 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import CITEXT, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,15 +53,9 @@ class Usuario(Base, ConId):
     email_canonico: Mapped[str] = mapped_column(CITEXT, unique=True, nullable=False)
     nombre: Mapped[str] = mapped_column(Text, nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # `cuenta_github_id` sera un FK a la futura tabla `cuenta_github` (SPEC 02
-    # S2.4.3, catalogo global con elegibilidad -- Etapa P6). Se creo en Etapa
-    # P1 como columna de solo tipo, sin escritor todavia.
-    cuenta_github_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Simplificacion de Etapa P4 (SPEC 02 S2.8.1, "declaracion de la cuenta"):
-    # el login validado en vivo contra GitHub, para poder incorporar al equipo
-    # docente sin esperar al catalogo `cuenta_github` completo de P6. Cuando
-    # P6 exista, `cuenta_github_id` pasa a ser la fuente y esta columna se
-    # retira -- documentado, no una decision silenciosa.
+    # Nombre historico: guarda el ID NUMERICO externo de GitHub, no el UUID
+    # del catalogo cuenta_github. Unico incluso si el login cambia (0002).
+    cuenta_github_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     github_login_declarado: Mapped[str | None] = mapped_column(Text, nullable=True)
     consentimiento_github_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     generacion_enlaces: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

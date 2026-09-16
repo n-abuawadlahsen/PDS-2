@@ -397,7 +397,7 @@ El flujo que se demuestra ese día (§3.1 del enunciado): crear un usuario profe
 
 **Llamadas externas:** Canvas — creación de la tarea de registro "Registro de tu cuenta de GitHub" (`POST /courses/:id/assignments`), lectura de sus entregas (`GET /courses/:id/students/submissions`), comentario de respuesta sobre la entrega (`PUT .../submissions/:user_id` con sólo `comment[text_comment]`). GitHub — validación en vivo del `login` declarado (`GET /users/{login}` contrastado con `GET /orgs/{login}`, sin confiar en el campo `type`).
 
-**Pantallas:** `/cursos/{id}/personas` (crear/publicar la tarea de registro con `comunicacion.enviar`, ver mapeo vigente, corregirlo con `mapeo.editar`, importar CSV), `/cursos/{id}/pendientes` (todo lo que falta en un solo sitio, con acción y botón de recordatorio manual).
+**Pantallas:** `/cursos/{id}/personas` (crear/publicar la tarea de registro con `curso.administrar`, ver mapeo vigente, corregirlo con `mapeo.editar`, importar CSV), `/cursos/{id}/pendientes` (todo lo que falta en un solo sitio, con acción y botón de recordatorio manual).
 
 **Jobs:** `recolector_mapeos` (3 min con la tarea de registro abierta; 15 min si no; volcado completo cada hora), `revalidar_mapeos` (diario 04:00, revalida cuentas contra GitHub, nunca contra Canvas).
 
@@ -504,7 +504,7 @@ El flujo que se demuestra ese día (§3.1 del enunciado): crear un usuario profe
 
 **Pantallas:** dashboard de tarea (contadores: operativos, degradados, con problemas por subtipo, inaccesibles, fuera de alcance, esperando), progreso "creando 12 de 60 · quedan ~9 min", ficha del sujeto con su repositorio y su historial si hubo sustitución.
 
-**Jobs:** `aprovisionar_repositorios` (evento + barrido cada 2 min, cerrojo 2, ritmo 1 repo/6s, 8 reintentos en ~2h), `reconciliar_accesos` (15 min), `sincronizar_acceso_docente`, `sync_tareas_y_fechas` (5 min, sólo lectura en esta etapa), `materializar_sujetos` (tras cada sync + barrido 5 min).
+**Jobs:** `aprovisionar_repositorios` (evento + barrido cada 2 min, cerrojo 2, ritmo 1 repo/6s, 8 reintentos en ~2h), `reconciliar_accesos` (1 min para pendientes, lotes de 20; resto elegible cada 15 min; ajuste del 15-sep en [ACTUALIZACION-ACCESOS-GITHUB.md](ACTUALIZACION-ACCESOS-GITHUB.md)), `sincronizar_acceso_docente`, `sync_tareas_y_fechas` (5 min, sólo lectura en esta etapa), `materializar_sujetos` (tras cada sync + barrido 5 min).
 
 ### Reglas de negocio no obvias
 

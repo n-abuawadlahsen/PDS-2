@@ -1,168 +1,199 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { enviarRecordatorio, obtenerPendientes, type Pendientes as PendientesDatos } from "../lib/api";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { enviarRecordatorio, obtenerPendientes } from "../lib/api";
+import { comprobar } from "../lib/errores";
 import { textoEstadoAcceso } from "../lib/textosTarea";
-
-/** `/cursos/{id}/pendientes` (SPEC 07 S7.8): la pantalla unica de
- * informacion faltante, los cuatro bloques literales de S7.8.1. */
-export function Pendientes() {
-  const { cursoId } = useParams<{ cursoId: string }>();
-  const [datos, setDatos] = useState<PendientesDatos | null>(null);
-  const [mensaje, setMensaje] = useState<string | null>(null);
-  const [enviando, setEnviando] = useState<string | null>(null);
-
-  async function cargar() {
-    if (!cursoId) return;
-    setDatos(await obtenerPendientes(cursoId));
-  }
-
-  useEffect(() => {
-    cargar();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursoId]);
-
-  async function onRecordatorio(estudianteId: string) {
-    if (!cursoId) return;
-    setEnviando(estudianteId);
-    setMensaje(null);
-    const respuesta = await enviarRecordatorio(cursoId, estudianteId);
-    if (respuesta.ok) {
-      setMensaje("Recordatorio enviado.");
-    } else if (respuesta.status === 429) {
-      setMensaje("Ya se envió un recordatorio a este estudiante hoy.");
-    } else {
-      setMensaje(`No se pudo enviar (${respuesta.status}).`);
-    }
-    setEnviando(null);
-  }
-
-  if (!datos) {
-    return (
-      <main style={{ maxWidth: 900, margin: "4rem auto", fontFamily: "sans-serif" }}>
-        <p>Cargando…</p>
-      </main>
-    );
-  }
-
+import { useCurso } from "../components/Layout";
+import {
+  Cabecera,
+  Cargando,
+  ErrorCarga,
+  Estado,
+  Mensajes,
+  Vacio,
+  etiqueta,
+} from "../components/ui";
+import { useConsulta, useOperacion } from "../hooks/useConsulta";
+function Recordatorio({ id }: { id: string }) {
+  const { curso } = useCurso();
+  const op = useOperacion();
+  const [solicitado, setSolicitado] = useState(false);
   return (
-    <main style={{ maxWidth: 900, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Pendientes</h1>
-      {mensaje && <p role="status">{mensaje}</p>}
-
-      <section>
-        <h2>1. Sin cuenta de GitHub ({datos.bloque_1_sin_cuenta.length})</h2>
-        {datos.bloque_1_sin_cuenta.length === 0 ? (
-          <p>Nada pendiente en este bloque.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Estado del estudiante</th>
-                <th>Estado del mapeo</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {datos.bloque_1_sin_cuenta.map((f) => (
-                <tr key={f.estudiante_id}>
-                  <td>{f.nombre}</td>
-                  <td>{f.estado_estudiante}</td>
-                  <td>{f.estado_mapeo}</td>
-                  <td>
-                    <button
-                      onClick={() => onRecordatorio(f.estudiante_id)}
-                      disabled={enviando === f.estudiante_id}
-                    >
-                      {enviando === f.estudiante_id ? "…" : "Enviar recordatorio"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <section>
-        <h2>2. Cuentas en conflicto ({datos.bloque_2_en_conflicto.length})</h2>
-        {datos.bloque_2_en_conflicto.length === 0 ? (
-          <p>Nada pendiente en este bloque.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Estado</th>
-                <th>Motivo</th>
-                <th>Cuenta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {datos.bloque_2_en_conflicto.map((f) => (
-                <tr key={f.estudiante_id}>
-                  <td>{f.nombre}</td>
-                  <td>{f.estado_mapeo}</td>
-                  <td>{f.motivo_invalidacion ?? "—"}</td>
-                  <td>{f.cuenta_login ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <section>
-        <h2>3. Grupos incompletos ({datos.bloque_3_grupos_incompletos.length})</h2>
-        {datos.bloque_3_grupos_incompletos.length === 0 ? (
-          <p>Nada pendiente en este bloque.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Tipo</th>
-                <th>Severidad</th>
-                <th>Nombre</th>
-              </tr>
-            </thead>
-            <tbody>
-              {datos.bloque_3_grupos_incompletos.map((f, i) => (
-                <tr key={`${f.estudiante_id ?? "curso"}-${i}`}>
-                  <td>{f.tipo}</td>
-                  <td>{f.severidad}</td>
-                  <td>{f.nombre ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <section>
-        <h2>4. Invitaciones sin aceptar ({datos.bloque_4_invitaciones_sin_aceptar.length})</h2>
-        {datos.bloque_4_invitaciones_sin_aceptar.length === 0 ? (
-          <p>Nada pendiente en este bloque.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Invitación</th>
-              </tr>
-            </thead>
-            <tbody>
-              {datos.bloque_4_invitaciones_sin_aceptar.map((f, i) => (
-                <tr key={`${f.estudiante_id}-${i}`}>
-                  <td>{f.nombre}</td>
-                  <td>{textoEstadoAcceso(f.estado_acceso)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <p>{cursoId && <Link to={`/cursos/${cursoId}/personas`}>Volver a Personas</Link>}</p>
-    </main>
+    <div>
+      <button
+        disabled={op.ocupado || solicitado}
+        onClick={() =>
+          void op.ejecutar(async () => {
+            const r = await enviarRecordatorio(curso.id, id);
+            if (r.status === 429) {
+              setSolicitado(true);
+              throw new Error(
+                "Ya se solicitó un recordatorio para este estudiante hoy.",
+              );
+            }
+            await comprobar(r);
+            setSolicitado(true);
+          }, "Recordatorio solicitado por Canvas. La recepción depende del procesamiento del envío.")
+        }
+      >
+        {op.ocupado
+          ? "Solicitando…"
+          : solicitado
+            ? "Recordatorio solicitado"
+            : "Enviar recordatorio"}
+      </button>
+      <Mensajes {...op} />
+    </div>
+  );
+}
+export function Pendientes() {
+  const { curso, puede } = useCurso();
+  const c = useConsulta(`pendientes-${curso.id}`, () =>
+    obtenerPendientes(curso.id),
+  );
+  const d = c.datos;
+  return (
+    <>
+      <Cabecera
+        titulo="Pendientes"
+        descripcion="Información o accesos que requieren atención. Los repositorios que ya tienen sus datos continúan automáticamente."
+        acciones={
+          <button disabled={c.cargando} onClick={c.recargar}>
+            Actualizar pendientes
+          </button>
+        }
+      />
+      {c.error && <ErrorCarga error={c.error} reintentar={c.recargar} />}
+      {!d ? (
+        !c.error && <Cargando />
+      ) : (
+        <div className="stack pending-list">
+          <section className="panel">
+            <h2>Sin cuenta de GitHub · {d.bloque_1_sin_cuenta.length}</h2>
+            <p>
+              Estos estudiantes deben declarar su cuenta en Canvas o recibir
+              ayuda del equipo docente. Máximo un recordatorio por estudiante al
+              día.
+            </p>
+            {!d.bloque_1_sin_cuenta.length ? (
+              <Vacio>No hay pendientes de este tipo.</Vacio>
+            ) : (
+              <ul className="list-clean">
+                {d.bloque_1_sin_cuenta.map((f) => (
+                  <li key={f.estudiante_id}>
+                    <div className="panel-header">
+                      <div>
+                        <strong>{f.nombre}</strong>
+                        <p className="help">
+                          Inscripción: {etiqueta(f.estado_estudiante)}
+                        </p>
+                        <Estado valor={f.estado_mapeo} />
+                      </div>
+                      {puede("comunicacion.enviar") && (
+                        <Recordatorio id={f.estudiante_id} />
+                      )}
+                    </div>
+                    {puede("mapeo.editar") && (
+                      <Link to={`/cursos/${curso.id}/personas`}>
+                        Revisar y asociar cuenta en Personas
+                      </Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!puede("comunicacion.enviar") && (
+              <p className="help">
+                El envío de recordatorios requiere permiso de comunicaciones.
+              </p>
+            )}
+          </section>
+          <section className="panel">
+            <h2>Cuentas en conflicto · {d.bloque_2_en_conflicto.length}</h2>
+            <p>
+              Revisa la cuenta declarada y el motivo antes de corregir una
+              asociación.
+            </p>
+            {!d.bloque_2_en_conflicto.length ? (
+              <Vacio>No hay pendientes de este tipo.</Vacio>
+            ) : (
+              <ul className="list-clean">
+                {d.bloque_2_en_conflicto.map((f) => (
+                  <li key={f.estudiante_id}>
+                    <div className="panel-header">
+                      <strong>{f.nombre}</strong>
+                      <Estado valor={f.estado_mapeo} />
+                    </div>
+                    <p>
+                      {f.cuenta_login
+                        ? `@${f.cuenta_login}`
+                        : "Sin cuenta identificada"}
+                    </p>
+                    {f.motivo_invalidacion && (
+                      <p className="help">{etiqueta(f.motivo_invalidacion)}</p>
+                    )}
+                    <Link to={`/cursos/${curso.id}/personas`}>
+                      Revisar en Personas
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="panel">
+            <h2>Grupos incompletos · {d.bloque_3_grupos_incompletos.length}</h2>
+            <p>
+              Información sincronizada desde Canvas. En esta versión las tareas
+              son individuales.
+            </p>
+            {!d.bloque_3_grupos_incompletos.length ? (
+              <Vacio>No hay pendientes de este tipo.</Vacio>
+            ) : (
+              <ul className="list-clean">
+                {d.bloque_3_grupos_incompletos.map((f, i) => (
+                  <li key={`${f.estudiante_id}-${i}`}>
+                    <strong>{f.nombre ?? "Información del curso"}</strong>
+                    <p>
+                      {etiqueta(f.tipo)} · {etiqueta(f.severidad)}
+                    </p>
+                    {Object.keys(f.detalle).length > 0 && (
+                      <details>
+                        <summary>Ver detalle</summary>
+                        <pre>{JSON.stringify(f.detalle, null, 2)}</pre>
+                      </details>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="panel">
+            <h2>
+              Invitaciones sin aceptar ·{" "}
+              {d.bloque_4_invitaciones_sin_aceptar.length}
+            </h2>
+            <p>
+              El repositorio puede estar creado mientras el estudiante aún debe
+              aceptar su invitación en GitHub.
+            </p>
+            {!d.bloque_4_invitaciones_sin_aceptar.length ? (
+              <Vacio>No hay pendientes de este tipo.</Vacio>
+            ) : (
+              <ul className="list-clean">
+                {d.bloque_4_invitaciones_sin_aceptar.map((f, i) => (
+                  <li key={`${f.estudiante_id}-${i}`}>
+                    <strong>{f.nombre}</strong>
+                    <p className="help">{textoEstadoAcceso(f.estado_acceso)}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Link to={`/cursos/${curso.id}/tareas`}>
+              Consultar repositorios por tarea
+            </Link>
+          </section>
+        </div>
+      )}
+    </>
   );
 }

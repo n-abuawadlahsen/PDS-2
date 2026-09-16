@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adaptadores import canvas_repo
+from app.adaptadores import canvas_repo, invitaciones_correo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.cliente_canvas import FalloProveedorCanvas, crear_cliente_canvas
 from app.adaptadores.modelos_aprovisionamiento import (
@@ -177,6 +177,7 @@ def despachar_pendientes(bd: Session, *, tomado_por: str, limite: int = 20) -> i
                         EstadoMensaje.PENDIENTE.value,
                         EstadoMensaje.REINTENTAR.value,
                         EstadoMensaje.BLOQUEADO.value,
+                        EstadoMensaje.DIFERIDO.value,
                     ]
                 ),
                 (MensajeSaliente.programado_para.is_(None))
@@ -199,6 +200,10 @@ def despachar_pendientes(bd: Session, *, tomado_por: str, limite: int = 20) -> i
 def _despachar_uno(
     bd: Session, mensaje: MensajeSaliente, *, tomado_por: str, ahora: datetime
 ) -> None:
+    if mensaje.canal == "CORREO":
+        invitaciones_correo.despachar(bd, mensaje, ahora=ahora)
+        bd.flush()
+        return
     curso = bd.get(Curso, mensaje.curso_id)
     estudiante = bd.get(Estudiante, mensaje.estudiante_id) if mensaje.estudiante_id else None
     assert curso is not None

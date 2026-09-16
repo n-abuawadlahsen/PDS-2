@@ -4,20 +4,17 @@
 usuario ya se sabe que es la unica profesora ACTIVA de un curso ACTIVO (la
 consulta la hace la capa de adaptadores, que si conoce el ORM) y decide.
 
-Nota de alcance (Etapa P1): hasta que exista `curso`/`membresia_curso` (Etapa
-P2), la lista de cursos bloqueantes que la API le pasa a esta funcion es siempre
-vacia -- no hay todavia ningun curso que bloquee nada. La funcion ya queda
-correcta para cuando esas tablas existan, sin tener que reescribirla.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 
 @dataclass(frozen=True)
 class CursoBloqueante:
-    curso_id: int
+    curso_id: UUID
     nombre: str
 
 

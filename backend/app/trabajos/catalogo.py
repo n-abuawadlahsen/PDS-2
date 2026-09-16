@@ -92,7 +92,13 @@ CATALOGO: tuple[DefinicionTrabajo, ...] = (
         "16-sep",
     ),
     DefinicionTrabajo(
-        "reconciliar_accesos", "15 min", "Curso", "2", "(repositorio, estudiante)", "4", "16-sep"
+        "reconciliar_accesos",
+        "1 min pendientes; 15 min resto; bajo demanda",
+        "Curso",
+        "2",
+        "(repositorio, estudiante)",
+        "4",
+        "16-sep",
     ),
     DefinicionTrabajo(
         "sincronizar_acceso_docente",

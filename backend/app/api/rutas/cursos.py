@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.adaptadores import bitacora_repo, cursos_repo, trabajos_repo
+from app.adaptadores import (
+    acceso_docente_repo,
+    bitacora_repo,
+    cuenta_repo,
+    cursos_repo,
+    invitaciones_correo,
+)
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.modelos_curso import Curso, InvitacionEquipo, MembresiaCurso
 from app.adaptadores.modelos_identidad import Sesion, Usuario
 from app.adaptadores.modelos_infraestructura import Bitacora
+from app.adaptadores.proveedor_correo import motivo_bloqueo
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere, usuario_actual
 from app.dominio.estados import RolMembresia
 from app.dominio.identidad import RechazoCorreo, normalizar_correo_google
@@ -25,6 +32,7 @@ from app.dominio.permisos import (
     validar_permisos_ayudante,
     validar_permisos_profesor,
 )
+from app.infraestructura.config import Settings, obtener_configuracion
 
 router = APIRouter(tags=["cursos"])
 
@@ -78,6 +86,9 @@ class MiembroSalida(BaseModel):
     permisos: list[str]
     estado: str
     retirada_en: datetime | None
+    github_login: str | None = None
+    github_estado: str | None = None
+    github_error: str | None = None
 
 
 class InvitacionEntrada(BaseModel):
@@ -94,6 +105,10 @@ class InvitacionSalida(BaseModel):
     permisos: list[str]
     estado: str
     expira_en: datetime
+    enlace: str | None = None
+    correo_estado: str | None = None
+    correo_motivo: str | None = None
+    reenvios_restantes: int = 0
 
 
 class PermisosEntrada(BaseModel):
@@ -203,9 +218,125 @@ def listar_equipo(
             permisos=f.permisos,
             estado=f.estado,
             retirada_en=f.retirada_en,
+            github_login=usuarios[f.usuario_id].github_login_declarado,
+            github_estado=f.org_github_estado,
+            github_error=f.org_github_ultimo_error,
         )
         for f in filas
     ]
+
+
+def _salida_invitacion(bd: Session, i: InvitacionEquipo, settings: Settings) -> InvitacionSalida:
+    mensaje = invitaciones_correo.mensaje_de_invitacion(bd, i)
+    motivo = mensaje.motivo_estado if mensaje else "ENLACE_ANTIGUO"
+    if mensaje and mensaje.estado not in {"ENVIADO", "CANCELADO", "CADUCADO", "SUPRIMIDO"}:
+        motivo = motivo_bloqueo(settings, i.email) or mensaje.ultimo_error_literal or motivo
+    return InvitacionSalida(
+        id=i.id,
+        email=i.email,
+        rol=i.rol,
+        permisos=i.permisos,
+        estado="EXPIRADA" if cursos_repo.invitacion_esta_vencida(i) else i.estado,
+        expira_en=i.expira_en,
+        enlace=invitaciones_correo.enlace(bd, i, settings),
+        correo_estado=mensaje.estado if mensaje else None,
+        correo_motivo=motivo,
+        reenvios_restantes=max(
+            0,
+            4
+            - cursos_repo.contar_reenvios(bd, curso_id=i.curso_id, email_canonico=i.email_canonico),
+        ),
+    )
+
+
+def _validar_cuotas_invitacion(bd: Session, curso_id: uuid.UUID, actor_id: uuid.UUID) -> None:
+    ahora = ahora_utc()
+    if (
+        bd.query(InvitacionEquipo)
+        .filter(
+            InvitacionEquipo.curso_id == curso_id,
+            InvitacionEquipo.estado == "PENDIENTE",
+            InvitacionEquipo.expira_en > ahora,
+        )
+        .count()
+        >= 20
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Este curso ya tiene 20 invitaciones pendientes. Revoca una antes de continuar.",
+        )
+    if (
+        bd.query(InvitacionEquipo)
+        .filter(
+            InvitacionEquipo.invitada_por == actor_id,
+            InvitacionEquipo.creada_en > ahora - timedelta(days=1),
+        )
+        .count()
+        >= 50
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="Alcanzaste el límite de 50 invitaciones en 24 horas. Intenta mañana.",
+        )
+
+
+@router.get("/api/cursos/{curso_id}/equipo/invitaciones", response_model=list[InvitacionSalida])
+def listar_invitaciones(
+    curso_id: uuid.UUID,
+    response: Response,
+    bd: Session = Depends(obtener_sesion_bd),
+    settings: Settings = Depends(obtener_configuracion),
+    _membresia: MembresiaCurso = Depends(requiere(Permiso.EQUIPO_ADMINISTRAR)),
+) -> list[InvitacionSalida]:
+    response.headers["Cache-Control"] = "no-store"
+    return [
+        _salida_invitacion(bd, i, settings)
+        for i in bd.query(InvitacionEquipo)
+        .filter_by(curso_id=curso_id)
+        .order_by(InvitacionEquipo.creada_en.desc())
+        .all()
+    ]
+
+
+@router.post(
+    "/api/cursos/{curso_id}/equipo/invitaciones/{invitacion_id}/reenviar",
+    response_model=InvitacionSalida,
+    dependencies=[Depends(exigir_csrf)],
+)
+def reenviar_invitacion(
+    curso_id: uuid.UUID,
+    invitacion_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
+    settings: Settings = Depends(obtener_configuracion),
+    _membresia: MembresiaCurso = Depends(requiere(Permiso.EQUIPO_ADMINISTRAR)),
+) -> InvitacionSalida:
+    i = bd.query(InvitacionEquipo).filter_by(id=invitacion_id, curso_id=curso_id).one_or_none()
+    if i is None:
+        raise HTTPException(status_code=404)
+    if i.estado != "PENDIENTE":
+        raise HTTPException(status_code=409, detail="Esta invitación ya fue aceptada o revocada.")
+    i.estado = "REVOCADA"
+    bd.flush()
+    _validar_cuotas_invitacion(bd, curso_id, actual[0].id)
+    try:
+        creada = cursos_repo.reenviar_invitacion(bd, i, actor=actual[0])
+    except cursos_repo.LimiteDeReenviosSuperado:
+        raise HTTPException(
+            status_code=409,
+            detail="Alcanzaste los tres reenvíos permitidos para esta dirección y curso.",
+        ) from None
+    invitaciones_correo.cancelar(bd, i)
+    invitaciones_correo.encolar(bd, creada, settings)
+    bitacora_repo.registrar(
+        bd,
+        accion="INVITACION_REENVIADA",
+        entidad="invitacion_equipo",
+        entidad_id=str(creada.invitacion.id),
+        actor_usuario_id=actual[0].id,
+        curso_id=curso_id,
+    )
+    return _salida_invitacion(bd, creada.invitacion, settings)
 
 
 @router.post(
@@ -216,10 +347,13 @@ def listar_equipo(
 def crear_invitacion(
     curso_id: uuid.UUID,
     datos: InvitacionEntrada,
+    response: Response,
     actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
     bd: Session = Depends(obtener_sesion_bd),
     _membresia: MembresiaCurso = Depends(requiere(Permiso.EQUIPO_ADMINISTRAR)),
-) -> InvitacionEquipo:
+    settings: Settings = Depends(obtener_configuracion),
+) -> InvitacionSalida:
+    response.headers["Cache-Control"] = "no-store"
     usuario, _ = actual
     permisos = _permisos_desde_lista(datos.permisos)
     _validar_permisos_de_rol(datos.rol, permisos)
@@ -241,9 +375,13 @@ def crear_invitacion(
     if pendiente is not None:
         raise HTTPException(
             status_code=409,
-            detail="ya hay una invitacion pendiente para esa direccion en este curso",
+            detail=(
+                "Ya existe una invitación para esta dirección. "
+                "Usa Reenviar en la lista de invitaciones."
+            ),
         )
 
+    _validar_cuotas_invitacion(bd, curso_id, usuario.id)
     creada = cursos_repo.crear_invitacion(
         bd,
         curso_id=curso_id,
@@ -262,11 +400,8 @@ def crear_invitacion(
         actor_usuario_id=usuario.id,
         curso_id=curso_id,
     )
-    # TODO(Etapa P2 - correo): encolar el envio real por `mensaje_saliente` /
-    # despachar_outbox (S2.5.3 paso 6) cuando exista el adaptador de correo
-    # (S14.12). Por ahora la invitacion queda creada; el enlace se comparte
-    # copiandolo desde la pantalla (S2.5.6 "Copiar el enlace").
-    return creada.invitacion
+    invitaciones_correo.encolar(bd, creada, settings)
+    return _salida_invitacion(bd, creada.invitacion, settings)
 
 
 @router.delete(
@@ -288,6 +423,9 @@ def revocar_invitacion(
     )
     if invitacion is None:
         raise HTTPException(status_code=404)
+    if invitacion.estado != "PENDIENTE":
+        raise HTTPException(status_code=409, detail="Solo puedes revocar una invitación pendiente.")
+    invitaciones_correo.cancelar(bd, invitacion)
     invitacion.estado = "REVOCADA"
     invitacion.revocada_en = ahora_utc()
     invitacion.revocada_por = usuario.id
@@ -301,43 +439,6 @@ def revocar_invitacion(
         curso_id=curso_id,
     )
     return {"ok": True}
-
-
-@router.post(
-    "/api/cursos/{curso_id}/equipo/invitaciones/{invitacion_id}/reenviar",
-    response_model=InvitacionSalida,
-    dependencies=[Depends(exigir_csrf)],
-)
-def reenviar_invitacion(
-    curso_id: uuid.UUID,
-    invitacion_id: uuid.UUID,
-    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
-    bd: Session = Depends(obtener_sesion_bd),
-    _membresia: MembresiaCurso = Depends(requiere(Permiso.EQUIPO_ADMINISTRAR)),
-) -> InvitacionEquipo:
-    usuario, _ = actual
-    anterior = (
-        bd.query(InvitacionEquipo)
-        .filter(InvitacionEquipo.id == invitacion_id, InvitacionEquipo.curso_id == curso_id)
-        .one_or_none()
-    )
-    if anterior is None:
-        raise HTTPException(status_code=404)
-    try:
-        creada = cursos_repo.reenviar_invitacion(bd, anterior, actor=usuario)
-    except cursos_repo.LimiteDeReenviosSuperado:
-        raise HTTPException(
-            status_code=409, detail="maximo tres reenvios por direccion y curso"
-        ) from None
-    bitacora_repo.registrar(
-        bd,
-        accion="INVITACION_REENVIADA",
-        entidad="invitacion_equipo",
-        entidad_id=str(creada.invitacion.id),
-        actor_usuario_id=usuario.id,
-        curso_id=curso_id,
-    )
-    return creada.invitacion
 
 
 # --------------------------------------------------------------------------
@@ -482,14 +583,8 @@ def retirar_miembro(
         actor_usuario_id=usuario.id,
         curso_id=curso_id,
     )
-    trabajos_repo.encolar(
-        bd,
-        tipo="revocar_acceso_docente",
-        clave_idempotencia=f"revocar:{membresia_id}",
-        max_intentos=4,
-        curso_id=curso_id,
-        payload={"membresia_id": str(membresia_id)},
-    )
+    cuenta_repo.retirar_credenciales(bd, objetivo)
+    acceso_docente_repo.encolar_sincronizacion(bd, objetivo, revocar=True)
     return {"ok": True}
 
 
@@ -511,7 +606,11 @@ def reincorporar_miembro(
     if objetivo.rol == RolMembresia.AYUDANTE.value:
         _validar_permisos_de_rol(RolMembresia.AYUDANTE, permisos)
 
-    cursos_repo.reincorporar_membresia(bd, objetivo, permisos=permisos)
+    try:
+        cursos_repo.reincorporar_membresia(bd, objetivo, permisos=permisos)
+    except cursos_repo.InvitacionNoAceptable as exc:
+        raise HTTPException(status_code=409, detail=exc.motivo) from None
+    acceso_docente_repo.encolar_sincronizacion(bd, objetivo)
     bitacora_repo.registrar(
         bd,
         accion="MEMBRESIA_REINCORPORADA",
@@ -520,6 +619,25 @@ def reincorporar_miembro(
         actor_usuario_id=usuario.id,
         curso_id=curso_id,
     )
+    return {"ok": True}
+
+
+@router.post(
+    "/api/cursos/{curso_id}/equipo/{membresia_id}/github/reintentar",
+    dependencies=[Depends(exigir_csrf)],
+)
+def reintentar_acceso_github(
+    curso_id: uuid.UUID,
+    membresia_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    _membresia: MembresiaCurso = Depends(requiere(Permiso.EQUIPO_ADMINISTRAR)),
+) -> dict[str, bool]:
+    objetivo = _obtener_membresia_o_404(bd, curso_id=curso_id, membresia_id=membresia_id)
+    if objetivo.estado != "ACTIVA":
+        raise HTTPException(
+            status_code=409, detail="La persona ya no forma parte del equipo activo."
+        )
+    acceso_docente_repo.encolar_sincronizacion(bd, objetivo)
     return {"ok": True}
 
 

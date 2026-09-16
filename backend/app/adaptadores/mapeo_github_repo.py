@@ -17,6 +17,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adaptadores.base import ahora_utc
@@ -40,6 +41,7 @@ from app.dominio.mapeo_github import (
     resultado_recibido,
 )
 from app.dominio.vinculacion_github import CuentaUsuarioInfo, es_cuenta_de_organizacion
+from app.infraestructura.cerrojos import bloquear_equipo
 
 
 def crear_mapeo_sin_dato(
@@ -130,7 +132,12 @@ def construir_contexto_elegibilidad(
             MembresiaCurso.estado == EstadoMembresia.ACTIVA.value,
             Usuario.github_login_declarado.is_not(None),
         )
-        .filter(Usuario.github_login_declarado.ilike(cuenta.login))
+        .filter(
+            or_(
+                Usuario.cuenta_github_id == cuenta.github_user_id,
+                Usuario.github_login_declarado.ilike(cuenta.login),
+            )
+        )
         .first()
         is not None
     )
@@ -263,6 +270,7 @@ def procesar_candidato(
         )
         return ResultadoProcesarCandidato(mapeo=mapeo, texto_no_resuelto=texto_crudo)
 
+    bloquear_equipo(bd)
     existe_usuario = cliente_github.existe_como_usuario(login)
     existe_org = cliente_github.existe_como_organizacion(login)
     es_org = es_cuenta_de_organizacion(existe_como_organizacion=existe_org)

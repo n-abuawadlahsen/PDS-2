@@ -36,3 +36,7 @@ backend/.doble_registro_github.json
 .claude/
 .workflow/
 PARA-EL-EQUIPO/
+
+# Navegador: resultados locales de pruebas frontend
+frontend/test-results/
+frontend/playwright-report/

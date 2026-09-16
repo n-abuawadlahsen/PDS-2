@@ -1,117 +1,278 @@
-import { useEffect, useState } from "react";
-import { apiFetch, obtenerPerfil, type Perfil as PerfilTipo } from "../lib/api";
-
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { apiFetch, type Perfil as PerfilTipo } from "../lib/api";
+import { comprobar } from "../lib/errores";
+import { useSesion } from "../components/Layout";
+import {
+  Apariencia,
+  Aviso,
+  Cabecera,
+  Cargando,
+  ErrorCarga,
+  Mensajes,
+  useConfirmar,
+} from "../components/ui";
+import { useConsulta, useOperacion } from "../hooks/useConsulta";
+import { fechaLegible } from "../lib/textosTarea";
 interface FilaSesion {
   id: number;
   agente: string | null;
   creada_en: string;
   es_la_actual: boolean;
 }
-
-/**
- * `/perfil`, recorte de Etapa P1 (SPEC 02 S2.10): identidad, sesiones y
- * cerrar cuenta. El resto (cuenta de GitHub, identidades de Canvas, enlaces
- * de baja) llega con las etapas que crean esas tablas -- ver README de la
- * carpeta backend/app/api/rutas/perfil.py.
- */
 export function PerfilPagina() {
-  const [perfil, setPerfil] = useState<PerfilTipo | null>(null);
-  const [nombre, setNombre] = useState("");
-  const [sesiones, setSesiones] = useState<FilaSesion[]>([]);
-  const [mensaje, setMensaje] = useState<string | null>(null);
-  const [cursosBloqueantes, setCursosBloqueantes] = useState<unknown[] | null>(null);
-
-  async function cargar() {
-    const datos = await obtenerPerfil();
-    setPerfil(datos);
-    if (datos) setNombre(datos.nombre);
-    const respuestaSesiones = await apiFetch("/api/perfil/sesiones");
-    if (respuestaSesiones.ok) setSesiones(await respuestaSesiones.json());
-  }
-
-  useEffect(() => {
-    cargar();
-  }, []);
-
-  async function guardarNombre(evento: React.FormEvent) {
-    evento.preventDefault();
-    const respuesta = await apiFetch("/api/perfil", {
-      method: "PATCH",
-      body: JSON.stringify({ nombre }),
+  const sesion = useSesion();
+  const [perfil, setPerfil] = useState(sesion.perfil);
+  const [nombre, setNombre] = useState(perfil.nombre);
+  const [login, setLogin] = useState(perfil.github_login_declarado ?? "");
+  const [consiento, setConsiento] = useState(false);
+  const [bloqueantes, setBloqueantes] = useState<
+    { id: string; nombre: string }[]
+  >([]);
+  const op = useOperacion();
+  const confirmar = useConfirmar();
+  const sesiones = useConsulta("sesiones", async (signal) => {
+    const r = await apiFetch("/api/perfil/sesiones", { signal });
+    await comprobar(r);
+    return r.json() as Promise<FilaSesion[]>;
+  });
+  async function guardar(path: string, method: string, body?: object) {
+    const r = await apiFetch(path, {
+      method,
+      body: body ? JSON.stringify(body) : undefined,
     });
-    if (respuesta.ok) {
-      setMensaje("Nombre actualizado.");
-      setPerfil(await respuesta.json());
-    } else {
-      setMensaje("No se pudo actualizar el nombre.");
-    }
+    await comprobar(r);
+    const p = (await r.json()) as PerfilTipo;
+    setPerfil(p);
+    sesion.recargar();
   }
-
-  async function cerrarOtrasSesiones() {
-    const respuesta = await apiFetch("/api/perfil/sesiones", { method: "DELETE" });
-    if (respuesta.ok) {
-      setMensaje("Se cerraron las demás sesiones.");
-      cargar();
-    }
-  }
-
   async function cerrarCuenta() {
-    if (!window.confirm("¿Cerrar tu cuenta? No se puede deshacer desde aquí.")) return;
-    const respuesta = await apiFetch("/api/perfil", { method: "DELETE" });
-    if (respuesta.status === 409) {
-      const cuerpo = await respuesta.json();
-      setCursosBloqueantes(cuerpo.detail?.cursos ?? []);
-      return;
-    }
-    if (respuesta.ok) {
-      window.location.href = "/acceso";
-    }
+    await op.ejecutar(async () => {
+      const previa = await apiFetch("/api/perfil/cierre");
+      await comprobar(previa);
+      const datos = (await previa.json()) as {
+        cursos: { curso_id: string; nombre: string }[];
+      };
+      const cursos = datos.cursos.map((c) => ({
+        id: c.curso_id,
+        nombre: c.nombre,
+      }));
+      setBloqueantes(cursos);
+      if (cursos.length) return;
+      if (
+        !(await confirmar({
+          titulo: "Cerrar mi cuenta",
+          descripcion: `Se cerrará la cuenta ${perfil.email} y todas sus sesiones. No podrás volver a iniciar sesión con ella.`,
+          accion: "Cerrar mi cuenta",
+          peligro: true,
+          escribir: "CERRAR",
+        }))
+      )
+        return;
+      const r = await apiFetch("/api/perfil", { method: "DELETE" });
+      if (r.status === 409) {
+        const rechazo = (await r.clone().json()) as {
+          detail?: { cursos?: { curso_id: string; nombre: string }[] };
+        };
+        setBloqueantes(
+          (rechazo.detail?.cursos ?? []).map((c) => ({
+            id: c.curso_id,
+            nombre: c.nombre,
+          })),
+        );
+      }
+      await comprobar(r);
+      window.location.assign("/acceso");
+    });
   }
-
-  if (!perfil) return <p>Cargando...</p>;
-
   return (
-    <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Mi perfil</h1>
-      {mensaje && <p role="status">{mensaje}</p>}
-
-      <section>
-        <h2>Identidad</h2>
-        <form onSubmit={guardarNombre}>
-          <label>
-            Nombre
-            <input value={nombre} onChange={(e) => setNombre(e.target.value)} />
-          </label>
-          <button type="submit">Guardar</button>
-        </form>
-        <p>
-          Correo <code>{perfil.email}</code> (no editable: es la identidad de tu cuenta de Google).
-        </p>
-      </section>
-
-      <section>
-        <h2>Mis sesiones</h2>
-        <ul>
-          {sesiones.map((s) => (
-            <li key={s.id}>
-              {s.agente ?? "agente desconocido"} — {new Date(s.creada_en).toLocaleString("es-CL")}
-              {s.es_la_actual && " (esta sesión)"}
-            </li>
-          ))}
-        </ul>
-        <button onClick={cerrarOtrasSesiones}>Cerrar las demás sesiones</button>
-      </section>
-
-      <section>
-        <h2>Cerrar mi cuenta</h2>
-        {cursosBloqueantes && cursosBloqueantes.length > 0 && (
-          <p role="alert">
-            No podés cerrar la cuenta: sos la única profesora activa de {cursosBloqueantes.length}{" "}
-            curso(s). Promové a otro profesor o archivá el curso primero.
+    <>
+      <Cabecera
+        titulo="Mi perfil"
+        descripcion="Tu identidad, cuenta de GitHub y preferencias de este navegador."
+      />
+      <Mensajes {...op} />
+      <div className="stack">
+        <section className="panel">
+          <h2>Identidad</h2>
+          <form
+            className="form-stack"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void op.ejecutar(
+                () => guardar("/api/perfil", "PATCH", { nombre }),
+                "Nombre actualizado.",
+              );
+            }}
+          >
+            <label>
+              Nombre
+              <input
+                required
+                maxLength={200}
+                value={nombre}
+                onChange={(e) => setNombre(e.target.value)}
+              />
+            </label>
+            <div>
+              <span className="muted">Correo de Google</span>
+              <p>{perfil.email}</p>
+              <p className="help">
+                El correo identifica tu cuenta y no se edita aquí.
+              </p>
+            </div>
+            <div>
+              <button className="primary" disabled={op.ocupado}>
+                Guardar nombre
+              </button>
+            </div>
+          </form>
+        </section>
+        <section className="panel">
+          <h2>Mi cuenta de GitHub</h2>
+          <p>
+            Declara tu cuenta personal para el acceso del equipo docente a los
+            repositorios. La aplicación comprobará que exista.
           </p>
-        )}
-        <button onClick={cerrarCuenta}>Cerrar mi cuenta</button>
-      </section>
-    </main>
+          <p>
+            Cuenta registrada:{" "}
+            <strong>
+              {perfil.github_login_declarado
+                ? `@${perfil.github_login_declarado}`
+                : "Sin cuenta declarada"}
+            </strong>
+          </p>
+          <form
+            className="form-stack"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void op.ejecutar(async () => {
+                await guardar("/api/perfil/cuenta-github", "PUT", {
+                  login: login.trim(),
+                  consiento,
+                });
+                setConsiento(false);
+              }, "Cuenta de GitHub registrada. La actualización de accesos se procesará en segundo plano.");
+            }}
+          >
+            <label>
+              Nombre de usuario de GitHub
+              <input
+                required
+                value={login}
+                onChange={(e) => setLogin(e.target.value)}
+                autoComplete="off"
+                placeholder="mi-usuario"
+              />
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={consiento}
+                onChange={(e) => setConsiento(e.target.checked)}
+              />
+              Declaro mi propia cuenta y doy consentimiento para el acceso
+              docente de lectura al código de los repositorios del curso.
+            </label>
+            <div className="actions">
+              <button
+                className="primary"
+                disabled={op.ocupado || !consiento || !login.trim()}
+              >
+                Guardar cuenta de GitHub
+              </button>
+              {perfil.github_login_declarado && (
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={op.ocupado}
+                  onClick={async () => {
+                    if (
+                      await confirmar({
+                        titulo: "Desvincular mi cuenta de GitHub",
+                        descripcion:
+                          "Se retirará la cuenta declarada de tu perfil. Esto no elimina repositorios de GitHub.",
+                        accion: "Desvincular",
+                        peligro: true,
+                      })
+                    )
+                      void op.ejecutar(async () => {
+                        await guardar("/api/perfil/cuenta-github", "DELETE");
+                        setLogin("");
+                      }, "Cuenta desvinculada del perfil.");
+                  }}
+                >
+                  Desvincular
+                </button>
+              )}
+            </div>
+          </form>
+        </section>
+        <section className="panel">
+          <h2>Apariencia</h2>
+          <Apariencia />
+        </section>
+        <section className="panel">
+          <h2>Sesiones abiertas</h2>
+          {sesiones.error && (
+            <ErrorCarga error={sesiones.error} reintentar={sesiones.recargar} />
+          )}
+          {!sesiones.datos ? (
+            !sesiones.error && <Cargando />
+          ) : (
+            <ul className="list-clean">
+              {sesiones.datos.map((s) => (
+                <li key={s.id}>
+                  <strong>
+                    {s.es_la_actual ? "Esta sesión" : "Otra sesión"}
+                  </strong>
+                  <p className="help">{s.agente ?? "Navegador no informado"}</p>
+                  <p className="help">Desde {fechaLegible(s.creada_en)}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            disabled={op.ocupado}
+            onClick={() =>
+              void op.ejecutar(async () => {
+                await comprobar(
+                  await apiFetch("/api/perfil/sesiones", { method: "DELETE" }),
+                );
+                sesiones.recargar();
+              }, "Las otras sesiones se cerraron. Esta sesión sigue activa.")
+            }
+          >
+            Cerrar las demás sesiones
+          </button>
+        </section>
+        <section className="panel danger-zone">
+          <h2>Cerrar mi cuenta</h2>
+          <p>
+            Esta acción cierra todas tus sesiones e impide volver a entrar con
+            esta cuenta.
+          </p>
+          {bloqueantes.length > 0 && (
+            <Aviso tipo="warning">
+              Primero incorpora a otro profesor activo en estos cursos:
+              <ul>
+                {bloqueantes.map((c) => (
+                  <li key={c.id}>
+                    <Link to={`/cursos/${c.id}/equipo`}>{c.nombre}</Link>
+                  </li>
+                ))}
+              </ul>
+            </Aviso>
+          )}
+          <button
+            className="danger"
+            disabled={op.ocupado}
+            onClick={cerrarCuenta}
+          >
+            Cerrar mi cuenta
+          </button>
+        </section>
+      </div>
+    </>
   );
 }

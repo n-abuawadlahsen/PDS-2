@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     email_from_nombre: str = Field(alias="EMAIL_FROM_NOMBRE")
     email_reply_to: str = Field(alias="EMAIL_REPLY_TO")
     email_dominio_verificado: str = Field(alias="EMAIL_DOMINIO_VERIFICADO")
+    email_proveedor: Literal["sin_configurar", "resend"] = Field(
+        default="sin_configurar", alias="EMAIL_PROVEEDOR"
+    )
     vite_api_base_url: str = Field(alias="VITE_API_BASE_URL")
     # Mecanismo propio para que la cookie csrf_token (no HttpOnly) sea legible
     # por JS en app.<dominio> aunque la emita api.<dominio> (S2.2.6): en

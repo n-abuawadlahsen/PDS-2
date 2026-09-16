@@ -127,6 +127,7 @@ def main() -> None:
         # El despacho del outbox es global: existe aunque ningun curso haya
         # activado todavia una tarea (S14.7.4).
         programacion_repo.asegurar_periodicos_globales(sesion)
+        programacion_repo.actualizar_cadencia_accesos(sesion)
         sesion.commit()
     tomado_por = _id_trabajador()
     _logger.info("ejecutor.arrancando", tomado_por=tomado_por)

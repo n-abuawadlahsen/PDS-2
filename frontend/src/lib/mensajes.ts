@@ -19,17 +19,20 @@ export const MOTIVOS_RECHAZO: Record<string, DescripcionMotivo> = {
   },
   HD_PRESENTE: {
     titulo: "Cuenta de dominio gestionado",
-    texto: "Esa cuenta de Google pertenece a un dominio gestionado. Necesitas una cuenta personal de gmail.com.",
+    texto:
+      "Esa cuenta de Google pertenece a un dominio gestionado. Necesitas una cuenta personal de gmail.com.",
     accion: "Probar con otra cuenta",
   },
   CORREO_NO_VERIFICADO: {
     titulo: "Correo sin verificar",
-    texto: "Google indica que ese correo aún no está verificado. Verifícalo en tu cuenta de Google y vuelve a intentarlo.",
+    texto:
+      "Google indica que ese correo aún no está verificado. Verifícalo en tu cuenta de Google y vuelve a intentarlo.",
     accion: "Reintentar",
   },
   ACCESO_CANCELADO: {
     titulo: "Acceso cancelado",
-    texto: "No autorizaste el acceso. Sin ese permiso no podemos identificarte.",
+    texto:
+      "No autorizaste el acceso. Sin ese permiso no podemos identificarte.",
     accion: "Reintentar",
   },
   STATE_INVALIDO: {
@@ -39,7 +42,8 @@ export const MOTIVOS_RECHAZO: Record<string, DescripcionMotivo> = {
   },
   CUENTA_CERRADA: {
     titulo: "Cuenta cerrada",
-    texto: "Esta cuenta fue cerrada por su titular y no puede volver a iniciar sesión.",
+    texto:
+      "Esta cuenta fue cerrada por su titular y no puede volver a iniciar sesión.",
     accion: "Contactar al equipo",
   },
   FALLO_PROVEEDOR: {
@@ -55,7 +59,9 @@ export const MOTIVOS_RECHAZO: Record<string, DescripcionMotivo> = {
   },
 };
 
-export function descripcionDeMotivo(motivo: string | null): DescripcionMotivo | null {
+export function descripcionDeMotivo(
+  motivo: string | null,
+): DescripcionMotivo | null {
   if (!motivo) return null;
   return MOTIVOS_RECHAZO[motivo] ?? null;
 }

@@ -1,83 +1,81 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { confirmarCallbackGithub, type CallbackInstalacionResultado } from "../lib/api";
-
-/**
- * URL de retorno unica de la GitHub App (S4.6.1): GitHub no sabe de que curso
- * se trata, por eso el `state` firmado es lo unico que resuelve el curso, y
- * esta pantalla no vive bajo `/cursos/:id`.
- */
+import {
+  confirmarCallbackGithub,
+  type CallbackInstalacionResultado,
+} from "../lib/api";
+import { detalleLegible, mensajeError } from "../lib/errores";
+import { Aviso, Cargando, ErrorCarga } from "../components/ui";
 export function GithubRetorno() {
   const [params] = useSearchParams();
-  const [resultado, setResultado] = useState<CallbackInstalacionResultado | null>(null);
+  const [resultado, setResultado] =
+    useState<CallbackInstalacionResultado | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // El `jti` del state es de un solo uso (A-058): un segundo canje del mismo
-  // state (p. ej. el doble efecto de StrictMode en desarrollo) falla igual
-  // que uno caducado. Esta ref evita llamar al backend dos veces.
-  const yaCanjeado = useRef(false);
-
+  const canje = useRef<ReturnType<typeof confirmarCallbackGithub> | null>(null);
   useEffect(() => {
-    if (yaCanjeado.current) return;
-    yaCanjeado.current = true;
-
+    let vigente = true;
     const state = params.get("state");
+    const installationId = params.get("installation_id");
     if (!state) {
-      setError("GitHub no envió ningún `state`. Volvé a intentar la instalación desde el curso.");
+      setError(
+        "GitHub no entregó la información de retorno. Vuelve a la configuración del curso para iniciar la instalación.",
+      );
       return;
     }
-    const installationId = params.get("installation_id");
-    confirmarCallbackGithub({
+    // Conserva la misma promesa durante el doble efecto de StrictMode. Nunca canjea dos veces.
+    canje.current ??= confirmarCallbackGithub({
       state,
       installation_id: installationId ? Number(installationId) : undefined,
       setup_action: params.get("setup_action") ?? undefined,
-    }).then(({ ok, cuerpo }) => {
-      if (ok) {
-        setResultado(cuerpo as CallbackInstalacionResultado);
-      } else {
-        const detalle = (cuerpo as { detail?: unknown }).detail;
-        setError(typeof detalle === "string" ? detalle : JSON.stringify(detalle));
-      }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
+    canje.current
+      .then((r) => {
+        if (!vigente) return;
+        if (r.ok) setResultado(r.cuerpo as CallbackInstalacionResultado);
+        else
+          setError(
+            detalleLegible(r.cuerpo) ||
+              "No pudimos completar la vinculación con GitHub.",
+          );
+      })
+      .catch((e) => {
+        if (vigente) setError(mensajeError(e));
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [params]);
+  const textos: Record<CallbackInstalacionResultado["resultado"], string> = {
+    VINCULADO: `La organización ${resultado?.org_login ?? ""} quedó vinculada. Continúa verificando las conexiones del curso.`,
+    SOLICITUD_PENDIENTE:
+      "La solicitud de instalación está pendiente de aprobación por un propietario de la organización. Revisa la configuración después de que la apruebe.",
+    SIN_INSTALLATION_ID:
+      "GitHub no devolvió una instalación. Si cancelaste el proceso, puedes iniciarlo nuevamente desde el curso.",
+    STATE_INVALIDO:
+      "El enlace de retorno venció o ya se utilizó. Revisa las instalaciones sin curso desde la configuración.",
+  };
   return (
-    <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Volviendo de GitHub…</h1>
-      {error && <p role="alert">{error}</p>}
-      {resultado?.resultado === "VINCULADO" && (
-        <p role="status">
-          Organización <strong>{resultado.org_login}</strong> vinculada. Equipo docente:{" "}
-          <code>{resultado.equipo_docentes_slug}</code>.
-        </p>
+    <section className="panel">
+      <h1>Conexión con GitHub</h1>
+      {error && <ErrorCarga error={error} />}
+      {!error && !resultado && <Cargando texto="Comprobando la instalación…" />}
+      {resultado && (
+        <Aviso
+          tipo={resultado.resultado === "VINCULADO" ? "success" : "warning"}
+        >
+          {textos[resultado.resultado]}
+        </Aviso>
       )}
-      {resultado?.resultado === "SOLICITUD_PENDIENTE" && (
-        <p role="status">
-          Pediste instalar la aplicación. Un owner de esa organización tiene que aprobarla. Te
-          avisaremos en cuanto ocurra; podés cerrar esta página.
-        </p>
-      )}
-      {resultado?.resultado === "SIN_INSTALLATION_ID" && (
-        <p role="status">
-          GitHub no nos devolvió ninguna instalación. Si cancelaste, podés volver a intentarlo.
-        </p>
-      )}
-      {resultado?.resultado === "STATE_INVALIDO" && (
-        <p role="alert">
-          El enlace de retorno venció o no es válido. Si instalaste la App fuera del asistente,
-          buscala en el bloque "Instalaciones sin curso" del paso 3.
-        </p>
-      )}
-      {resultado?.curso_id && (
-        <p>
-          <Link to={`/cursos/${resultado.curso_id}/vinculacion`}>Volver al asistente de vinculación</Link>
-        </p>
-      )}
-      {!resultado?.curso_id && (
-        <p>
-          <Link to="/cursos">Volver a mis cursos</Link>
-        </p>
-      )}
-    </main>
+      <Link
+        className="button primary"
+        to={
+          resultado?.curso_id
+            ? `/cursos/${resultado.curso_id}/vinculacion`
+            : "/cursos"
+        }
+      >
+        {resultado?.curso_id ? "Volver a configuración" : "Volver a mis cursos"}
+      </Link>
+    </section>
   );
 }
