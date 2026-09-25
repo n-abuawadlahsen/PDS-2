@@ -44,14 +44,22 @@ def test_ca_8_2_01_modalidad_incompatible_se_rechaza():
     assert exc.value.motivo == MotivoRechazoTarea.MODALIDAD_INCOMPATIBLE
 
 
-def test_modalidad_grupal_es_capa_3_en_la_parcial():
-    with pytest.raises(RechazoTarea) as exc:
+def test_modalidad_grupal_disponible_tras_retirar_su_bandera():
+    # F1: `tarea_modalidad_grupal` esta retirada; ya no es capa 3 en la parcial.
+    assert (
         validar_modalidad_para_vincular(
             modalidad_tarea=None, es_grupal_canvas=True, perfil_alcance="parcial"
         )
-    assert exc.value.motivo == MotivoRechazoTarea.MODALIDAD_GRUPAL_NO_DISPONIBLE
-    assert "23 de septiembre" in exc.value.detalle
-    assert "próximamente" not in exc.value.detalle.lower()
+        == ModalidadTarea.GRUPAL
+    )
+
+
+def test_motivo_capa_3_escribe_la_fecha_y_nunca_proximamente():
+    from app.dominio.alcance import motivo_capa_3
+
+    texto = motivo_capa_3("correccion", "Corregir")
+    assert "5 de octubre" in texto
+    assert "próximamente" not in texto.lower()
 
 
 def test_modalidad_individual_se_deriva_de_canvas():

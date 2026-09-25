@@ -4,8 +4,14 @@ A-097, A-163, A-164, A-202, A-211, A-212; Etapa P8).
 Orquesta la maquina 2 (repositorio) y la maquina 3 (acceso del estudiante) con
 I/O real contra GitHub. Las decisiones viven en `app/dominio/aprovisionamiento.py`.
 
-Simplificaciones de esta etapa, cada una con su TODO donde toca:
-- Solo tareas `INDIVIDUAL` (la grupal es la bandera `tarea_modalidad_grupal`).
+Etapa F1 activa la rama `GRUPAL`: el sujeto es el grupo, el repositorio se
+crea con un solo integrante con mapeo vigente y los demas se incorporan
+despues; la salida de un integrante solo propone revocar (A-212).
+
+Simplificaciones, cada una con su TODO donde toca:
+- La decision humana sobre una revocacion propuesta (programarla, mantener el
+  acceso) y su ejecucion no estan: la fila queda en `REVOCACION_PROPUESTA` y
+  GitHub no se toca, que es lo unico que A-212 exige que ocurra solo.
 - Sin receptor de webhooks: la aceptacion de una invitacion la detecta la
   reconciliacion (`GET collaborators/{login}`), no el webhook `member`.
 - Un repositorio sin base se crea con `auto_init` (+ `.gitignore` si la tarea lo
@@ -36,7 +42,12 @@ from app.adaptadores.modelos_aprovisionamiento import AccesoRepositorio, Reposit
 from app.adaptadores.modelos_curso import Curso
 from app.adaptadores.modelos_github import AccesoDocenteRepositorio, EquipoGithubCurso
 from app.adaptadores.modelos_mapeo import CuentaGithub, MapeoGithub
-from app.adaptadores.modelos_padron import Estudiante
+from app.adaptadores.modelos_padron import (
+    ConjuntoGrupos,
+    Estudiante,
+    Grupo,
+    PertenenciaGrupo,
+)
 from app.adaptadores.modelos_tarea import (
     Entrega,
     RepositorioBase,
@@ -52,17 +63,22 @@ from app.dominio.aprovisionamiento import (
     SONDEOS_CONTENIDO_SEGUNDOS,
     clasificar_rechazo_github,
     destino_al_reintentar,
+    es_integrante_elegible,
     espera_reintento,
     estado_acceso_tras_invitar,
+    estado_acceso_tras_salir_del_grupo,
     evaluar_predicado_operativo,
     listo_para_reintentar,
     minutos_restantes,
+    motivo_espera_grupal,
     motivo_espera_individual,
+    motivo_no_es_sujeto_grupal,
     motivo_no_es_sujeto_individual,
 )
 from app.dominio.estados import (
     EstadoAccesoDocente,
     EstadoAccesoRepositorio,
+    EstadoGrupo,
     EstadoMapeoGithub,
     EstadoRepositorio,
     EstadoRepositorioBase,
@@ -70,9 +86,11 @@ from app.dominio.estados import (
     EstadoValidacionEntrega,
     FamiliaError,
     ModalidadTarea,
+    MotivoEsperandoInformacion,
     SubtipoErrorPermanente,
     TipoSujeto,
     ViaAccesoDocente,
+    WorkflowStatePertenenciaGrupo,
 )
 from app.dominio.nombres_repositorio import (
     SujetoNombre,
@@ -156,7 +174,6 @@ def materializar_sujetos(bd: Session, *, curso: Curso) -> int:
     Devuelve cuantos quedaron listos para crear. No llama a ningun proveedor."""
     ahora = ahora_utc()
     listos = 0
-    estudiantes = bd.query(Estudiante).filter(Estudiante.curso_id == curso.id).all()
     mapeos = _mapeos_vigentes(bd, curso.id)
     tareas = (
         bd.query(Tarea)
@@ -164,85 +181,309 @@ def materializar_sujetos(bd: Session, *, curso: Curso) -> int:
         .all()
     )
     for tarea in tareas:
-        if tarea.modalidad != ModalidadTarea.INDIVIDUAL.value:
-            continue  # TODO(etapa-F1): sujetos de grupo (A-164 paso 2, tarea grupal)
-        visibles = {
-            estudiante_id
-            for (estudiante_id,) in bd.query(VisibilidadEntrega.estudiante_id)
-            .join(Entrega, Entrega.id == VisibilidadEntrega.entrega_id)
-            .filter(
-                Entrega.tarea_id == tarea.id,
-                Entrega.estado_validacion == EstadoValidacionEntrega.VIGENTE.value,
-                VisibilidadEntrega.visible.is_(True),
+        visibles = visibles_de_tarea(bd, tarea.id)
+        if tarea.modalidad == ModalidadTarea.GRUPAL.value:
+            listos += _materializar_grupal(
+                bd, curso=curso, tarea=tarea, visibles=visibles, mapeos=mapeos, ahora=ahora
             )
-        }
-        sujetos = {
-            s.estudiante_id: s
-            for s in bd.query(Sujeto).filter(
-                Sujeto.tarea_id == tarea.id, Sujeto.tipo == TipoSujeto.ESTUDIANTE.value
+        else:
+            listos += _materializar_individual(
+                bd, curso=curso, tarea=tarea, visibles=visibles, mapeos=mapeos, ahora=ahora
             )
-        }
-        for estudiante in estudiantes:
-            motivo_baja = motivo_no_es_sujeto_individual(
-                estado_estudiante=estudiante.estado,
-                visible_en_alguna_entrega=estudiante.id in visibles,
-            )
-            sujeto = sujetos.get(estudiante.id)
-            if motivo_baja is not None:
-                if sujeto is not None and sujeto.activo:
-                    _desactivar_sujeto(bd, sujeto, motivo=motivo_baja.value, ahora=ahora)
-                continue
-            if sujeto is None:
-                sujeto = Sujeto(
-                    tarea_id=tarea.id,
-                    tipo=TipoSujeto.ESTUDIANTE.value,
-                    estudiante_id=estudiante.id,
-                    activo=True,
-                    creado_en=ahora,
-                )
-                bd.add(sujeto)
-                bd.flush()
-            elif not sujeto.activo:
-                _reactivar_sujeto(bd, sujeto, ahora=ahora)
-
-            repositorio = _repositorio_vivo(bd, sujeto.id)
-            if repositorio is None:
-                nombre = _nombre_del_sujeto(curso, tarea, estudiante)
-                repositorio = Repositorio(
-                    curso_id=curso.id,
-                    tarea_id=tarea.id,
-                    sujeto_id=sujeto.id,
-                    nombre=nombre,
-                    nombre_canonico=nombre,
-                    estado=EstadoRepositorio.ESPERANDO_INFORMACION.value,
-                    intentos=0,
-                    sondeos_contenido=0,
-                    creado_en=ahora,
-                    actualizado_en=ahora,
-                )
-                bd.add(repositorio)
-                bd.flush()
-            if repositorio.estado in (
-                EstadoRepositorio.ESPERANDO_INFORMACION.value,
-                EstadoRepositorio.LISTO_PARA_CREAR.value,
-            ):
-                mapeo = mapeos.get(estudiante.id)
-                motivo = motivo_espera_individual(
-                    estado_mapeo=mapeo.estado if mapeo is not None else None,
-                    estado_tarea=tarea.estado,
-                )
-                if motivo is None:
-                    repositorio.estado = EstadoRepositorio.LISTO_PARA_CREAR.value
-                    repositorio.motivo = None
-                    listos += 1
-                    encolar_aprovisionamiento(bd, repositorio)
-                else:
-                    repositorio.estado = EstadoRepositorio.ESPERANDO_INFORMACION.value
-                    repositorio.motivo = motivo.value
-                repositorio.actualizado_en = ahora
         bd.flush()
         fechas_repo.recalcular_fechas_tarea(bd, curso_id=curso.id, tarea_id=tarea.id)
     return listos
+
+
+def visibles_de_tarea(bd: Session, tarea_id: uuid.UUID) -> set[uuid.UUID]:
+    """Estudiantes visibles en al menos una entrega vigente de la tarea
+    (A-164: la union da repositorio)."""
+    return {
+        estudiante_id
+        for (estudiante_id,) in bd.query(VisibilidadEntrega.estudiante_id)
+        .join(Entrega, Entrega.id == VisibilidadEntrega.entrega_id)
+        .filter(
+            Entrega.tarea_id == tarea_id,
+            Entrega.estado_validacion.in_(ESTADOS_ENTREGA_OPERANTES),
+            VisibilidadEntrega.visible.is_(True),
+        )
+    }
+
+
+# `VINCULADA_TRAS_EL_CIERRE` funciona con normalidad para todo salvo la captura
+# automatica (S9.6.7): da visibilidad y repositorio igual que `VIGENTE`.
+ESTADOS_ENTREGA_OPERANTES = (
+    EstadoValidacionEntrega.VIGENTE.value,
+    EstadoValidacionEntrega.VINCULADA_TRAS_EL_CIERRE.value,
+)
+
+
+def _materializar_individual(
+    bd: Session,
+    *,
+    curso: Curso,
+    tarea: Tarea,
+    visibles: set[uuid.UUID],
+    mapeos: dict[uuid.UUID, MapeoGithub],
+    ahora: datetime,
+) -> int:
+    listos = 0
+    sujetos = {
+        s.estudiante_id: s
+        for s in bd.query(Sujeto).filter(
+            Sujeto.tarea_id == tarea.id, Sujeto.tipo == TipoSujeto.ESTUDIANTE.value
+        )
+    }
+    for estudiante in bd.query(Estudiante).filter(Estudiante.curso_id == curso.id):
+        motivo_baja = motivo_no_es_sujeto_individual(
+            estado_estudiante=estudiante.estado,
+            visible_en_alguna_entrega=estudiante.id in visibles,
+        )
+        sujeto = sujetos.get(estudiante.id)
+        if motivo_baja is not None:
+            if sujeto is not None and sujeto.activo:
+                _desactivar_sujeto(bd, sujeto, motivo=motivo_baja.value, ahora=ahora)
+            continue
+        if sujeto is None:
+            sujeto = Sujeto(
+                tarea_id=tarea.id,
+                tipo=TipoSujeto.ESTUDIANTE.value,
+                estudiante_id=estudiante.id,
+                activo=True,
+                creado_en=ahora,
+            )
+            bd.add(sujeto)
+            bd.flush()
+        elif not sujeto.activo:
+            _reactivar_sujeto(bd, sujeto, ahora=ahora)
+        mapeo = mapeos.get(estudiante.id)
+        motivo = motivo_espera_individual(
+            estado_mapeo=mapeo.estado if mapeo is not None else None,
+            estado_tarea=tarea.estado,
+        )
+        if _asegurar_repositorio_y_guarda(
+            bd,
+            curso=curso,
+            tarea=tarea,
+            sujeto=sujeto,
+            nombre=_nombre_del_sujeto(curso, tarea, estudiante),
+            motivo=motivo,
+            ahora=ahora,
+        ):
+            listos += 1
+    return listos
+
+
+def _materializar_grupal(
+    bd: Session,
+    *,
+    curso: Curso,
+    tarea: Tarea,
+    visibles: set[uuid.UUID],
+    mapeos: dict[uuid.UUID, MapeoGithub],
+    ahora: datetime,
+) -> int:
+    """A-164 paso 2, tarea grupal: un sujeto por grupo del conjunto de la tarea
+    con al menos un integrante `accepted` elegible. La guarda (A-093) pide un
+    solo integrante con mapeo `VIGENTE`."""
+    conjunto_id = _conjunto_de_tarea(bd, tarea)
+    if conjunto_id is None:
+        return 0  # sync_grupos aun no espejo el conjunto: el proximo ciclo lo reintenta
+    listos = 0
+    sujetos = {
+        s.grupo_id: s
+        for s in bd.query(Sujeto).filter(
+            Sujeto.tarea_id == tarea.id, Sujeto.tipo == TipoSujeto.GRUPO.value
+        )
+    }
+    en_dos_grupos = estudiantes_en_dos_grupos(bd, conjunto_id)
+    for grupo in bd.query(Grupo).filter(Grupo.conjunto_grupos_id == conjunto_id):
+        integrantes = integrantes_del_grupo(bd, grupo.id, visibles)
+        motivo_baja = motivo_no_es_sujeto_grupal(
+            grupo_activo=grupo.estado == EstadoGrupo.ACTIVO.value,
+            integrantes_elegibles=len(integrantes),
+        )
+        sujeto = sujetos.get(grupo.id)
+        if motivo_baja is not None:
+            if sujeto is not None and sujeto.activo:
+                _desactivar_sujeto(bd, sujeto, motivo=motivo_baja.value, ahora=ahora)
+            continue
+        if sujeto is None:
+            sujeto = Sujeto(
+                tarea_id=tarea.id,
+                tipo=TipoSujeto.GRUPO.value,
+                grupo_id=grupo.id,
+                activo=True,
+                creado_en=ahora,
+            )
+            bd.add(sujeto)
+            bd.flush()
+        elif not sujeto.activo:
+            _reactivar_sujeto(bd, sujeto, ahora=ahora)
+        motivo = motivo_espera_grupal(
+            estados_mapeo_integrantes=[
+                mapeos[i.id].estado if i.id in mapeos else None for i in integrantes
+            ],
+            hay_integrante_en_dos_grupos=any(i.id in en_dos_grupos for i in integrantes),
+            estado_tarea=tarea.estado,
+        )
+        if _asegurar_repositorio_y_guarda(
+            bd,
+            curso=curso,
+            tarea=tarea,
+            sujeto=sujeto,
+            nombre=_nombre_del_grupo(curso, tarea, grupo),
+            motivo=motivo,
+            ahora=ahora,
+        ):
+            listos += 1
+    return listos
+
+
+def _asegurar_repositorio_y_guarda(
+    bd: Session,
+    *,
+    curso: Curso,
+    tarea: Tarea,
+    sujeto: Sujeto,
+    nombre: str,
+    motivo: MotivoEsperandoInformacion | None,
+    ahora: datetime,
+) -> bool:
+    """Crea la fila de repositorio del sujeto si falta y aplica la guarda de
+    A-093. Devuelve `True` si quedo `LISTO_PARA_CREAR` (y encolado)."""
+    repositorio = _repositorio_vivo(bd, sujeto.id)
+    if repositorio is None:
+        repositorio = Repositorio(
+            curso_id=curso.id,
+            tarea_id=tarea.id,
+            sujeto_id=sujeto.id,
+            nombre=nombre,
+            nombre_canonico=nombre,
+            estado=EstadoRepositorio.ESPERANDO_INFORMACION.value,
+            intentos=0,
+            sondeos_contenido=0,
+            creado_en=ahora,
+            actualizado_en=ahora,
+        )
+        bd.add(repositorio)
+        bd.flush()
+    if repositorio.estado not in (
+        EstadoRepositorio.ESPERANDO_INFORMACION.value,
+        EstadoRepositorio.LISTO_PARA_CREAR.value,
+    ):
+        return False
+    repositorio.actualizado_en = ahora
+    if motivo is not None:
+        repositorio.estado = EstadoRepositorio.ESPERANDO_INFORMACION.value
+        repositorio.motivo = motivo.value
+        return False
+    repositorio.estado = EstadoRepositorio.LISTO_PARA_CREAR.value
+    repositorio.motivo = None
+    encolar_aprovisionamiento(bd, repositorio)
+    return True
+
+
+def _conjunto_de_tarea(bd: Session, tarea: Tarea) -> uuid.UUID | None:
+    """El conjunto de grupos de la tarea; si al crearla aun no estaba espejado,
+    se resuelve ahora desde el `group_category_id` de sus entregas y se fija."""
+    if tarea.conjunto_grupos_id is not None:
+        return tarea.conjunto_grupos_id
+    categoria = (
+        bd.query(Entrega.group_category_id_canvas)
+        .filter(Entrega.tarea_id == tarea.id, Entrega.group_category_id_canvas.isnot(None))
+        .order_by(Entrega.orden)
+        .first()
+    )
+    if categoria is None:
+        return None
+    conjunto = (
+        bd.query(ConjuntoGrupos)
+        .filter(
+            ConjuntoGrupos.curso_id == tarea.curso_id,
+            ConjuntoGrupos.canvas_group_category_id == categoria[0],
+        )
+        .one_or_none()
+    )
+    if conjunto is None:
+        return None
+    tarea.conjunto_grupos_id = conjunto.id
+    bd.flush()
+    return conjunto.id
+
+
+def integrantes_del_grupo(
+    bd: Session, grupo_id: uuid.UUID, visibles: set[uuid.UUID]
+) -> list[Estudiante]:
+    """A-048: cuenta como integrante quien esta `accepted` (nunca `invited` ni
+    `requested`) y ademas es elegible como sujeto (matricula y visibilidad)."""
+    filas = (
+        bd.query(Estudiante)
+        .join(PertenenciaGrupo, PertenenciaGrupo.estudiante_id == Estudiante.id)
+        .filter(
+            PertenenciaGrupo.grupo_id == grupo_id,
+            PertenenciaGrupo.activa.is_(True),
+            PertenenciaGrupo.workflow_state == WorkflowStatePertenenciaGrupo.ACCEPTED.value,
+        )
+        .order_by(Estudiante.nombre_ordenable, Estudiante.nombre)
+        .all()
+    )
+    return [
+        e
+        for e in filas
+        if es_integrante_elegible(
+            estado_estudiante=e.estado, visible_en_alguna_entrega=e.id in visibles
+        )
+    ]
+
+
+def estudiantes_en_dos_grupos(bd: Session, conjunto_id: uuid.UUID) -> set[uuid.UUID]:
+    """A-049 (S7.3.6): estudiantes `accepted` en mas de un grupo del mismo
+    conjunto. Se deriva de las pertenencias, no de la incidencia, para que el
+    grupo se libere en cuanto Canvas se corrige."""
+    conteo: dict[uuid.UUID, int] = {}
+    for (estudiante_id,) in (
+        bd.query(PertenenciaGrupo.estudiante_id)
+        .join(Grupo, Grupo.id == PertenenciaGrupo.grupo_id)
+        .filter(
+            Grupo.conjunto_grupos_id == conjunto_id,
+            Grupo.estado == EstadoGrupo.ACTIVO.value,
+            PertenenciaGrupo.activa.is_(True),
+            PertenenciaGrupo.workflow_state == WorkflowStatePertenenciaGrupo.ACCEPTED.value,
+        )
+    ):
+        conteo[estudiante_id] = conteo.get(estudiante_id, 0) + 1
+    return {e for e, n in conteo.items() if n > 1}
+
+
+def _hay_pendientes_en_canvas(bd: Session, grupo_id: uuid.UUID) -> bool:
+    """S8.6.2 condicion 2: alguien `invited`/`requested` en el grupo, visto en
+    el ultimo ciclo de `sync_grupos`."""
+    return (
+        bd.query(PertenenciaGrupo.id)
+        .filter(
+            PertenenciaGrupo.grupo_id == grupo_id,
+            PertenenciaGrupo.workflow_state.in_(
+                [
+                    WorkflowStatePertenenciaGrupo.INVITED.value,
+                    WorkflowStatePertenenciaGrupo.REQUESTED.value,
+                ]
+            ),
+            PertenenciaGrupo.ciclos_ausente == 0,
+        )
+        .first()
+        is not None
+    )
+
+
+def _nombre_del_grupo(curso: Curso, tarea: Tarea, grupo: Grupo) -> str:
+    return nombre_repositorio(
+        curso_slug=curso.slug,
+        tarea_slug=tarea.slug,
+        # `grupo.slug` ya lleva el `canvas_group_id` de sufijo (S7.2.1): la parte
+        # legible sale del nombre, porque el identificador ya va en `g<id>`.
+        sujeto=SujetoNombre(tipo="g", canvas_id=grupo.canvas_group_id, texto_legible=grupo.nombre),
+    )
 
 
 def _repositorio_vivo(bd: Session, sujeto_id: uuid.UUID) -> Repositorio | None:
@@ -290,12 +531,66 @@ def _reactivar_sujeto(bd: Session, sujeto: Sujeto, *, ahora: datetime) -> None:
 
 @dataclass(frozen=True)
 class _Contexto:
+    """`integrantes`: el estudiante de un sujeto individual, o los integrantes
+    `accepted` elegibles de un grupo (A-048). `marcador` es `e<id>`/`g<id>`."""
+
     curso: Curso
     tarea: Tarea
     sujeto: Sujeto
-    estudiante: Estudiante
+    integrantes: tuple[Estudiante, ...]
+    marcador: str
+    nombre_legible: str
+    grupo: Grupo | None
     org: str
     token: str
+
+
+def _contexto(bd: Session, *, curso: Curso, tarea: Tarea, sujeto: Sujeto, token: str) -> _Contexto:
+    assert curso.github_org_login is not None
+    if sujeto.grupo_id is not None:
+        grupo = bd.get(Grupo, sujeto.grupo_id)
+        assert grupo is not None
+        return _Contexto(
+            curso=curso,
+            tarea=tarea,
+            sujeto=sujeto,
+            integrantes=tuple(integrantes_del_grupo(bd, grupo.id, visibles_de_tarea(bd, tarea.id))),
+            marcador=f"g{grupo.canvas_group_id}",
+            nombre_legible=grupo.nombre,
+            grupo=grupo,
+            org=curso.github_org_login,
+            token=token,
+        )
+    estudiante = bd.get(Estudiante, sujeto.estudiante_id)
+    assert estudiante is not None
+    return _Contexto(
+        curso=curso,
+        tarea=tarea,
+        sujeto=sujeto,
+        integrantes=(estudiante,),
+        marcador=f"e{estudiante.canvas_user_id}",
+        nombre_legible=estudiante.nombre,
+        grupo=None,
+        org=curso.github_org_login,
+        token=token,
+    )
+
+
+def _motivo_espera_del_contexto(bd: Session, c: _Contexto) -> MotivoEsperandoInformacion | None:
+    mapeos = _mapeos_vigentes(bd, c.curso.id)
+    if c.grupo is None:
+        mapeo = mapeos.get(c.integrantes[0].id)
+        return motivo_espera_individual(
+            estado_mapeo=mapeo.estado if mapeo is not None else None, estado_tarea=c.tarea.estado
+        )
+    en_dos = estudiantes_en_dos_grupos(bd, c.grupo.conjunto_grupos_id)
+    return motivo_espera_grupal(
+        estados_mapeo_integrantes=[
+            mapeos[i.id].estado if i.id in mapeos else None for i in c.integrantes
+        ],
+        hay_integrante_en_dos_grupos=any(i.id in en_dos for i in c.integrantes),
+        estado_tarea=c.tarea.estado,
+    )
 
 
 def aprovisionar_repositorio(
@@ -326,19 +621,10 @@ def aprovisionar_repositorio(
         return
     if curso.github_org_login is None or curso.github_installation_id is None:
         return
-    estudiante = bd.get(Estudiante, sujeto.estudiante_id)
-    assert estudiante is not None
 
     try:
         token = cliente.obtener_token_instalacion(curso.github_installation_id)
-        contexto = _Contexto(
-            curso=curso,
-            tarea=tarea,
-            sujeto=sujeto,
-            estudiante=estudiante,
-            org=curso.github_org_login,
-            token=token,
-        )
+        contexto = _contexto(bd, curso=curso, tarea=tarea, sujeto=sujeto, token=token)
         if repositorio.github_repo_id is None:
             if not _crear(bd, cliente, contexto, repositorio):
                 return
@@ -379,10 +665,7 @@ def _crear(bd: Session, cliente: ClienteGitHub, c: _Contexto, repositorio: Repos
     """`LISTO_PARA_CREAR -> CREANDO -> CREADO_SIN_CONTENIDO` (o, si se adopta un
     repositorio ya existente, directo a `CONFIGURANDO_ACCESOS`). Devuelve
     `False` si el repositorio quedo esperando o en error."""
-    mapeo = _mapeos_vigentes(bd, c.curso.id).get(c.estudiante.id)
-    motivo = motivo_espera_individual(
-        estado_mapeo=mapeo.estado if mapeo is not None else None, estado_tarea=c.tarea.estado
-    )
+    motivo = _motivo_espera_del_contexto(bd, c)
     if motivo is not None:
         repositorio.estado = EstadoRepositorio.ESPERANDO_INFORMACION.value
         repositorio.motivo = motivo.value
@@ -415,12 +698,8 @@ def _crear(bd: Session, cliente: ClienteGitHub, c: _Contexto, repositorio: Repos
         return _adoptar_o_rechazar(bd, c, repositorio, existente)
 
     descripcion = (
-        f"Repositorio de {c.estudiante.nombre} — {c.tarea.nombre} — {c.curso.nombre} "
-        + marcador_descripcion(
-            curso_slug=c.curso.slug,
-            tarea_slug=c.tarea.slug,
-            sujeto=f"e{c.estudiante.canvas_user_id}",
-        )
+        f"Repositorio de {c.nombre_legible} — {c.tarea.nombre} — {c.curso.nombre} "
+        + marcador_descripcion(curso_slug=c.curso.slug, tarea_slug=c.tarea.slug, sujeto=c.marcador)
     )
     try:
         if base is not None:
@@ -500,7 +779,7 @@ def _adoptar_o_rechazar(
         org_login=c.org,
         curso_slug=c.curso.slug,
         tarea_slug=c.tarea.slug,
-        sujeto=f"e{c.estudiante.canvas_user_id}",
+        sujeto=c.marcador,
     )
     if otro_con_mismo_id is not None:
         fallidas.append("ya pertenece a otro sujeto de la aplicación")
@@ -510,7 +789,7 @@ def _adoptar_o_rechazar(
         repositorio.error_codigo = SubtipoErrorPermanente.NOMBRE_OCUPADO_POR_TERCERO.value
         repositorio.error_mensaje_literal = (
             f"Ya existe en GitHub un repositorio llamado {repositorio.nombre} que no es el de "
-            f"este estudiante ({'; '.join(fallidas)})."
+            f"{c.nombre_legible} ({'; '.join(fallidas)})."
         )
         bd.flush()
         incidencia_repo.abrir_o_actualizar(
@@ -604,9 +883,46 @@ def _configurar_accesos(
     *,
     trabajo_id: uuid.UUID | None,
 ) -> None:
-    _asegurar_acceso_estudiante(bd, cliente, c, repositorio, trabajo_id=trabajo_id)
+    _proponer_revocaciones(bd, c, repositorio)
+    for estudiante in c.integrantes:
+        _asegurar_acceso_estudiante(
+            bd, cliente, c, repositorio, estudiante=estudiante, trabajo_id=trabajo_id
+        )
     _asegurar_acceso_docente(bd, cliente, c, repositorio)
-    _evaluar_predicado(bd, c.curso, repositorio)
+    _evaluar_predicado(bd, c, repositorio)
+
+
+def _proponer_revocaciones(bd: Session, c: _Contexto, repositorio: Repositorio) -> None:
+    """S8.8.3 (A-212): quien ya no es integrante del grupo -- ausencia que
+    `sync_grupos` confirmo en dos ciclos -- queda en `REVOCACION_PROPUESTA`.
+    Nunca se llama a GitHub desde aqui: la revocacion exige decision humana.
+    TODO(etapa-F1-revocacion): decidir (programar con gracia o mantener) y
+    ejecutar `revocar_acceso_estudiante`."""
+    if c.grupo is None:
+        return  # un sujeto individual que sale de alcance va a FUERA_DE_ALCANCE (A-095)
+    actuales = {e.id for e in c.integrantes}
+    ahora = ahora_utc()
+    for acceso in bd.query(AccesoRepositorio).filter(
+        AccesoRepositorio.repositorio_id == repositorio.id
+    ):
+        if acceso.estudiante_id in actuales:
+            continue
+        nuevo = estado_acceso_tras_salir_del_grupo(acceso.estado)
+        if nuevo is None:
+            continue
+        antes = acceso.estado
+        acceso.estado = nuevo.value
+        acceso.actualizado_en = ahora
+        bd.flush()
+        registrar_bitacora(
+            bd,
+            accion="ACCESO_REVOCACION_PROPUESTA",
+            entidad="acceso_repositorio",
+            entidad_id=str(acceso.id),
+            curso_id=c.curso.id,
+            antes={"estado": antes},
+            despues={"estado": acceso.estado},
+        )
 
 
 def _asegurar_acceso_estudiante(
@@ -615,6 +931,7 @@ def _asegurar_acceso_estudiante(
     c: _Contexto,
     repositorio: Repositorio,
     *,
+    estudiante: Estudiante,
     trabajo_id: uuid.UUID | None,
 ) -> AccesoRepositorio:
     ahora = ahora_utc()
@@ -622,11 +939,11 @@ def _asegurar_acceso_estudiante(
         bd.query(AccesoRepositorio)
         .filter(
             AccesoRepositorio.repositorio_id == repositorio.id,
-            AccesoRepositorio.estudiante_id == c.estudiante.id,
+            AccesoRepositorio.estudiante_id == estudiante.id,
         )
         .one_or_none()
     )
-    mapeo = _mapeos_vigentes(bd, c.curso.id).get(c.estudiante.id)
+    mapeo = _mapeos_vigentes(bd, c.curso.id).get(estudiante.id)
     cuenta = (
         bd.get(CuentaGithub, mapeo.cuenta_github_id)
         if mapeo is not None
@@ -637,12 +954,16 @@ def _asegurar_acceso_estudiante(
     if acceso is None:
         acceso = AccesoRepositorio(
             repositorio_id=repositorio.id,
-            estudiante_id=c.estudiante.id,
+            estudiante_id=estudiante.id,
             estado=EstadoAccesoRepositorio.SIN_MAPEO.value,
             reenvios=0,
             actualizado_en=ahora,
         )
         bd.add(acceso)
+    elif acceso.estado == EstadoAccesoRepositorio.REVOCACION_PROPUESTA.value:
+        # Volvio al grupo antes de que nadie decidiera: se mantiene el acceso,
+        # repasando el orden de S8.8.2 (primero, ¿ya es colaborador?).
+        acceso.estado = EstadoAccesoRepositorio.POR_INVITAR.value
     if cuenta is None:
         if acceso.estado not in ESTADOS_ACCESO_CUBIERTO:
             acceso.estado = EstadoAccesoRepositorio.SIN_MAPEO.value
@@ -680,7 +1001,7 @@ def _asegurar_acceso_estudiante(
             acceso.ultimo_error = f"GitHub respondió {exc.status_code}: {exc.mensaje_literal}"
     acceso.actualizado_en = ahora
     bd.flush()
-    _asegurar_aviso_de_acceso(bd, c, repositorio, acceso, trabajo_id=trabajo_id)
+    _asegurar_aviso_de_acceso(bd, c, repositorio, acceso, estudiante, trabajo_id=trabajo_id)
     return acceso
 
 
@@ -689,6 +1010,7 @@ def _asegurar_aviso_de_acceso(
     c: _Contexto,
     repositorio: Repositorio,
     acceso: AccesoRepositorio,
+    estudiante: Estudiante,
     *,
     trabajo_id: uuid.UUID | None,
 ) -> None:
@@ -714,7 +1036,7 @@ def _asegurar_aviso_de_acceso(
         tarea=c.tarea,
         sujeto=c.sujeto,
         repositorio=repositorio,
-        estudiante=c.estudiante,
+        estudiante=estudiante,
         acceso=acceso,
         evento=outbox_repo.EVENTO_REPOSITORIO_DISPONIBLE,
         fecha_cierre=fecha,
@@ -727,7 +1049,7 @@ def _asegurar_aviso_de_acceso(
             tarea=c.tarea,
             sujeto=c.sujeto,
             repositorio=repositorio,
-            estudiante=c.estudiante,
+            estudiante=estudiante,
             acceso=acceso,
             evento=outbox_repo.EVENTO_INVITACION_ACEPTADA,
             fecha_cierre=fecha,
@@ -784,10 +1106,18 @@ def _asegurar_acceso_docente(
     return fila
 
 
-def _evaluar_predicado(bd: Session, curso: Curso, repositorio: Repositorio) -> None:
-    accesos = (
-        bd.query(AccesoRepositorio).filter(AccesoRepositorio.repositorio_id == repositorio.id).all()
-    )
+def _evaluar_predicado(bd: Session, c: _Contexto, repositorio: Repositorio) -> None:
+    """El predicado mira solo a los integrantes actuales: una revocacion
+    propuesta no cambia el estado del repositorio (S8.8.3)."""
+    curso = c.curso
+    actuales = {e.id for e in c.integrantes}
+    accesos = [
+        a
+        for a in bd.query(AccesoRepositorio).filter(
+            AccesoRepositorio.repositorio_id == repositorio.id
+        )
+        if a.estudiante_id in actuales
+    ]
     docente = (
         bd.query(AccesoDocenteRepositorio)
         .filter(AccesoDocenteRepositorio.repositorio_id == repositorio.id)
@@ -798,8 +1128,9 @@ def _evaluar_predicado(bd: Session, curso: Curso, repositorio: Repositorio) -> N
         hay_errores_al_invitar=any(
             a.ultimo_error and a.estado not in ESTADOS_ACCESO_CUBIERTO for a in accesos
         ),
-        # TODO(etapa-F1): integrantes invited/requested en Canvas (tarea grupal).
-        integrantes_pendientes_en_canvas=False,
+        integrantes_pendientes_en_canvas=(
+            c.grupo is not None and _hay_pendientes_en_canvas(bd, c.grupo.id)
+        ),
         estado_acceso_docente=docente.estado if docente is not None else None,
     )
     anterior = repositorio.estado
@@ -913,16 +1244,7 @@ def reconciliar_accesos(bd: Session, cliente: ClienteGitHub, *, curso: Curso) ->
         sujeto = bd.get(Sujeto, repositorio.sujeto_id)
         tarea = bd.get(Tarea, repositorio.tarea_id)
         assert sujeto is not None and tarea is not None
-        estudiante = bd.get(Estudiante, sujeto.estudiante_id)
-        assert estudiante is not None
-        c = _Contexto(
-            curso=curso,
-            tarea=tarea,
-            sujeto=sujeto,
-            estudiante=estudiante,
-            org=curso.github_org_login,
-            token=token,
-        )
+        c = _contexto(bd, curso=curso, tarea=tarea, sujeto=sujeto, token=token)
         try:
             _reconciliar_repositorio(bd, cliente, c, repositorio)
         except RechazoProveedorGithub as exc:
@@ -939,6 +1261,7 @@ def _reconciliar_repositorio(
     bd: Session, cliente: ClienteGitHub, c: _Contexto, repositorio: Repositorio
 ) -> None:
     ahora = ahora_utc()
+    _proponer_revocaciones(bd, c, repositorio)
     accesos = (
         bd.query(AccesoRepositorio).filter(AccesoRepositorio.repositorio_id == repositorio.id).all()
     )
@@ -971,10 +1294,13 @@ def _reconciliar_repositorio(
     bd.flush()
     # SIN_MAPEO que ahora tiene mapeo vigente, POR_INVITAR y los avisos que aun
     # no salieron: el mismo camino que la creacion, con sus lecturas previas.
-    _asegurar_acceso_estudiante(bd, cliente, c, repositorio, trabajo_id=None)
+    for estudiante in c.integrantes:
+        _asegurar_acceso_estudiante(
+            bd, cliente, c, repositorio, estudiante=estudiante, trabajo_id=None
+        )
     _asegurar_acceso_docente(bd, cliente, c, repositorio)
     if repositorio.estado != EstadoRepositorio.FUERA_DE_ALCANCE.value:
-        _evaluar_predicado(bd, c.curso, repositorio)
+        _evaluar_predicado(bd, c, repositorio)
 
 
 def _puede_reenviar(acceso: AccesoRepositorio, ahora: datetime) -> bool:

@@ -756,10 +756,22 @@ export interface ResumenRepositorios {
   minutos_restantes: number;
 }
 
+/** Integrante `accepted` de un sujeto grupal con el estado de su acceso (F1). */
+export interface IntegranteRepositorio {
+  estudiante_id: string;
+  nombre: string;
+  cuenta_github: string | null;
+  acceso_estado: string | null;
+  acceso_error: string | null;
+  invitacion_url: string | null;
+}
+
 export interface FilaRepositorio {
   repositorio_id: string;
   estudiante_id: string | null;
   sujeto: string;
+  sujeto_tipo: "ESTUDIANTE" | "GRUPO";
+  integrantes: IntegranteRepositorio[];
   sujeto_activo: boolean;
   motivo_desactivacion: string | null;
   nombre: string;

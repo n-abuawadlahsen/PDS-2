@@ -16,15 +16,29 @@ from sqlalchemy.orm import Session
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.modelos_aprovisionamiento import FechaEfectiva, ReglaFecha, Sujeto
-from app.adaptadores.modelos_padron import Estudiante, Grupo, Matricula, Seccion
+from app.adaptadores.modelos_padron import (
+    Estudiante,
+    Grupo,
+    Matricula,
+    PertenenciaGrupo,
+    Seccion,
+)
 from app.adaptadores.modelos_tarea import Entrega, VisibilidadEntrega
 from app.dominio.estados import (
     AlcanceReglaFecha,
     EstadoFechaEfectiva,
     EstadoValidacionEntrega,
     TipoSujeto,
+    WorkflowStatePertenenciaGrupo,
 )
-from app.dominio.fechas import ReglaFechaDatos, fecha_efectiva_individual, huella_reglas
+from app.dominio.fechas import (
+    IntegranteFecha,
+    ReglaFechaDatos,
+    ResultadoFecha,
+    fecha_efectiva_grupal,
+    fecha_efectiva_individual,
+    huella_reglas,
+)
 from app.dominio.tareas_canvas import AssignmentCanvasCrudo, OverrideCanvasCrudo
 
 
@@ -159,7 +173,10 @@ def _reglas_de_entrega(bd: Session, entrega_id: uuid.UUID) -> list[ReglaFechaDat
 
 def recalcular_fechas_entrega(bd: Session, *, curso_id: uuid.UUID, entrega: Entrega) -> None:
     """Materializa la fecha de cada sujeto activo visible en la entrega. Un
-    sujeto no visible no recibe fecha (S9.3.2); si tenia una, se supersede."""
+    sujeto no visible no recibe fecha (S9.3.2); si tenia una, se supersede.
+
+    Sujeto grupal (S9.3.3): visible si lo es alguno de sus integrantes
+    `accepted`; su fecha es el maximo de la cadena de cada uno de ellos."""
     reglas = _reglas_de_entrega(bd, entrega.id)
     if not reglas:
         return  # la entrega aun no paso por un ciclo de sync_tareas_y_fechas
@@ -179,66 +196,114 @@ def recalcular_fechas_entrega(bd: Session, *, curso_id: uuid.UUID, entrega: Entr
         secciones.setdefault(estudiante_id, set()).add(canvas_section_id)
 
     sujetos = (
-        bd.query(Sujeto, Estudiante)
-        .join(Estudiante, Estudiante.id == Sujeto.estudiante_id)
+        bd.query(Sujeto).filter(Sujeto.tarea_id == entrega.tarea_id, Sujeto.activo.is_(True)).all()
+    )
+    for sujeto in sujetos:
+        resultado: ResultadoFecha | None
+        if sujeto.tipo == TipoSujeto.GRUPO.value:
+            grupo = bd.get(Grupo, sujeto.grupo_id)
+            assert grupo is not None
+            integrantes = [
+                IntegranteFecha(
+                    canvas_user_id=e.canvas_user_id,
+                    canvas_section_ids=frozenset(secciones.get(e.id, set())),
+                )
+                for e in _integrantes_aceptados(bd, grupo.id)
+                if e.id in visibles
+            ]
+            resultado = fecha_efectiva_grupal(
+                reglas=reglas, canvas_group_id=grupo.canvas_group_id, integrantes=integrantes
+            )
+        else:
+            estudiante = bd.get(Estudiante, sujeto.estudiante_id)
+            assert estudiante is not None
+            resultado = (
+                fecha_efectiva_individual(
+                    reglas=reglas,
+                    canvas_user_id=estudiante.canvas_user_id,
+                    canvas_section_ids=frozenset(secciones.get(estudiante.id, set())),
+                )
+                if estudiante.id in visibles
+                else None
+            )
+        _materializar(bd, entrega=entrega, sujeto=sujeto, resultado=resultado, ahora=ahora)
+    bd.flush()
+
+
+def _integrantes_aceptados(bd: Session, grupo_id: uuid.UUID) -> list[Estudiante]:
+    """A-048: solo cuenta quien esta `accepted` en la pertenencia vigente."""
+    return (
+        bd.query(Estudiante)
+        .join(PertenenciaGrupo, PertenenciaGrupo.estudiante_id == Estudiante.id)
         .filter(
-            Sujeto.tarea_id == entrega.tarea_id,
-            Sujeto.tipo == TipoSujeto.ESTUDIANTE.value,
-            Sujeto.activo.is_(True),
+            PertenenciaGrupo.grupo_id == grupo_id,
+            PertenenciaGrupo.activa.is_(True),
+            PertenenciaGrupo.workflow_state == WorkflowStatePertenenciaGrupo.ACCEPTED.value,
         )
         .all()
     )
-    for sujeto, estudiante in sujetos:
-        vigente = (
-            bd.query(FechaEfectiva)
-            .filter(
-                FechaEfectiva.entrega_id == entrega.id,
-                FechaEfectiva.sujeto_id == sujeto.id,
-                FechaEfectiva.estado == EstadoFechaEfectiva.VIGENTE.value,
-            )
-            .one_or_none()
+
+
+def _materializar(
+    bd: Session,
+    *,
+    entrega: Entrega,
+    sujeto: Sujeto,
+    resultado: ResultadoFecha | None,
+    ahora: datetime,
+) -> None:
+    """Ley 2: nunca en sitio. `resultado = None` = el sujeto no es visible en
+    la entrega: la fecha vigente, si la habia, se supersede sin sustituta."""
+    vigente = (
+        bd.query(FechaEfectiva)
+        .filter(
+            FechaEfectiva.entrega_id == entrega.id,
+            FechaEfectiva.sujeto_id == sujeto.id,
+            FechaEfectiva.estado == EstadoFechaEfectiva.VIGENTE.value,
         )
-        if estudiante.id not in visibles:
-            if vigente is not None:
-                vigente.estado = EstadoFechaEfectiva.SUPERSEDIDA.value
-                vigente.vigente_hasta = ahora
-            continue
-        resultado = fecha_efectiva_individual(
-            reglas=reglas,
-            canvas_user_id=estudiante.canvas_user_id,
-            canvas_section_ids=frozenset(secciones.get(estudiante.id, set())),
-        )
-        regla_id = resultado.regla_ref if isinstance(resultado.regla_ref, uuid.UUID) else None
-        if (
-            vigente is not None
-            and vigente.due_at_utc == resultado.due_at_utc
-            and vigente.origen == resultado.origen.value
-            and vigente.ambigua == resultado.ambigua
-        ):
-            continue
+        .one_or_none()
+    )
+    if resultado is None:
         if vigente is not None:
             vigente.estado = EstadoFechaEfectiva.SUPERSEDIDA.value
             vigente.vigente_hasta = ahora
-            bd.flush()
-        bd.add(
-            FechaEfectiva(
-                entrega_id=entrega.id,
-                sujeto_id=sujeto.id,
-                due_at_utc=resultado.due_at_utc,
-                origen=resultado.origen.value,
-                regla_fecha_id=regla_id,
-                ambigua=resultado.ambigua,
-                calculada_en=ahora,
-                estado=EstadoFechaEfectiva.VIGENTE.value,
-            )
+        return
+    if (
+        vigente is not None
+        and vigente.due_at_utc == resultado.due_at_utc
+        and vigente.origen == resultado.origen.value
+        and vigente.ambigua == resultado.ambigua
+    ):
+        return
+    if vigente is not None:
+        vigente.estado = EstadoFechaEfectiva.SUPERSEDIDA.value
+        vigente.vigente_hasta = ahora
+        bd.flush()
+    bd.add(
+        FechaEfectiva(
+            entrega_id=entrega.id,
+            sujeto_id=sujeto.id,
+            due_at_utc=resultado.due_at_utc,
+            origen=resultado.origen.value,
+            regla_fecha_id=(
+                resultado.regla_ref if isinstance(resultado.regla_ref, uuid.UUID) else None
+            ),
+            ambigua=resultado.ambigua,
+            calculada_en=ahora,
+            estado=EstadoFechaEfectiva.VIGENTE.value,
         )
-    bd.flush()
+    )
 
 
 def recalcular_fechas_tarea(bd: Session, *, curso_id: uuid.UUID, tarea_id: uuid.UUID) -> None:
     for entrega in bd.query(Entrega).filter(
         Entrega.tarea_id == tarea_id,
-        Entrega.estado_validacion == EstadoValidacionEntrega.VIGENTE.value,
+        Entrega.estado_validacion.in_(
+            [
+                EstadoValidacionEntrega.VIGENTE.value,
+                EstadoValidacionEntrega.VINCULADA_TRAS_EL_CIERRE.value,
+            ]
+        ),
     ):
         recalcular_fechas_entrega(bd, curso_id=curso_id, entrega=entrega)
 

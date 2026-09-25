@@ -18,6 +18,16 @@ Este documento registra las decisiones y procedimientos operativos que el SPEC (
 
 Inventario cerrado de 15 claves en `backend/.env.example` (sin valores). Ninguna rotación se ha ejecutado todavía porque no hay entorno `ensayo`/`producción` desplegado.
 
+## Retirada de banderas de alcance (SPEC 01 §1.11, CA-1.11-06)
+
+Una bandera se retira escribiendo su fecha en `retirada_el` dentro de `backend/app/dominio/alcance.py`, y solo con el criterio de aceptación de su etapa en verde. Desde ese momento queda activa también bajo `PERFIL_ALCANCE=parcial`. Titular de todas las retiradas de esta tabla: equipo del Proyecto 2; suplente: sin designar.
+
+| Bandera | Etapa | Fecha comprometida | Retirada el | Criterio en verde |
+|---|---|---|---|---|
+| `tarea_modalidad_grupal` | F1 | 23-09-2026 20:00 | 25-09-2026 | `tests/api/test_aprovisionamiento_grupal.py` (CA-8.5-01, grupo `OPERATIVO`, estudiante en dos grupos sin frenar a los demás, salida sin revocación) y `tests/dominio/test_aprovisionamiento.py`/`test_fechas.py` (F1) |
+
+La retirada de F1 llega dos días después de la fecha comprometida.
+
 ## Registro de incidencias
 
 _(vacío — ninguna incidencia registrada todavía; el proyecto no está desplegado fuera de local)_

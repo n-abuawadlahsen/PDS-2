@@ -31,7 +31,14 @@ from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.cliente_canvas import ClienteCanvas, FalloProveedorCanvas
 from app.adaptadores.modelos_curso import Curso
-from app.adaptadores.modelos_padron import Estudiante, Grupo, Matricula, PertenenciaGrupo, Seccion
+from app.adaptadores.modelos_padron import (
+    ConjuntoGrupos,
+    Estudiante,
+    Grupo,
+    Matricula,
+    PertenenciaGrupo,
+    Seccion,
+)
 from app.adaptadores.modelos_tarea import (
     AssignmentCanvas,
     Entrega,
@@ -537,6 +544,25 @@ def _assignment_elegible(
     return fila
 
 
+def conjunto_grupos_de(
+    bd: Session, *, curso_id: uuid.UUID, canvas_group_category_id: int | None
+) -> uuid.UUID | None:
+    """El `conjunto_grupos` de una tarea grupal sale del `group_category_id`
+    del assignment (A-047). `None` si `sync_grupos` aun no lo espejo: la
+    materializacion lo vuelve a buscar en cada ciclo."""
+    if canvas_group_category_id is None:
+        return None
+    fila = (
+        bd.query(ConjuntoGrupos)
+        .filter(
+            ConjuntoGrupos.curso_id == curso_id,
+            ConjuntoGrupos.canvas_group_category_id == canvas_group_category_id,
+        )
+        .one_or_none()
+    )
+    return fila.id if fila is not None else None
+
+
 def _nueva_entrega(
     *, tarea: Tarea, fila: AssignmentCanvas, orden: int, tipo: TipoEntrega, slugs: set[str]
 ) -> Entrega:
@@ -615,6 +641,13 @@ def crear_tarea(
         nombre=nombre_final,
         slug=slug_final,
         modalidad=modalidad.value,
+        conjunto_grupos_id=(
+            conjunto_grupos_de(
+                bd, curso_id=curso.id, canvas_group_category_id=fila.group_category_id_canvas
+            )
+            if modalidad == ModalidadTarea.GRUPAL
+            else None
+        ),
         gitignore_template=gitignore_template,
         estado=EstadoTarea.BORRADOR.value,
         creada_por=actor_usuario_id,

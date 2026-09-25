@@ -109,11 +109,11 @@ export function BloqueRepositorios({ cursoId, tareaId }: { cursoId: string; tare
           <table>
             <thead>
               <tr>
-                <th>Estudiante</th>
+                <th>Estudiante o grupo</th>
                 <th>Repositorio</th>
                 <th>Estado</th>
                 <th>Motivo</th>
-                <th>Acceso del estudiante</th>
+                <th>Acceso de los estudiantes</th>
                 <th>Equipo docente</th>
                 <th></th>
               </tr>
@@ -123,7 +123,14 @@ export function BloqueRepositorios({ cursoId, tareaId }: { cursoId: string; tare
                 <tr key={f.repositorio_id} style={{ opacity: f.sujeto_activo ? 1 : 0.6 }}>
                   <td>
                     {f.sujeto}
-                    {f.cuenta_github && <div style={ESTILO_MOTIVO}>@{f.cuenta_github}</div>}
+                    {f.sujeto_tipo === "ESTUDIANTE" && f.cuenta_github && (
+                      <div style={ESTILO_MOTIVO}>@{f.cuenta_github}</div>
+                    )}
+                    {f.sujeto_tipo === "GRUPO" && (
+                      <div style={ESTILO_MOTIVO}>
+                        {f.integrantes.length === 1 ? "1 integrante" : `${f.integrantes.length} integrantes`}
+                      </div>
+                    )}
                   </td>
                   <td>
                     {f.url_html ? (
@@ -147,8 +154,28 @@ export function BloqueRepositorios({ cursoId, tareaId }: { cursoId: string; tare
                     {!f.sujeto_activo && <div style={ESTILO_MOTIVO}>Ya no es parte de la tarea en Canvas</div>}
                   </td>
                   <td>
-                    {f.acceso_estado ? textoEstadoAcceso(f.acceso_estado) : "—"}
-                    {f.acceso_error && <div style={ESTILO_MOTIVO}>{f.acceso_error}</div>}
+                    {f.sujeto_tipo === "GRUPO" ? (
+                      f.integrantes.length === 0 ? (
+                        "—"
+                      ) : (
+                        <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
+                          {f.integrantes.map((i) => (
+                            <li key={i.estudiante_id}>
+                              {i.nombre}
+                              {i.cuenta_github && <span style={ESTILO_MOTIVO}> @{i.cuenta_github}</span>}
+                              {": "}
+                              {i.acceso_estado ? textoEstadoAcceso(i.acceso_estado) : "sin acceso todavía"}
+                              {i.acceso_error && <div style={ESTILO_MOTIVO}>{i.acceso_error}</div>}
+                            </li>
+                          ))}
+                        </ul>
+                      )
+                    ) : (
+                      <>
+                        {f.acceso_estado ? textoEstadoAcceso(f.acceso_estado) : "—"}
+                        {f.acceso_error && <div style={ESTILO_MOTIVO}>{f.acceso_error}</div>}
+                      </>
+                    )}
                   </td>
                   <td>{f.acceso_docente ? textoAccesoDocente(f.acceso_docente) : "—"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>

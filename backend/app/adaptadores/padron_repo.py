@@ -503,7 +503,28 @@ def sincronizar_grupos(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
                     curso_id=curso.id,
                     detalle={"subtipo": subtipo, "grupo_id": str(pg.grupo_id)},
                 )
+        # Una pertenencia `invited`/`requested` que Canvas ya no devuelve deja de
+        # contar como integrante pendiente (S8.6.2): se envejece, nunca se borra.
+        for pg in (
+            bd.query(PertenenciaGrupo)
+            .join(Grupo, Grupo.id == PertenenciaGrupo.grupo_id)
+            .filter(
+                Grupo.conjunto_grupos_id == conjunto_fila.id,
+                PertenenciaGrupo.workflow_state != "accepted",
+            )
+        ):
+            if (pg.grupo_id, pg.estudiante_id) in vistos_pares:
+                pg.ciclos_ausente = 0
+            else:
+                pg.ciclos_ausente += 1
         bd.flush()
+
+        previos_en_dos = {e for e, grupos in anterior_por_estudiante.items() if len(grupos) > 1}
+        for estudiante_id in previos_en_dos:
+            if len(nuevo_por_estudiante.get(estudiante_id, set())) <= 1:
+                incidencia_repo.cerrar(
+                    bd, tipo="ESTUDIANTE_EN_DOS_GRUPOS", curso_id=curso.id, sujeto_id=estudiante_id
+                )
 
         for estudiante_id, grupos_ids in nuevo_por_estudiante.items():
             if len(grupos_ids) > 1:

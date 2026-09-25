@@ -4,6 +4,11 @@
 llamador pasa el perfil leido de la configuracion. Cada bandera lleva la fecha
 comprometida que la capa 3 ("deshabilitado con motivo") escribe en pantalla --
 nunca la palabra "proximamente" (S1.11).
+
+Retirar una bandera es escribir aqui su fecha de retirada, y solo cuando su
+criterio de aceptacion esta en verde (S1.11): desde ese momento la bandera
+queda activa en cualquier perfil. La retirada se registra tambien en
+`docs/operacion.md` con fecha, titular y criterio (CA-1.11-06).
 """
 
 from __future__ import annotations
@@ -16,11 +21,12 @@ class BanderaAlcance:
     nombre: str
     capa: int
     fecha_comprometida: str
+    retirada_el: str | None = None
 
 
 BANDERAS: tuple[BanderaAlcance, ...] = (
     BanderaAlcance("tarea_multientrega", 3, "23 de septiembre"),
-    BanderaAlcance("tarea_modalidad_grupal", 3, "23 de septiembre"),
+    BanderaAlcance("tarea_modalidad_grupal", 3, "23 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("fechas_excepciones", 3, "23 de septiembre"),
     BanderaAlcance("versiones_entrega", 3, "23 de septiembre"),
     BanderaAlcance("tarea_archivado", 2, "30 de septiembre"),
@@ -40,11 +46,11 @@ _POR_NOMBRE = {b.nombre: b for b in BANDERAS}
 
 
 def bandera_activa(perfil_alcance: str, nombre: str) -> bool:
-    """Bajo `parcial` ninguna de las doce esta retirada todavia; bajo
-    `completo`, todas. El calendario fino de retiro llega con cada etapa F."""
+    """Bajo `completo` todas estan activas; bajo `parcial`, solo las que ya
+    se retiraron porque su etapa F tiene el criterio en verde."""
     if nombre not in _POR_NOMBRE:
         raise KeyError(f"bandera fuera del catalogo cerrado: {nombre}")
-    return perfil_alcance == "completo"
+    return perfil_alcance == "completo" or _POR_NOMBRE[nombre].retirada_el is not None
 
 
 def motivo_capa_3(nombre: str, que_falta: str) -> str:

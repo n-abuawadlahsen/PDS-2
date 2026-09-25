@@ -25,7 +25,7 @@ from app.adaptadores.modelos_aprovisionamiento import (
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_github import AccesoDocenteRepositorio
 from app.adaptadores.modelos_mapeo import CuentaGithub
-from app.adaptadores.modelos_padron import Estudiante, Seccion
+from app.adaptadores.modelos_padron import Estudiante, Grupo, Seccion
 from app.adaptadores.modelos_tarea import Entrega, Tarea
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere
 from app.dominio.estados import EstadoFechaEfectiva
@@ -62,10 +62,24 @@ class ResumenSalida(BaseModel):
     minutos_restantes: int
 
 
+class IntegranteSalida(BaseModel):
+    """La ficha de un sujeto grupal lista a sus integrantes `accepted` con el
+    estado de su acceso (F1)."""
+
+    estudiante_id: uuid.UUID
+    nombre: str
+    cuenta_github: str | None
+    acceso_estado: str | None
+    acceso_error: str | None
+    invitacion_url: str | None
+
+
 class FilaRepositorioSalida(BaseModel):
     repositorio_id: uuid.UUID
     estudiante_id: uuid.UUID | None
     sujeto: str
+    sujeto_tipo: str
+    integrantes: list[IntegranteSalida]
     sujeto_activo: bool
     motivo_desactivacion: str | None
     nombre: str
@@ -104,18 +118,30 @@ def listar_repositorios(
     resumen = aprovisionamiento_repo.resumen_repositorios(bd, tarea_id=tarea.id)
     filas = []
     consulta = (
-        bd.query(Repositorio, Sujeto, Estudiante)
+        bd.query(Repositorio, Sujeto, Estudiante, Grupo)
         .join(Sujeto, Sujeto.id == Repositorio.sujeto_id)
         .outerjoin(Estudiante, Estudiante.id == Sujeto.estudiante_id)
+        .outerjoin(Grupo, Grupo.id == Sujeto.grupo_id)
         .filter(Repositorio.tarea_id == tarea.id)
-        .order_by(Estudiante.nombre_ordenable, Estudiante.nombre, Repositorio.creado_en)
-    )
-    for repositorio, sujeto, estudiante in consulta:
-        acceso = (
-            bd.query(AccesoRepositorio)
-            .filter(AccesoRepositorio.repositorio_id == repositorio.id)
-            .first()
+        .order_by(
+            Grupo.nombre, Estudiante.nombre_ordenable, Estudiante.nombre, Repositorio.creado_en
         )
+    )
+    visibles = aprovisionamiento_repo.visibles_de_tarea(bd, tarea.id)
+    for repositorio, sujeto, estudiante, grupo in consulta:
+        accesos = {
+            a.estudiante_id: a
+            for a in bd.query(AccesoRepositorio).filter(
+                AccesoRepositorio.repositorio_id == repositorio.id
+            )
+        }
+        miembros = (
+            aprovisionamiento_repo.integrantes_del_grupo(bd, grupo.id, visibles)
+            if grupo is not None
+            else ([estudiante] if estudiante is not None else [])
+        )
+        integrantes = [_integrante(bd, e, accesos.get(e.id)) for e in miembros]
+        acceso = accesos.get(estudiante.id) if estudiante is not None else None
         cuenta = (
             bd.get(CuentaGithub, acceso.cuenta_github_id)
             if acceso is not None and acceso.cuenta_github_id
@@ -130,7 +156,15 @@ def listar_repositorios(
             FilaRepositorioSalida(
                 repositorio_id=repositorio.id,
                 estudiante_id=estudiante.id if estudiante is not None else None,
-                sujeto=estudiante.nombre if estudiante is not None else "—",
+                sujeto=(
+                    grupo.nombre
+                    if grupo is not None
+                    else estudiante.nombre
+                    if estudiante is not None
+                    else "—"
+                ),
+                sujeto_tipo=sujeto.tipo,
+                integrantes=integrantes,
                 sujeto_activo=sujeto.activo,
                 motivo_desactivacion=sujeto.motivo_desactivacion,
                 nombre=repositorio.nombre,
@@ -151,6 +185,24 @@ def listar_repositorios(
             )
         )
     return RepositoriosSalida(resumen=ResumenSalida(**resumen.__dict__), filas=filas)
+
+
+def _integrante(
+    bd: Session, estudiante: Estudiante, acceso: AccesoRepositorio | None
+) -> IntegranteSalida:
+    cuenta = (
+        bd.get(CuentaGithub, acceso.cuenta_github_id)
+        if acceso is not None and acceso.cuenta_github_id
+        else None
+    )
+    return IntegranteSalida(
+        estudiante_id=estudiante.id,
+        nombre=estudiante.nombre,
+        cuenta_github=cuenta.login if cuenta is not None else None,
+        acceso_estado=acceso.estado if acceso is not None else None,
+        acceso_error=acceso.ultimo_error if acceso is not None else None,
+        invitacion_url=acceso.invitacion_html_url if acceso is not None else None,
+    )
 
 
 def _repositorio(bd: Session, tarea: Tarea, repositorio_id: uuid.UUID) -> Repositorio:

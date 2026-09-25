@@ -1,6 +1,6 @@
 """Fecha efectiva por `(entrega, sujeto)` y huella de reglas (SPEC 09 S9.3-S9.4;
-A-054, A-055, A-056, A-082). Etapa P8 la usa en modo lectura: se calcula y se
-muestra; la captura de versiones que la consume llega en el Bloque 1.
+A-054, A-055, A-056, A-082). Etapa P8 la usa en modo lectura; F1 anade el sujeto
+grupal (S9.3.3): la cadena de cada integrante `accepted` y el maximo.
 """
 
 from __future__ import annotations
@@ -32,12 +32,22 @@ class ReglaFechaDatos:
 
 @dataclass(frozen=True)
 class ResultadoFecha:
-    """`due_at_utc = None` es «sin fecha de cierre» (S9.3.2): no se inventa una."""
+    """`due_at_utc = None` es «sin fecha de cierre» (S9.3.2): no se inventa una.
+
+    `fechas_integrantes` solo se llena para un sujeto grupal: la fecha que la
+    cadena dio a cada integrante, que es el detalle de `GRUPO_HETEROGENEO`."""
 
     due_at_utc: datetime | None
     origen: OrigenFechaEfectiva
     regla_ref: Hashable | None
     ambigua: bool
+    fechas_integrantes: tuple[tuple[int, datetime | None], ...] = ()
+
+
+@dataclass(frozen=True)
+class IntegranteFecha:
+    canvas_user_id: int
+    canvas_section_ids: frozenset[int]
 
 
 def _elegir_mas_tardia(candidatas: list[ReglaFechaDatos]) -> tuple[ReglaFechaDatos, bool]:
@@ -52,10 +62,15 @@ def _elegir_mas_tardia(candidatas: list[ReglaFechaDatos]) -> tuple[ReglaFechaDat
 
 
 def fecha_efectiva_individual(
-    *, reglas: list[ReglaFechaDatos], canvas_user_id: int, canvas_section_ids: frozenset[int]
+    *,
+    reglas: list[ReglaFechaDatos],
+    canvas_user_id: int,
+    canvas_section_ids: frozenset[int],
+    canvas_group_id: int | None = None,
 ) -> ResultadoFecha:
-    """S9.3.2, cadena estricta entre niveles: extension individual, seccion,
-    base. El nivel de grupo solo se evalua en tareas grupales (no aplica aqui).
+    """S9.3.2, cadena estricta entre niveles: extension individual, grupo,
+    seccion, base. El nivel de grupo solo se evalua en tareas grupales, es
+    decir, cuando el llamador pasa `canvas_group_id`.
 
     Un override aplicable con `due_at` nulo produce «sin fecha», no hereda la
     base (CA-9.3-04)."""
@@ -67,6 +82,16 @@ def fecha_efectiva_individual(
                 for r in reglas
                 if r.alcance == AlcanceReglaFecha.ESTUDIANTES
                 and canvas_user_id in r.estudiante_canvas_ids
+            ],
+        ),
+        (
+            OrigenFechaEfectiva.GRUPO,
+            [
+                r
+                for r in reglas
+                if canvas_group_id is not None
+                and r.alcance == AlcanceReglaFecha.GRUPO
+                and r.grupo_canvas_id == canvas_group_id
             ],
         ),
         (
@@ -91,6 +116,56 @@ def fecha_efectiva_individual(
             )
     return ResultadoFecha(
         due_at_utc=None, origen=OrigenFechaEfectiva.BASE, regla_ref=None, ambigua=False
+    )
+
+
+def fecha_efectiva_grupal(
+    *,
+    reglas: list[ReglaFechaDatos],
+    canvas_group_id: int,
+    integrantes: list[IntegranteFecha],
+) -> ResultadoFecha | None:
+    """S9.3.3 (Q-2.4-05, Q-2.4-40): la cadena de S9.3.2 para cada integrante
+    `accepted`, y el **maximo** de las fechas resultantes -- capturar antes de
+    tiempo destruye trabajo legitimo. Un integrante sin fecha no aporta
+    candidato ni anula al resto; si ninguno aporta, el grupo queda sin fecha.
+    Fechas distintas entre integrantes dejan la fila `ambigua`.
+
+    `None` = el grupo no tiene integrantes que cuenten: no hay fecha que
+    calcular (el sujeto no deberia estar activo)."""
+    if not integrantes:
+        return None
+    por_integrante = [
+        (
+            i.canvas_user_id,
+            fecha_efectiva_individual(
+                reglas=reglas,
+                canvas_user_id=i.canvas_user_id,
+                canvas_section_ids=i.canvas_section_ids,
+                canvas_group_id=canvas_group_id,
+            ),
+        )
+        for i in integrantes
+    ]
+    fechas = tuple((uid, r.due_at_utc) for uid, r in por_integrante)
+    con_fecha = [(uid, r) for uid, r in por_integrante if r.due_at_utc is not None]
+    if not con_fecha:
+        primero = por_integrante[0][1]
+        return ResultadoFecha(
+            due_at_utc=None,
+            origen=primero.origen,
+            regla_ref=primero.regla_ref,
+            ambigua=False,
+            fechas_integrantes=fechas,
+        )
+    _, ganador = max(con_fecha, key=lambda par: par[1].due_at_utc)  # type: ignore[arg-type,return-value]
+    distintas = {r.due_at_utc for _, r in con_fecha}
+    return ResultadoFecha(
+        due_at_utc=ganador.due_at_utc,
+        origen=ganador.origen,
+        regla_ref=ganador.regla_ref,
+        ambigua=len(distintas) > 1 or any(r.ambigua for _, r in con_fecha),
+        fechas_integrantes=fechas,
     )
 
 
