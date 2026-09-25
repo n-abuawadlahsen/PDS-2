@@ -30,6 +30,7 @@ from app.adaptadores import (
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.cliente_canvas import ClienteCanvas, FalloProveedorCanvas
+from app.adaptadores.modelos_aprovisionamiento import ReglaFecha
 from app.adaptadores.modelos_curso import Curso
 from app.adaptadores.modelos_padron import (
     ConjuntoGrupos,
@@ -48,6 +49,7 @@ from app.adaptadores.modelos_tarea import (
 )
 from app.dominio.alcance import bandera_activa, motivo_capa_3
 from app.dominio.estados import (
+    AlcanceReglaFecha,
     EstadoRepositorioBase,
     EstadoTarea,
     EstadoValidacionEntrega,
@@ -67,14 +69,18 @@ from app.dominio.padron import confirma_ausencia
 from app.dominio.tareas import (
     PLANTILLAS_GITIGNORE,
     EntregaActivacion,
+    EntregaFechas,
     EntregaOrden,
     EstudianteVisibilidad,
     MotivoRechazoTarea,
     RechazoTarea,
+    advertencias_de_entregas,
     motivo_no_activable,
     ordenar_al_vincular,
     renumerar_al_desvincular,
     resolver_visibilidad,
+    validar_conjunto_para_vincular,
+    validar_excluir,
     validar_modalidad_para_vincular,
     validar_vincular_otra_entrega,
 )
@@ -185,6 +191,9 @@ def sincronizar_tareas(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
                 bd, curso_id=curso.id, entrega=entrega, crudo=vista, overrides=overrides
             )
 
+    for tarea_id in {e.tarea_id for e in entregas}:
+        _actualizar_advertencias(bd, tarea_id)
+
     estado = (
         ResultadoSincronizacion.TRUNCADA if resultado.truncado else ResultadoSincronizacion.OK
     ).value
@@ -201,6 +210,49 @@ def sincronizar_tareas(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
     )
     # S9.4.4: orden fijo del ciclo, tareas y fechas antes que la materializacion.
     encolar_materializacion(bd, curso_id=curso.id)
+
+
+def _actualizar_advertencias(bd: Session, tarea_id: uuid.UUID) -> None:
+    """S9.11 `entrega.advertencias`, recalculadas en cada ciclo sobre la
+    fecha base y el `lock_at`/`unlock_at` de la regla `BASE`."""
+    entregas = entregas_de_tarea(bd, tarea_id)
+    base = {
+        r.entrega_id: r
+        for r in bd.query(ReglaFecha).filter(
+            ReglaFecha.entrega_id.in_([e.id for e in entregas]),
+            ReglaFecha.alcance == AlcanceReglaFecha.BASE.value,
+        )
+    }
+    calculadas = advertencias_de_entregas(
+        [
+            EntregaFechas(
+                id=e.id,
+                orden=e.orden,
+                tipo=TipoEntrega(e.tipo),
+                due_at=e.due_at_base,
+                lock_at=base[e.id].lock_at if e.id in base else None,
+                unlock_at=base[e.id].unlock_at if e.id in base else None,
+            )
+            for e in entregas
+            if e.estado_validacion != EstadoValidacionEntrega.EXCLUIDA.value
+        ]
+    )
+    for e in entregas:
+        nuevas = [a.value for a in calculadas.get(e.id, [])]
+        if list(e.advertencias or []) != nuevas:
+            e.advertencias = nuevas
+    bd.flush()
+
+
+def encolar_sincronizacion_tareas(bd: Session, *, curso_id: uuid.UUID, motivo: str) -> None:
+    """Encola `sync_tareas_y_fechas` sin llamar a Canvas en la peticion (A-089)."""
+    trabajos_repo.encolar(
+        bd,
+        tipo="sync_tareas_y_fechas",
+        clave_idempotencia=f"sync_tareas:{curso_id}:{motivo}",
+        max_intentos=4,
+        curso_id=curso_id,
+    )
 
 
 def encolar_materializacion(bd: Session, *, curso_id: uuid.UUID) -> None:
@@ -710,6 +762,15 @@ def vincular_entrega(
         es_grupal_canvas=fila.es_grupal,
         perfil_alcance=perfil_alcance,
     )
+    if tarea.modalidad == ModalidadTarea.GRUPAL.value:
+        validar_conjunto_para_vincular(
+            categorias_existentes={
+                e.group_category_id_canvas
+                for e in existentes
+                if e.group_category_id_canvas is not None
+            },
+            categoria_nueva=fila.group_category_id_canvas,
+        )
 
     por_canvas = {e.canvas_assignment_id: e for e in existentes}
     if final_canvas_assignment_id == canvas_assignment_id:
@@ -749,7 +810,38 @@ def vincular_entrega(
             "orden": nueva.orden,
         },
     )
+    # Fechas, visibilidad y sujetos de la entrega nueva llegan en el proximo
+    # ciclo; se encola ya para no esperar la cadencia de 5 minutos.
+    encolar_sincronizacion_tareas(bd, curso_id=curso.id, motivo=f"vincular:{nueva.id}")
     return nueva
+
+
+def excluir_entrega(
+    bd: Session, *, curso: Curso, tarea: Tarea, entrega: Entrega, actor_usuario_id: uuid.UUID
+) -> None:
+    """A-080 regla 1: con versiones capturadas solo cabe excluir. La entrega
+    conserva su `orden` y todo lo registrado; deja de sincronizarse, de dar
+    visibilidad y de capturarse."""
+    validar_excluir(
+        tipo=TipoEntrega(entrega.tipo),
+        ya_excluida=entrega.estado_validacion == EstadoValidacionEntrega.EXCLUIDA.value,
+    )
+    antes = {"estado_validacion": entrega.estado_validacion}
+    entrega.estado_validacion = EstadoValidacionEntrega.EXCLUIDA.value
+    tarea.actualizada_en = ahora_utc()
+    bd.flush()
+    registrar_bitacora(
+        bd,
+        accion="ENTREGA_EXCLUIDA",
+        entidad="entrega",
+        entidad_id=str(entrega.id),
+        actor_usuario_id=actor_usuario_id,
+        curso_id=curso.id,
+        antes=antes,
+        despues={"estado_validacion": entrega.estado_validacion},
+    )
+    _actualizar_advertencias(bd, tarea.id)
+    encolar_materializacion(bd, curso_id=curso.id)
 
 
 def desvincular_entrega(

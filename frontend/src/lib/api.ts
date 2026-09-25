@@ -561,6 +561,7 @@ export interface EntregaTarea {
   publicada: boolean;
   due_at_base: string | null;
   estado_validacion: string;
+  advertencias: string[];
   sincronizado_en: string;
 }
 
@@ -681,6 +682,35 @@ export async function desvincularEntrega(
 ): Promise<Resultado<TareaDetalle>> {
   return resultado(
     await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/entregas/${entregaId}`, { method: "DELETE" }),
+  );
+}
+
+/** R2.3.2: vincular otra tarea de Canvas; hay que decir siempre cual es la final (A-080). */
+export async function vincularEntrega(
+  cursoId: string,
+  tareaId: string,
+  canvasAssignmentId: number,
+  finalCanvasAssignmentId: number,
+): Promise<Resultado<TareaDetalle>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/entregas`, {
+      method: "POST",
+      body: JSON.stringify({
+        canvas_assignment_id: canvasAssignmentId,
+        final_canvas_assignment_id: finalCanvasAssignmentId,
+      }),
+    }),
+  );
+}
+
+/** Con versiones registradas no se desvincula: se excluye, sin borrar nada. */
+export async function excluirEntrega(
+  cursoId: string,
+  tareaId: string,
+  entregaId: string,
+): Promise<Resultado<TareaDetalle>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/entregas/${entregaId}/excluir`, { method: "POST" }),
   );
 }
 

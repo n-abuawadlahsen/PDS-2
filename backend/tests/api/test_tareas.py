@@ -164,9 +164,8 @@ def test_crear_tarea_individual_con_su_entrega_final(cliente: TestClient):
     assert entrega["slug"] == "tarea-1-ordenamiento"
     # R2.3.5: sin base, la tarea se activa sin ninguna comprobacion de base (CA-8.3-01).
     assert tarea["activar"] == {"habilitada": True, "motivo": None}
-    # Bandera `tarea_multientrega`: capa 3 con fecha.
-    assert tarea["vincular_otra_entrega"]["habilitada"] is False
-    assert "23 de septiembre" in tarea["vincular_otra_entrega"]["motivo"]
+    # F2: bandera `tarea_multientrega` retirada.
+    assert tarea["vincular_otra_entrega"] == {"habilitada": True, "motivo": None}
 
     listado = cliente.get(f"/api/cursos/{curso_id}/tareas").json()
     assert [t["slug"] for t in listado] == ["t1-ordenamiento"]
@@ -223,15 +222,16 @@ def test_slug_repetido_no_se_sufija(cliente: TestClient):
     assert respuesta.json()["detail"]["motivo"] == "SLUG_OCUPADO"
 
 
-def test_segunda_entrega_rechazada_en_la_parcial(cliente: TestClient):
+def test_segunda_entrega_disponible_tras_retirar_su_bandera(cliente: TestClient):
+    # F2: `tarea_multientrega` retirada; la segunda entrega ya no es capa 3.
     curso_id = _preparar_curso(cliente, slug="pds-t7-h", email="profe.t7h@gmail.com")
     tarea = _crear_tarea(cliente, curso_id)
     respuesta = cliente.post(
         f"/api/cursos/{curso_id}/tareas/{tarea['id']}/entregas",
         json={"canvas_assignment_id": 9104, "final_canvas_assignment_id": 9104},
     )
-    assert respuesta.status_code == 409
-    assert respuesta.json()["detail"]["motivo"] == "MULTIENTREGA_NO_DISPONIBLE"
+    assert respuesta.status_code == 200, respuesta.text
+    assert len(respuesta.json()["entregas"]) == 2
 
 
 def test_tarea_sin_sincronizar_pide_sincronizar(cliente: TestClient):

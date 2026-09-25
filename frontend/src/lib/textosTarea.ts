@@ -95,6 +95,13 @@ const ESTADO_ACCESO_DOCENTE: Record<string, string> = {
   ERROR: "Con error",
 };
 
+const ADVERTENCIA_ENTREGA: Record<string, string> = {
+  LOCK_ANTES_DE_DUE: "Canvas deja de aceptar entregas antes de la fecha de cierre",
+  UNLOCK_DESPUES_DE_DUE: "Canvas la abre después de su fecha de cierre",
+  FINAL_ANTES_QUE_PARCIAL: "La entrega final cierra antes que una parcial",
+  DOS_ENTREGAS_MISMA_FECHA: "Otra entrega de esta tarea cierra a la misma hora",
+};
+
 function traducir(tabla: Record<string, string>, valor: string | null | undefined): string {
   if (!valor) return "—";
   return tabla[valor] ?? valor.toLowerCase().replaceAll("_", " ");
@@ -104,6 +111,7 @@ export const textoEstadoTarea = (v: string | null | undefined) => traducir(ESTAD
 export const textoModalidad = (v: string | null | undefined) => traducir(MODALIDAD, v);
 export const textoTipoEntrega = (v: string | null | undefined) => traducir(TIPO_ENTREGA, v);
 export const textoEstadoEntrega = (v: string | null | undefined) => traducir(ESTADO_ENTREGA, v);
+export const textoAdvertenciaEntrega = (v: string | null | undefined) => traducir(ADVERTENCIA_ENTREGA, v);
 export const textoEstadoBase = (v: string | null | undefined) => traducir(ESTADO_BASE, v);
 export const textoEstadoRepositorio = (v: string | null | undefined) => traducir(ESTADO_REPOSITORIO, v);
 export const textoMotivoRepositorio = (v: string | null | undefined) => traducir(MOTIVO_REPOSITORIO, v);

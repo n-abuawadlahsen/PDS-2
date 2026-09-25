@@ -25,8 +25,9 @@ Una bandera se retira escribiendo su fecha en `retirada_el` dentro de `backend/a
 | Bandera | Etapa | Fecha comprometida | Retirada el | Criterio en verde |
 |---|---|---|---|---|
 | `tarea_modalidad_grupal` | F1 | 23-09-2026 20:00 | 25-09-2026 | `tests/api/test_aprovisionamiento_grupal.py` (CA-8.5-01, grupo `OPERATIVO`, estudiante en dos grupos sin frenar a los demás, salida sin revocación) y `tests/dominio/test_aprovisionamiento.py`/`test_fechas.py` (F1) |
+| `tarea_multientrega` | F2 | 23-09-2026 20:00 | 25-09-2026 | `tests/api/test_multientrega.py` (renumerar, cero o dos finales imposibles, excluir sin borrar, mismos repositorios para todas las entregas, modalidad congelada) y `tests/dominio/test_multientrega.py` |
 
-La retirada de F1 llega dos días después de la fecha comprometida.
+Las retiradas de F1 y F2 llegan dos días después de la fecha comprometida.
 
 ## Registro de incidencias
 

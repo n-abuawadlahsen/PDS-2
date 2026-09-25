@@ -27,7 +27,6 @@ from app.dominio.tareas import (
     resolver_visibilidad,
     validar_modalidad_para_vincular,
     validar_ruta_archivo,
-    validar_vincular_otra_entrega,
 )
 from app.dominio.tareas_canvas import OverrideCanvasCrudo
 
@@ -69,14 +68,6 @@ def test_modalidad_individual_se_deriva_de_canvas():
         )
         == ModalidadTarea.INDIVIDUAL
     )
-
-
-def test_segunda_entrega_es_capa_3_en_la_parcial():
-    validar_vincular_otra_entrega(cantidad_actual=0, perfil_alcance="parcial")
-    with pytest.raises(RechazoTarea) as exc:
-        validar_vincular_otra_entrega(cantidad_actual=1, perfil_alcance="parcial")
-    assert exc.value.motivo == MotivoRechazoTarea.MULTIENTREGA_NO_DISPONIBLE
-    validar_vincular_otra_entrega(cantidad_actual=1, perfil_alcance="completo")
 
 
 # --- Orden y entrega FINAL (A-080) ---

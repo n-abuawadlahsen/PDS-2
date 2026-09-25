@@ -123,6 +123,7 @@ class EntregaSalida(BaseModel):
     publicada: bool
     due_at_base: datetime | None
     estado_validacion: str
+    advertencias: list[str]
     sincronizado_en: datetime
 
 
@@ -213,6 +214,7 @@ def _salida_entrega(e: Entrega) -> EntregaSalida:
         publicada=e.publicada,
         due_at_base=e.due_at_base,
         estado_validacion=e.estado_validacion,
+        advertencias=list(e.advertencias or []),
         sincronizado_en=e.sincronizado_en,
     )
 
@@ -470,6 +472,39 @@ def desvincular_entrega(
         raise HTTPException(status_code=404)
     try:
         tareas_repo.desvincular_entrega(
+            bd, curso=curso, tarea=tarea, entrega=entrega, actor_usuario_id=membresia.usuario_id
+        )
+    except RechazoTarea as exc:
+        raise _http_rechazo(exc) from None
+    return _detalle(bd, curso=curso, tarea=tarea, settings=settings)
+
+
+@router.post(
+    "/api/cursos/{curso_id}/tareas/{tarea_id}/entregas/{entrega_id}/excluir",
+    response_model=TareaDetalleSalida,
+    dependencies=[Depends(exigir_csrf)],
+)
+def excluir_entrega(
+    curso_id: uuid.UUID,
+    tarea_id: uuid.UUID,
+    entrega_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    settings: Settings = Depends(obtener_configuracion),
+    membresia: MembresiaCurso = Depends(requiere(Permiso.TAREA_ADMINISTRAR)),
+) -> TareaDetalleSalida:
+    """R2.3.2 (A-080 regla 1): la alternativa a desvincular cuando ya hay
+    versiones registradas. Nunca borra nada."""
+    curso = _curso(bd, curso_id)
+    tarea = _tarea(bd, curso_id, tarea_id)
+    entrega = (
+        bd.query(Entrega)
+        .filter(Entrega.id == entrega_id, Entrega.tarea_id == tarea.id)
+        .one_or_none()
+    )
+    if entrega is None:
+        raise HTTPException(status_code=404)
+    try:
+        tareas_repo.excluir_entrega(
             bd, curso=curso, tarea=tarea, entrega=entrega, actor_usuario_id=membresia.usuario_id
         )
     except RechazoTarea as exc:
