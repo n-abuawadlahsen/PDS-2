@@ -65,3 +65,18 @@ def cerrar(
         Incidencia.abierta.is_(True),
     ).update({"abierta": False, "resuelta_en": ahora_utc()})
     bd.flush()
+
+
+def abierta(
+    bd: Session, *, tipo: str, curso_id: uuid.UUID | None, sujeto_id: uuid.UUID | None = None
+) -> Incidencia | None:
+    return (
+        bd.query(Incidencia)
+        .filter(
+            Incidencia.tipo == tipo,
+            Incidencia.curso_id == curso_id,
+            Incidencia.sujeto_id == sujeto_id,
+            Incidencia.abierta.is_(True),
+        )
+        .one_or_none()
+    )

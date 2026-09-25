@@ -16,6 +16,7 @@ from app.api.rutas import (
     capacidades,
     cursos,
     estado,
+    fechas,
     interno,
     pendientes,
     perfil,
@@ -59,6 +60,7 @@ def crear_app() -> FastAPI:
     app.include_router(pendientes.router)
     app.include_router(tareas.router)
     app.include_router(repositorios.router)
+    app.include_router(fechas.router)
 
     return app
 

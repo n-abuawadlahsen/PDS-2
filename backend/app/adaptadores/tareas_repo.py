@@ -16,6 +16,7 @@ import json
 import uuid
 from collections.abc import Hashable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -30,8 +31,9 @@ from app.adaptadores import (
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.cliente_canvas import ClienteCanvas, FalloProveedorCanvas
-from app.adaptadores.modelos_aprovisionamiento import ReglaFecha
+from app.adaptadores.modelos_aprovisionamiento import FechaEfectiva, ReglaFecha
 from app.adaptadores.modelos_curso import Curso
+from app.adaptadores.modelos_infraestructura import Sincronizacion
 from app.adaptadores.modelos_padron import (
     ConjuntoGrupos,
     Estudiante,
@@ -50,6 +52,7 @@ from app.adaptadores.modelos_tarea import (
 from app.dominio.alcance import bandera_activa, motivo_capa_3
 from app.dominio.estados import (
     AlcanceReglaFecha,
+    EstadoFechaEfectiva,
     EstadoRepositorioBase,
     EstadoTarea,
     EstadoValidacionEntrega,
@@ -58,6 +61,7 @@ from app.dominio.estados import (
     TipoEntrega,
     WorkflowStatePertenenciaGrupo,
 )
+from app.dominio.fechas import cadencia_sync_fechas, discrepancias_aceleracion
 from app.dominio.nombres_repositorio import (
     SujetoNombre,
     es_slug_valido,
@@ -151,7 +155,16 @@ def sincronizar_tareas(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
     bd.flush()
 
     estudiantes = _estudiantes_para_visibilidad(bd, curso.id)
-    contadores = {"assignments": len(resultado.items), "entregas": 0, "eliminadas": 0}
+    # S9.4.4 (Q-2.4-39): si el padron o los grupos de este ciclo fallaron, no
+    # se calcula ninguna fecha sobre sus datos; la huella no se toca y el ciclo
+    # siguiente lo reintenta.
+    pospuestas = padron_fallido(bd, curso.id)
+    contadores: dict[str, Any] = {
+        "assignments": len(resultado.items),
+        "entregas": 0,
+        "eliminadas": 0,
+        "fechas_pospuestas": pospuestas,
+    }
     entregas = (
         bd.query(Entrega)
         .filter(
@@ -186,7 +199,10 @@ def sincronizar_tareas(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
             overrides=overrides,
             estudiantes=estudiantes,
         )
-        if overrides is not None:
+        if overrides is not None and not pospuestas:
+            _contrastar_aceleracion(
+                bd, curso_id=curso.id, entrega=entrega, crudo=vista, overrides=overrides
+            )
             fechas_repo.sincronizar_fechas_entrega(
                 bd, curso_id=curso.id, entrega=entrega, crudo=vista, overrides=overrides
             )
@@ -208,8 +224,100 @@ def sincronizar_tareas(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
     sincronizacion_repo.registrar_ciclo(
         bd, curso_id=curso.id, recurso=_RECURSO_TAREAS, resultado=estado, contadores=contadores
     )
+    _ajustar_cadencia(bd, curso.id)
     # S9.4.4: orden fijo del ciclo, tareas y fechas antes que la materializacion.
     encolar_materializacion(bd, curso_id=curso.id)
+
+
+_RESULTADOS_QUE_POSPONEN = (
+    ResultadoSincronizacion.FALLIDA.value,
+    ResultadoSincronizacion.TRUNCADA.value,
+)
+
+
+def padron_fallido(bd: Session, curso_id: uuid.UUID) -> bool:
+    """CA-9.4-03: el ultimo ciclo de `sync_roster` o de `sync_grupos` termino
+    `FALLIDA` o `TRUNCADA`."""
+    for recurso in ("roster", "grupos"):
+        ultimo = (
+            bd.query(Sincronizacion.resultado)
+            .filter(Sincronizacion.curso_id == curso_id, Sincronizacion.recurso == recurso)
+            .order_by(Sincronizacion.creado_en.desc())
+            .first()
+        )
+        if ultimo is not None and ultimo[0] in _RESULTADOS_QUE_POSPONEN:
+            return True
+    return False
+
+
+def _contrastar_aceleracion(
+    bd: Session,
+    *,
+    curso_id: uuid.UUID,
+    entrega: Entrega,
+    crudo: AssignmentCanvasCrudo,
+    overrides: list[OverrideCanvasCrudo],
+) -> None:
+    """S9.3.1 (A-054): la aceleracion es indicio y la autoridad fija el
+    valor. Si discrepan, se abre `DISCREPANCIA_FECHAS` y manda la autoridad."""
+    crudos = crudo.payload.get("overrides")
+    aceleracion = (
+        {
+            int(o["id"]): _fecha_iso(o.get("due_at"))
+            for o in crudos
+            if isinstance(o, dict) and o.get("id") is not None
+        }
+        if isinstance(crudos, list)
+        else None
+    )
+    distintos = discrepancias_aceleracion(
+        aceleracion=aceleracion,
+        autoridad={o.canvas_override_id: o.due_at for o in overrides},
+    )
+    if distintos:
+        incidencia_repo.abrir_o_actualizar(
+            bd,
+            tipo="DISCREPANCIA_FECHAS",
+            severidad="ADVERTENCIA",
+            sujeto_tipo="ENTREGA",
+            curso_id=curso_id,
+            sujeto_id=entrega.id,
+            detalle={"motivo": "ACELERACION_VS_AUTORIDAD", "canvas_override_ids": distintos},
+        )
+    else:
+        incidencia_repo.cerrar(
+            bd, tipo="DISCREPANCIA_FECHAS", curso_id=curso_id, sujeto_id=entrega.id
+        )
+
+
+def _fecha_iso(valor: object) -> datetime | None:
+    if not valor:
+        return None
+    return datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+
+
+def _ajustar_cadencia(bd: Session, curso_id: uuid.UUID) -> None:
+    """S9.4.4 (A-114): 1 minuto dentro de las 2 horas previas a una fecha
+    efectiva de cierre del curso; 5 minutos el resto del tiempo."""
+    ahora = ahora_utc()
+    proximos = [
+        due
+        for (due,) in bd.query(FechaEfectiva.due_at_utc)
+        .join(Entrega, Entrega.id == FechaEfectiva.entrega_id)
+        .filter(
+            Entrega.curso_id == curso_id,
+            FechaEfectiva.estado == EstadoFechaEfectiva.VIGENTE.value,
+            FechaEfectiva.due_at_utc > ahora,
+            FechaEfectiva.due_at_utc <= ahora + timedelta(hours=2),
+        )
+        if due is not None
+    ]
+    programacion_repo.ajustar_cadencia(
+        bd,
+        tipo="sync_tareas_y_fechas",
+        curso_id=curso_id,
+        cadencia=cadencia_sync_fechas(ahora=ahora, proximos_cierres=proximos),
+    )
 
 
 def _actualizar_advertencias(bd: Session, tarea_id: uuid.UUID) -> None:

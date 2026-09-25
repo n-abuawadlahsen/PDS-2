@@ -1,5 +1,5 @@
-"""Estado de los repositorios de una tarea y fechas de sus entregas (SPEC 08 S8.9,
-S8.11; SPEC 09 S9.5; SPEC 13 S13.5.2; Etapa P8).
+"""Estado de los repositorios de una tarea (SPEC 08 S8.9, S8.11; SPEC 13
+S13.5.2; Etapa P8). Las fechas de las entregas viven en `fechas.py` (F3).
 
 Nada de este modulo llama a Canvas ni a GitHub: lee lo que los trabajos dejaron
 escrito (A-089). «Reintentar» y «sustituir» solo marcan y encolan (A-226).
@@ -17,19 +17,15 @@ from sqlalchemy.orm import Session
 from app.adaptadores import aprovisionamiento_repo
 from app.adaptadores.modelos_aprovisionamiento import (
     AccesoRepositorio,
-    FechaEfectiva,
-    ReglaFecha,
     Repositorio,
     Sujeto,
 )
-from app.adaptadores.modelos_curso import Curso, MembresiaCurso
+from app.adaptadores.modelos_curso import MembresiaCurso
 from app.adaptadores.modelos_github import AccesoDocenteRepositorio
 from app.adaptadores.modelos_mapeo import CuentaGithub
-from app.adaptadores.modelos_padron import Estudiante, Grupo, Seccion
-from app.adaptadores.modelos_tarea import Entrega, Tarea
+from app.adaptadores.modelos_padron import Estudiante, Grupo
+from app.adaptadores.modelos_tarea import Tarea
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere
-from app.dominio.estados import EstadoFechaEfectiva
-from app.dominio.fechas import formatear_fecha
 from app.dominio.permisos import Permiso
 
 router = APIRouter(tags=["repositorios"])
@@ -279,85 +275,3 @@ def sustituir_repositorio(
             status_code=409, detail={"motivo": "NO_SUSTITUIBLE", "detalle": exc.detalle}
         ) from None
     return {"repositorio_id": str(nuevo.id)}
-
-
-class ExcepcionFechaSalida(BaseModel):
-    origen: str
-    etiqueta: str
-    fecha: str
-
-
-class FechasEntregaSalida(BaseModel):
-    entrega_id: uuid.UUID
-    nombre: str
-    tipo: str
-    orden: int
-    cierre_base: str
-    fechas_distintas: int
-    excepciones: list[ExcepcionFechaSalida]
-    sujetos_con_fecha: int
-    sujetos_sin_fecha: int
-
-
-@router.get(
-    "/api/cursos/{curso_id}/tareas/{tarea_id}/entregas/fechas",
-    response_model=list[FechasEntregaSalida],
-)
-def fechas_de_entregas(
-    curso_id: uuid.UUID,
-    tarea_id: uuid.UUID,
-    bd: Session = Depends(obtener_sesion_bd),
-    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
-) -> list[FechasEntregaSalida]:
-    """R2.4.1-R2.4.3 en modo lectura (S9.5): «Cierre: ... · Sección 2: ... · N
-    excepciones», con la zona del curso escrita."""
-    tarea = _tarea(bd, curso_id, tarea_id)
-    curso = bd.get(Curso, curso_id)
-    assert curso is not None
-    zona = curso.zona_horaria
-    secciones = {
-        s.canvas_section_id: s.nombre
-        for s in bd.query(Seccion).filter(Seccion.curso_id == curso_id)
-    }
-    salida = []
-    for entrega in bd.query(Entrega).filter(Entrega.tarea_id == tarea.id).order_by(Entrega.orden):
-        excepciones = []
-        for regla in bd.query(ReglaFecha).filter(
-            ReglaFecha.entrega_id == entrega.id, ReglaFecha.alcance != "BASE"
-        ):
-            if regla.alcance == "SECCION":
-                seccion = secciones.get(regla.canvas_section_id or 0, regla.canvas_section_id)
-                etiqueta = f"Sección {seccion}"
-            elif regla.alcance == "GRUPO":
-                etiqueta = f"Grupo {regla.canvas_group_id}"
-            else:
-                etiqueta = f"Extensión individual ({len(regla.estudiante_ids)} estudiante/s)"
-            excepciones.append(
-                ExcepcionFechaSalida(
-                    origen=regla.alcance,
-                    etiqueta=etiqueta,
-                    fecha=formatear_fecha(regla.due_at, zona),
-                )
-            )
-        vigentes = (
-            bd.query(FechaEfectiva)
-            .filter(
-                FechaEfectiva.entrega_id == entrega.id,
-                FechaEfectiva.estado == EstadoFechaEfectiva.VIGENTE.value,
-            )
-            .all()
-        )
-        salida.append(
-            FechasEntregaSalida(
-                entrega_id=entrega.id,
-                nombre=entrega.nombre,
-                tipo=entrega.tipo,
-                orden=entrega.orden,
-                cierre_base=formatear_fecha(entrega.due_at_base, zona),
-                fechas_distintas=len({f.due_at_utc for f in vigentes if f.due_at_utc is not None}),
-                excepciones=excepciones,
-                sujetos_con_fecha=sum(1 for f in vigentes if f.due_at_utc is not None),
-                sujetos_sin_fecha=sum(1 for f in vigentes if f.due_at_utc is None),
-            )
-        )
-    return salida

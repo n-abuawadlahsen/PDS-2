@@ -825,7 +825,12 @@ class ClienteCanvasReal:
             "/api/v1/courses/{course_id}/assignments",
             f"/api/v1/courses/{canvas_course_id}/assignments",
             token=token,
-            params={"include[]": "assignment_visibility", "per_page": 100},
+            # S9.3.1: fuente de aceleracion; los overrides de autoridad siguen
+            # saliendo del endpoint 14 (`obtener_overrides_assignment`).
+            params={
+                "include[]": ["all_dates", "overrides", "assignment_visibility"],
+                "per_page": 100,
+            },
         )
         return ResultadoPaginado(
             items=[_assignment_desde_json(d) for d in items],

@@ -11,6 +11,7 @@ volver a llamarlo no duplica filas (`UNIQUE (tipo, curso_id)`).
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
@@ -63,4 +64,22 @@ def asegurar_periodicos_globales(bd: Session) -> None:
         # `UNIQUE (tipo, curso_id)` no impide dos filas con `curso_id` nulo en
         # Postgres: la comprobacion previa de `_asegurar` es la que lo evita.
         _asegurar(bd, tipo=tipo, curso_id=None, cadencia=cadencia)
+    bd.flush()
+
+
+def ajustar_cadencia(bd: Session, *, tipo: str, curso_id: uuid.UUID, cadencia: int) -> None:
+    """Cambia la cadencia de un periodico ya sembrado (S9.4.4: 5 min / 1 min).
+    Si se acorta, la proxima ejecucion se adelanta para no esperar el ciclo
+    largo que ya estaba programado."""
+    fila = (
+        bd.query(TrabajoPeriodico)
+        .filter(TrabajoPeriodico.tipo == tipo, TrabajoPeriodico.curso_id == curso_id)
+        .one_or_none()
+    )
+    if fila is None or fila.cadencia_segundos == cadencia:
+        return
+    fila.cadencia_segundos = cadencia
+    limite = ahora_utc() + timedelta(seconds=cadencia)
+    if fila.proxima_ejecucion > limite:
+        fila.proxima_ejecucion = limite
     bd.flush()

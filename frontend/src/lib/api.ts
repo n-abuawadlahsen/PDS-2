@@ -826,16 +826,58 @@ export interface RepositoriosTarea {
   filas: FilaRepositorio[];
 }
 
+export interface ExcepcionFecha {
+  origen: string;
+  etiqueta: string;
+  fecha: string;
+  canvas_override_id: number | null;
+  titulo: string | null;
+  sujetos: string[];
+}
+
+export interface CandidataFecha {
+  origen: string;
+  etiqueta: string;
+  fecha: string;
+  canvas_override_id: number | null;
+}
+
 export interface FechasEntrega {
   entrega_id: string;
   nombre: string;
   tipo: string;
   orden: number;
+  estado_validacion: string;
   cierre_base: string;
   fechas_distintas: number;
-  excepciones: { origen: string; etiqueta: string; fecha: string }[];
+  excepciones: ExcepcionFecha[];
+  ambiguas: { sujeto_id: string; sujeto: string; fecha: string; candidatas: CandidataFecha[] }[];
   sujetos_con_fecha: number;
   sujetos_sin_fecha: number;
+}
+
+export interface HistorialFechasSujeto {
+  sujeto_id: string;
+  sujeto: string;
+  fechas: {
+    fecha: string;
+    origen: string;
+    etiqueta: string;
+    canvas_override_id: number | null;
+    override_titulo: string | null;
+    override_retirado: boolean;
+    ambigua: boolean;
+    estado: string;
+    calculada_en: string;
+    vigente_hasta: string | null;
+  }[];
+}
+
+/** S9.4.1: el encadenamiento de fechas superseded por sujeto es el historial. */
+export async function obtenerHistorialFechas(cursoId: string, entregaId: string): Promise<HistorialFechasSujeto[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/historial-fechas`);
+  if (!respuesta.ok) throw new Error(`GET historial-fechas -> ${respuesta.status}`);
+  return respuesta.json();
 }
 
 export async function obtenerRepositoriosTarea(cursoId: string, tareaId: string): Promise<RepositoriosTarea> {

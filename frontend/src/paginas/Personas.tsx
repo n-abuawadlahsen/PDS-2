@@ -93,7 +93,12 @@ export function Personas() {
     setMensaje(null);
     const respuesta = await sincronizarAhora(cursoId);
     if (respuesta.ok) {
-      setMensaje("Sincronización encolada. Los datos se actualizan en unos minutos.");
+      const cuerpo = await respuesta.json();
+      setMensaje(
+        cuerpo.en_curso
+          ? "Sincronizando ahora mismo: ya hay un ciclo en curso para este curso."
+          : "Sincronización encolada. Los datos se actualizan en unos minutos.",
+      );
     } else {
       setMensaje(`No se pudo encolar la sincronización (${respuesta.status}).`);
     }

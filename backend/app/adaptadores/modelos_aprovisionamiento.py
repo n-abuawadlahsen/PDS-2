@@ -204,7 +204,11 @@ class AccesoRepositorio(Base, ConId):
 
 
 class ReglaFecha(Base, ConId):
-    """A-080: copia cruda de lo que devuelve Canvas; una fila `BASE` por entrega."""
+    """A-080: copia cruda de lo que devuelve Canvas; una fila `BASE` por entrega.
+
+    Un override que desaparece de Canvas no se borra: queda con `retirada_en`
+    (Ley 2), para que el historial de fechas siga diciendo que regla justifico
+    cada fecha superseda (S9.4.1). Si reaparece con el mismo id, se reactiva."""
 
     __tablename__ = "regla_fecha"
     __table_args__ = (
@@ -247,6 +251,7 @@ class ReglaFecha(Base, ConId):
     lock_at: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     titulo: Mapped[str | None] = mapped_column(Text, nullable=True)
     sincronizado_en: Mapped[datetime] = mapped_column(_TZ, nullable=False)
+    retirada_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
 
 
 class FechaEfectiva(Base, ConId):

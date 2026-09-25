@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import {
   obtenerFechasEntregas,
+  obtenerHistorialFechas,
   obtenerRepositoriosTarea,
   reintentarRepositorio,
   sustituirRepositorio,
   type FechasEntrega,
   type FilaRepositorio,
+  type HistorialFechasSujeto,
   type RepositoriosTarea,
 } from "../lib/api";
 import {
@@ -206,20 +208,122 @@ export function LineaFechas({ cursoId, tareaId }: { cursoId: string; tareaId: st
   return (
     <div style={{ marginTop: "0.75rem" }}>
       {fechas.map((f) => (
-        <p key={f.entrega_id} style={{ margin: "0.25rem 0" }}>
-          <strong>
-            {textoTipoEntrega(f.tipo)} {f.orden}
-          </strong>{" "}
-          · Cierre: {f.cierre_base}
-          {f.excepciones.map((e, i) => (
-            <span key={i}>
-              {" "}
-              · {e.etiqueta}: {e.fecha}
-            </span>
-          ))}
-          {f.sujetos_sin_fecha > 0 && <span style={ESTILO_MOTIVO}> · {f.sujetos_sin_fecha} sin fecha de cierre</span>}
-        </p>
+        <FechasDeUnaEntrega key={f.entrega_id} cursoId={cursoId} fechas={f} />
       ))}
     </div>
+  );
+}
+
+/** S9.5: «Cierre: ... · Sección 2: ... · N excepciones», con las excepciones
+ * desplegables (sujeto, fecha, origen y override copiable) y la insignia
+ * «fecha ambigua» con sus candidatas (CA-9.5-03). */
+function FechasDeUnaEntrega({ cursoId, fechas: f }: { cursoId: string; fechas: FechasEntrega }) {
+  const [historial, setHistorial] = useState<HistorialFechasSujeto[] | null>(null);
+  const secciones = f.excepciones.filter((e) => e.origen === "SECCION");
+  const otras = f.excepciones.filter((e) => e.origen !== "SECCION");
+  return (
+    <div style={{ margin: "0.25rem 0" }}>
+      <strong>
+        {textoTipoEntrega(f.tipo)} {f.orden}
+      </strong>{" "}
+      · Cierre: {f.cierre_base}
+      {secciones.map((e) => (
+        <span key={e.canvas_override_id ?? e.etiqueta}>
+          {" "}
+          · {e.etiqueta}: {e.fecha}
+        </span>
+      ))}
+      {f.sujetos_sin_fecha > 0 && <span style={ESTILO_MOTIVO}> · {f.sujetos_sin_fecha} sin fecha de cierre</span>}
+      {otras.length > 0 && (
+        <details>
+          <summary>{otras.length === 1 ? "1 excepción" : `${otras.length} excepciones`}</summary>
+          <ul>
+            {otras.map((e) => (
+              <li key={e.canvas_override_id ?? e.etiqueta}>
+                {e.sujetos.join(", ") || "nadie del curso"} — {e.fecha} · {e.etiqueta}
+                {e.canvas_override_id !== null && <Override id={e.canvas_override_id} />}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {f.ambiguas.map((a) => (
+        <details key={a.sujeto_id}>
+          <summary>
+            <span style={{ background: "#fff3cd", padding: "0 0.3rem" }}>fecha ambigua</span> {a.sujeto}: {a.fecha}
+          </summary>
+          <ul>
+            {a.candidatas.map((c, i) => (
+              <li key={i}>
+                {c.etiqueta}: {c.fecha}
+                {c.canvas_override_id !== null && <Override id={c.canvas_override_id} />}
+              </li>
+            ))}
+          </ul>
+          <p style={ESTILO_MOTIVO}>
+            Se usa la más tardía: capturar antes de tiempo destruye trabajo legítimo.
+          </p>
+        </details>
+      ))}
+      <div>
+        <button
+          style={{ fontSize: "0.85rem" }}
+          onClick={async () => setHistorial(historial ? null : await obtenerHistorialFechas(cursoId, f.entrega_id))}
+        >
+          {historial ? "Ocultar historial de fechas" : "Ver historial de fechas"}
+        </button>
+        {historial && (
+          <table style={{ fontSize: "0.85rem" }}>
+            <thead>
+              <tr>
+                <th>Estudiante o grupo</th>
+                <th>Fecha de cierre</th>
+                <th>Origen</th>
+                <th>Vigencia</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historial.flatMap((h) =>
+                h.fechas.map((x, i) => (
+                  <tr key={`${h.sujeto_id}-${i}`} style={{ opacity: x.estado === "VIGENTE" ? 1 : 0.6 }}>
+                    <td>{i === 0 ? h.sujeto : ""}</td>
+                    <td>
+                      {x.fecha}
+                      {x.ambigua && <span style={ESTILO_MOTIVO}> (ambigua)</span>}
+                    </td>
+                    <td>
+                      {x.etiqueta}
+                      {x.override_titulo && <span style={ESTILO_MOTIVO}> «{x.override_titulo}»</span>}
+                      {x.override_retirado && <span style={ESTILO_MOTIVO}> (ya no existe en Canvas)</span>}
+                    </td>
+                    <td>
+                      {x.estado === "VIGENTE"
+                        ? `vigente desde ${fechaLegible(x.calculada_en)}`
+                        : `reemplazada el ${fechaLegible(x.vigente_hasta)}`}
+                    </td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Override({ id }: { id: number }) {
+  return (
+    <>
+      {" "}
+      <code>{id}</code>{" "}
+      <button
+        style={{ fontSize: "0.75rem" }}
+        title="Copiar el identificador del override de Canvas"
+        onClick={() => navigator.clipboard?.writeText(String(id))}
+      >
+        copiar
+      </button>
+    </>
   );
 }

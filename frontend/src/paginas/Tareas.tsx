@@ -56,10 +56,13 @@ export function Tareas() {
   async function onSincronizar() {
     if (!cursoId) return;
     const respuesta = await sincronizarAhora(cursoId);
+    const cuerpo = respuesta.ok ? await respuesta.json() : null;
     setMensaje(
-      respuesta.ok
-        ? "Sincronización encolada. Recarga en unos segundos para ver las tareas de Canvas."
-        : `No se pudo encolar (${respuesta.status}).`,
+      !respuesta.ok
+        ? `No se pudo encolar (${respuesta.status}).`
+        : cuerpo?.en_curso
+          ? "Sincronizando ahora mismo: ya hay un ciclo en curso para este curso."
+          : "Sincronización encolada. Recarga en unos segundos para ver las tareas de Canvas.",
     );
   }
 

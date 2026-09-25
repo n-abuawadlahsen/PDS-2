@@ -25,7 +25,7 @@ from app.adaptadores.canvas_repo import descifrar_token, obtener_credencial_oper
 from app.adaptadores.cliente_canvas import FalloProveedorCanvas, crear_cliente_canvas
 from app.adaptadores.cliente_github import FalloProveedorGithub, crear_cliente_github_desde_config
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
-from app.adaptadores.modelos_infraestructura import CursorSincronizacion
+from app.adaptadores.modelos_infraestructura import CursorSincronizacion, Trabajo
 from app.adaptadores.modelos_mapeo import CuentaGithub, MapeoGithub
 from app.adaptadores.modelos_padron import (
     ConjuntoGrupos,
@@ -36,7 +36,7 @@ from app.adaptadores.modelos_padron import (
     Seccion,
 )
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere
-from app.dominio.estados import EstadoEstudiante, EstadoMapeoGithub
+from app.dominio.estados import EstadoEstudiante, EstadoMapeoGithub, EstadoTrabajo
 from app.dominio.mapeo_github import RechazoMapeo
 from app.dominio.permisos import Permiso, permisos_efectivos
 from app.infraestructura.cifrado import Llavero
@@ -327,7 +327,27 @@ def sincronizar_ahora(
     llama a Canvas dentro de la peticion (Ley 1). Roster antes que grupos, y
     ambos antes que tareas: un grupo referencia estudiantes que deben existir
     primero (S7.2.5), y la visibilidad de una entrega se calcula sobre ese
-    padron (A-164)."""
+    padron (A-164).
+
+    CA-9.4-04: con un ciclo ya en vuelo no se encola otro; la respuesta dice
+    `en_curso` para que la pantalla escriba «sincronizando ahora mismo»."""
+    en_vuelo = (
+        bd.query(Trabajo.id)
+        .filter(
+            Trabajo.curso_id == curso_id,
+            Trabajo.tipo == "sync_tareas_y_fechas",
+            Trabajo.estado.in_(
+                [
+                    EstadoTrabajo.PENDIENTE.value,
+                    EstadoTrabajo.EN_CURSO.value,
+                    EstadoTrabajo.REINTENTAR.value,
+                ]
+            ),
+        )
+        .first()
+    )
+    if en_vuelo is not None:
+        return {"ok": True, "en_curso": True}
     ahora = ahora_utc()
     for tipo, prefijo in (
         ("sync_roster", "manual_roster"),
@@ -341,7 +361,7 @@ def sincronizar_ahora(
             max_intentos=4,
             curso_id=curso_id,
         )
-    return {"ok": True}
+    return {"ok": True, "en_curso": False}
 
 
 def _detalle_rechazo(exc: RechazoMapeo) -> dict[str, str]:
