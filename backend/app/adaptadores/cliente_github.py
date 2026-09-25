@@ -31,6 +31,7 @@ from app.dominio.repositorio_github import (
     RepoGithubInfo,
     ResultadoInvitacion,
 )
+from app.dominio.versiones import CommitCierre
 from app.dominio.vinculacion_github import CuentaUsuarioInfo, InstalacionInfo, OrganizacionInfo
 
 _TIMEOUT_SEGUNDOS = 20.0
@@ -303,7 +304,7 @@ class ClienteGitHub(Protocol):
         ...
 
     def obtener_archivo(
-        self, org_login: str, repo: str, ruta: str, token_instalacion: str
+        self, org_login: str, repo: str, ruta: str, token_instalacion: str, ref: str | None = None
     ) -> ArchivoGithub | None:
         """`GET /repos/{o}/{r}/contents/{ruta}`. No figura en la tabla de
         S6.5.2, pero es la "lectura antes del efecto" que el contrato de A-169
@@ -338,6 +339,37 @@ class ClienteGitHub(Protocol):
         token_instalacion: str,
     ) -> None:
         """`DELETE /repos/{o}/{r}/contents/{ruta}`: solo sobre el base (S6.5.2)."""
+        ...
+
+    # --- Etapa F4: captura de versiones (SPEC 09 S9.6, S9.8.5, S9.10.5) ---
+
+    def listar_commits_hasta(
+        self, org_login: str, repo: str, *, rama: str, corte: datetime, token_instalacion: str
+    ) -> list[CommitCierre]:
+        """`GET /repos/{o}/{r}/commits?sha=<rama>&until=<corte+1s>&per_page=100`
+        (A-102). Pide un segundo por encima del corte para que la inclusividad
+        de `until` deje de importar; si ninguna candidata cae en el corte, sigue
+        `Link` hasta 5 paginas. La seleccion del commit la hace el dominio."""
+        ...
+
+    def obtener_commit(
+        self, org_login: str, repo: str, sha: str, token_instalacion: str
+    ) -> CommitCierre | None:
+        """`GET /repos/{o}/{r}/commits/{sha}`: `None` si el SHA no existe en ese
+        repositorio (404/422), que es como se rechaza fijar un SHA ajeno."""
+        ...
+
+    def obtener_ref_tag(
+        self, org_login: str, repo: str, nombre: str, token_instalacion: str
+    ) -> str | None:
+        """`GET /repos/{o}/{r}/git/ref/tags/{nombre}`: el SHA al que apunta, o
+        `None` si la etiqueta no existe."""
+        ...
+
+    def crear_ref_tag(
+        self, org_login: str, repo: str, nombre: str, sha: str, token_instalacion: str
+    ) -> None:
+        """`POST /repos/{o}/{r}/git/refs` con `refs/tags/<nombre>` (A-104)."""
         ...
 
 
@@ -798,12 +830,14 @@ class ClienteGitHubReal:
         _exigir_exito(respuesta)
 
     def obtener_archivo(
-        self, org_login: str, repo: str, ruta: str, token_instalacion: str
+        self, org_login: str, repo: str, ruta: str, token_instalacion: str, ref: str | None = None
     ) -> ArchivoGithub | None:
         respuesta = self._peticion(
             "GET",
             f"https://api.github.com/repos/{org_login}/{repo}/contents/{quote(ruta, safe='/')}",
             token=token_instalacion,
+            # F4 (S9.10.5): `ref` lee el arbol del commit capturado.
+            params={"ref": ref} if ref is not None else None,
         )
         if respuesta.status_code == 404:
             return None
@@ -866,6 +900,89 @@ class ClienteGitHubReal:
             return  # ya no estaba: el efecto buscado ya existe
         _exigir_exito(respuesta)
 
+    def listar_commits_hasta(
+        self, org_login: str, repo: str, *, rama: str, corte: datetime, token_instalacion: str
+    ) -> list[CommitCierre]:
+        url: str | None = f"https://api.github.com/repos/{org_login}/{repo}/commits"
+        params: dict[str, Any] | None = {
+            "sha": rama,
+            "until": (corte + timedelta(seconds=1)).astimezone(UTC).isoformat(),
+            "per_page": 100,
+        }
+        commits: list[CommitCierre] = []
+        for _ in range(_PAGINAS_COMMITS_MAXIMAS):
+            assert url is not None
+            respuesta = self._peticion("GET", url, token=token_instalacion, params=params)
+            if respuesta.status_code == 409:
+                return []  # repositorio vacio
+            _exigir_exito(respuesta)
+            commits.extend(_commit_desde_json(d) for d in respuesta.json())
+            url = respuesta.links.get("next", {}).get("url")
+            params = None
+            if url is None or any(c.fecha_committer <= corte for c in commits):
+                break
+        return commits
+
+    def obtener_commit(
+        self, org_login: str, repo: str, sha: str, token_instalacion: str
+    ) -> CommitCierre | None:
+        respuesta = self._peticion(
+            "GET",
+            f"https://api.github.com/repos/{org_login}/{repo}/commits/{sha}",
+            token=token_instalacion,
+        )
+        if respuesta.status_code in (404, 422):
+            return None
+        _exigir_exito(respuesta)
+        return _commit_desde_json(respuesta.json())
+
+    def obtener_ref_tag(
+        self, org_login: str, repo: str, nombre: str, token_instalacion: str
+    ) -> str | None:
+        ruta = quote(nombre, safe="/")
+        respuesta = self._peticion(
+            "GET",
+            f"https://api.github.com/repos/{org_login}/{repo}/git/ref/tags/{ruta}",
+            token=token_instalacion,
+        )
+        if respuesta.status_code == 404:
+            return None
+        _exigir_exito(respuesta)
+        return str(respuesta.json()["object"]["sha"])
+
+    def crear_ref_tag(
+        self, org_login: str, repo: str, nombre: str, sha: str, token_instalacion: str
+    ) -> None:
+        respuesta = self._peticion(
+            "POST",
+            f"https://api.github.com/repos/{org_login}/{repo}/git/refs",
+            token=token_instalacion,
+            json={"ref": f"refs/tags/{nombre}", "sha": sha},
+        )
+        _exigir_exito(respuesta)
+
+
+_PAGINAS_COMMITS_MAXIMAS = 5
+
+
+def _fecha_github(valor: str | None) -> datetime | None:
+    if not valor:
+        return None
+    return datetime.fromisoformat(valor.replace("Z", "+00:00"))
+
+
+def _commit_desde_json(d: dict[str, Any]) -> CommitCierre:
+    datos = d.get("commit") or {}
+    fecha_committer = _fecha_github((datos.get("committer") or {}).get("date"))
+    assert fecha_committer is not None
+    return CommitCierre(
+        sha=str(d["sha"]),
+        tree_sha=(datos.get("tree") or {}).get("sha"),
+        fecha_committer=fecha_committer,
+        fecha_autor=_fecha_github((datos.get("author") or {}).get("date")),
+        mensaje=datos.get("message"),
+    )
+
 
 def _sha_blob(contenido: bytes) -> str:
     """El `sha` que GitHub devuelve en la API de contenidos es el blob sha de git."""
@@ -894,6 +1011,40 @@ _archivos: dict[tuple[str, str], dict[str, bytes]] = {}
 _colaboradores: dict[tuple[str, str], set[str]] = {}
 _invitaciones: dict[tuple[str, str], dict[str, InvitacionGithub]] = {}
 _repos_con_lectura_equipo: set[tuple[str, str, str]] = set()
+# Etapa F4: historia de commits y etiquetas del doble. Al crear un repositorio
+# nace con su commit inicial; `agregar_commit_doble` simula al estudiante.
+_commits: dict[tuple[str, str], list[CommitCierre]] = {}
+_tags: dict[tuple[str, str], dict[str, str]] = {}
+
+
+def agregar_commit_doble(org_login: str, repo: str, *, fecha: datetime, mensaje: str) -> str:
+    """Solo para el doble: el estudiante hace un commit con fecha de committer
+    `fecha`. Devuelve el SHA."""
+    historia = _commits.setdefault((org_login, repo), [])
+    sha = hashlib.sha1(f"{org_login}/{repo}/{len(historia)}/{mensaje}".encode()).hexdigest()
+    historia.append(
+        CommitCierre(
+            sha=sha,
+            tree_sha=hashlib.sha1(sha.encode()).hexdigest(),
+            fecha_committer=fecha,
+            fecha_autor=fecha,
+            mensaje=mensaje,
+        )
+    )
+    return sha
+
+
+def retrodatar_repo_doble(org_login: str, repo: str, fecha: datetime) -> None:
+    """Solo para el doble: el commit inicial pasa a tener fecha `fecha`, como
+    un repositorio creado dias antes de un cierre."""
+    historia = _commits.get((org_login, repo), [])
+    if historia:
+        historia[0] = replace(historia[0], fecha_committer=fecha, fecha_autor=fecha)
+
+
+def tags_doble(org_login: str, repo: str) -> dict[str, str]:
+    """Solo para el doble: las etiquetas del repositorio, mutables en pruebas."""
+    return _tags.setdefault((org_login, repo), {})
 
 
 def aceptar_invitacion_doble(org_login: str, repo: str, login: str) -> None:
@@ -1058,6 +1209,7 @@ class ClienteGitHubDoble:
         if gitignore_template is not None:
             archivos[".gitignore"] = f"# {gitignore_template}\n".encode()
         _archivos[(org_login, nombre)] = archivos
+        self._sembrar_commit_inicial(org_login, nombre)
         return info
 
     def _nuevo_repo(self, org_login: str, nombre: str, descripcion: str) -> RepoGithubInfo:
@@ -1075,6 +1227,20 @@ class ClienteGitHubDoble:
         _repos[(org_login, nombre)] = info
         return info
 
+    def _sembrar_commit_inicial(self, org_login: str, nombre: str) -> None:
+        """El commit inicial del doble es el mismo SHA que `obtener_primer_commit`."""
+        sha = self.obtener_primer_commit(org_login, nombre, "")
+        if sha is not None:
+            _commits[(org_login, nombre)] = [
+                CommitCierre(
+                    sha=sha,
+                    tree_sha=None,
+                    fecha_committer=datetime.now(UTC),
+                    fecha_autor=datetime.now(UTC),
+                    mensaje="Initial commit",
+                )
+            ]
+
     def generar_desde_plantilla(
         self,
         plantilla_owner: str,
@@ -1091,6 +1257,7 @@ class ClienteGitHubDoble:
             raise RechazoProveedorGithub(404, "Not Found")
         info = self._nuevo_repo(org_login, nombre, descripcion)
         _archivos[(org_login, nombre)] = dict(_archivos.get((plantilla_owner, plantilla_repo), {}))
+        self._sembrar_commit_inicial(org_login, nombre)
         return info
 
     def obtener_primer_commit(
@@ -1150,7 +1317,7 @@ class ClienteGitHubDoble:
         _repos[(org_login, repo)] = replace(_repos[(org_login, repo)], topics=tuple(topics))
 
     def obtener_archivo(
-        self, org_login: str, repo: str, ruta: str, token_instalacion: str
+        self, org_login: str, repo: str, ruta: str, token_instalacion: str, ref: str | None = None
     ) -> ArchivoGithub | None:
         contenido = _archivos.get((org_login, repo), {}).get(ruta)
         if contenido is None:
@@ -1193,6 +1360,38 @@ class ClienteGitHubDoble:
         token_instalacion: str,
     ) -> None:
         _archivos.get((org_login, repo), {}).pop(ruta, None)
+
+    def listar_commits_hasta(
+        self, org_login: str, repo: str, *, rama: str, corte: datetime, token_instalacion: str
+    ) -> list[CommitCierre]:
+        if (org_login, repo) not in _repos:
+            raise RechazoProveedorGithub(404, "Not Found")
+        hasta = corte + timedelta(seconds=1)
+        return sorted(
+            (c for c in _commits.get((org_login, repo), []) if c.fecha_committer <= hasta),
+            key=lambda c: c.fecha_committer,
+            reverse=True,
+        )
+
+    def obtener_commit(
+        self, org_login: str, repo: str, sha: str, token_instalacion: str
+    ) -> CommitCierre | None:
+        return next((c for c in _commits.get((org_login, repo), []) if c.sha == sha), None)
+
+    def obtener_ref_tag(
+        self, org_login: str, repo: str, nombre: str, token_instalacion: str
+    ) -> str | None:
+        return _tags.get((org_login, repo), {}).get(nombre)
+
+    def crear_ref_tag(
+        self, org_login: str, repo: str, nombre: str, sha: str, token_instalacion: str
+    ) -> None:
+        if (org_login, repo) not in _repos:
+            raise RechazoProveedorGithub(404, "Not Found")
+        tags = _tags.setdefault((org_login, repo), {})
+        if nombre in tags:
+            raise RechazoProveedorGithub(422, "Reference already exists")
+        tags[nombre] = sha
 
 
 def crear_cliente_github(*, modo: str, app_id: str, private_key_pem_base64: str) -> ClienteGitHub:

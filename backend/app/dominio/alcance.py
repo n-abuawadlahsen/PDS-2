@@ -14,6 +14,8 @@ queda activa en cualquier perfil. La retirada se registra tambien en
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 @dataclass(frozen=True)
@@ -28,7 +30,7 @@ BANDERAS: tuple[BanderaAlcance, ...] = (
     BanderaAlcance("tarea_multientrega", 3, "23 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("tarea_modalidad_grupal", 3, "23 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("fechas_excepciones", 3, "23 de septiembre", retirada_el="25-09-2026"),
-    BanderaAlcance("versiones_entrega", 3, "23 de septiembre"),
+    BanderaAlcance("versiones_entrega", 3, "23 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("tarea_archivado", 2, "30 de septiembre"),
     BanderaAlcance("tablero_actividad", 2, "30 de septiembre"),
     BanderaAlcance("repositorio_timeline", 2, "30 de septiembre"),
@@ -57,3 +59,14 @@ def motivo_capa_3(nombre: str, que_falta: str) -> str:
     """Texto de un control deshabilitado con motivo (S1.11 capa 3): dice que
     falta y la fecha comprometida escrita."""
     return f"{que_falta} llega el {_POR_NOMBRE[nombre].fecha_comprometida}."
+
+
+def instante_retirada(nombre: str) -> datetime | None:
+    """El comienzo del dia de retirada, en la zona por defecto de los cursos
+    (A-152). Es el instante en que el codigo de esa bandera entra en servicio;
+    `None` si aun no se retiro."""
+    retirada = _POR_NOMBRE[nombre].retirada_el
+    if retirada is None:
+        return None
+    dia, mes, anio = (int(p) for p in retirada.split("-"))
+    return datetime(anio, mes, dia, tzinfo=ZoneInfo("America/Santiago"))

@@ -137,3 +137,23 @@ def liberar_huerfanos_por_vigilancia(sesion: Session, *, umbral_minutos: int = 1
         trabajo.proximo_intento_en = ahora_utc()
     sesion.flush()
     return len(trabajos)
+
+
+class PosponerTrabajo(Exception):
+    """El manejador pide volver a intentarlo en `cuando` sin consumir un
+    intento: una condicion bloqueante que no es un fallo del trabajo (p. ej.
+    GitHub sin acceso al capturar, S9.10.4)."""
+
+    def __init__(self, cuando: datetime, motivo: str) -> None:
+        self.cuando = cuando
+        self.motivo = motivo
+        super().__init__(motivo)
+
+
+def marcar_pospuesto(sesion: Session, trabajo: Trabajo, *, cuando: datetime, motivo: str) -> None:
+    trabajo.estado = EstadoTrabajo.PENDIENTE.value
+    trabajo.proximo_intento_en = cuando
+    trabajo.ultimo_error = motivo
+    trabajo.tomado_por = None
+    trabajo.tomado_en = None
+    sesion.flush()

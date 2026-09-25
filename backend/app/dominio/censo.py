@@ -93,6 +93,9 @@ ENTIDADES_ETAPA_P8: frozenset[str] = frozenset(
     }
 )
 
+# Etapa F4 - captura y versiones de entrega (SPEC 09 S9.6-S9.9).
+ENTIDADES_ETAPA_F4: frozenset[str] = frozenset({"version_entrega"})
+
 CENSO: frozenset[str] = (
     ENTIDADES_ETAPA_0
     | ENTIDADES_ETAPA_P1
@@ -103,6 +106,7 @@ CENSO: frozenset[str] = (
     | ENTIDADES_ETAPA_P6
     | ENTIDADES_ETAPA_P7
     | ENTIDADES_ETAPA_P8
+    | ENTIDADES_ETAPA_F4
 )
 
 # Valor especial admitido en bitacora.entidad ademas del censo (A-184).

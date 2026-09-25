@@ -8,6 +8,7 @@ import {
   escribirArchivoBase,
   excluirEntrega,
   obtenerAssignmentsCanvas,
+  obtenerCapacidades,
   obtenerTarea,
   previsualizarArchivoBase,
   renombrarArchivoBase,
@@ -62,6 +63,14 @@ export function Tarea() {
   const [opciones, setOpciones] = useState<AssignmentCanvasOpcion[] | null>(null);
   const [nuevaId, setNuevaId] = useState<number | null>(null);
   const [finalId, setFinalId] = useState<number | null>(null);
+  // SPEC 13.3.3: la pestaña de entregas y versiones existe si sus dos banderas
+  // estan retiradas; la navegacion sale solo de /api/capacidades.
+  const [conVersiones, setConVersiones] = useState(false);
+  useEffect(() => {
+    obtenerCapacidades().then((c) =>
+      setConVersiones(["versiones_entrega", "fechas_excepciones"].every((b) => c.banderas.includes(b))),
+    );
+  }, []);
 
   async function cargar() {
     if (!cursoId || !tareaId) return;
@@ -236,6 +245,13 @@ export function Tarea() {
           </table>
         )}
         <LineaFechas cursoId={cursoId} tareaId={tareaId} />
+        {conVersiones && (
+          <p>
+            <Link to={`/cursos/${cursoId}/tareas/${tareaId}/entregas`}>
+              Entregas y versiones: excepciones de fecha, versiones registradas y acceso al código
+            </Link>
+          </p>
+        )}
         {!tarea.vincular_otra_entrega.habilitada ? (
           <p>
             <button disabled>Vincular otra entrega</button>{" "}

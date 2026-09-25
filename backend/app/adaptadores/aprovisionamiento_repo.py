@@ -30,7 +30,13 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.adaptadores import fechas_repo, incidencia_repo, outbox_repo, trabajos_repo
+from app.adaptadores import (
+    fechas_repo,
+    incidencia_repo,
+    outbox_repo,
+    trabajos_repo,
+    versiones_repo,
+)
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.cliente_github import (
@@ -1143,6 +1149,8 @@ def _evaluar_predicado(bd: Session, c: _Contexto, repositorio: Repositorio) -> N
     repositorio.error_codigo = None
     if repositorio.listo_en is None:
         repositorio.listo_en = ahora_utc()
+        # S9.6.6: si el sujeto ya tenia `SIN_REPOSITORIO`, se avisa; no se captura solo.
+        versiones_repo.al_quedar_listo_el_repositorio(bd, repositorio)
     repositorio.actualizado_en = ahora_utc()
     bd.flush()
     if anterior != repositorio.estado:

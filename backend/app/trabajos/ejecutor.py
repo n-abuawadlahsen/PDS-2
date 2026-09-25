@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adaptadores import programacion_repo, trabajos_repo
+from app.adaptadores.base import ahora_utc
 from app.dominio.estados import FamiliaError
 from app.dominio.reintentos import proximo_intento_en
 from app.infraestructura.config import obtener_configuracion
@@ -29,6 +30,8 @@ from app.infraestructura.logs import configurar_logs, obtener_logger
 from app.infraestructura.migraciones import aplicar_migraciones
 from app.trabajos import (  # noqa: F401 (registra manejadores)
     aprovisionar_repositorios,
+    barrido_completo_actividad,
+    crear_etiqueta,
     despachar_outbox,
     ejecutar_checklist_vinculacion,
     materializar_sujetos,
@@ -36,6 +39,7 @@ from app.trabajos import (  # noqa: F401 (registra manejadores)
     recolector_mapeos,
     reconciliar_accesos,
     registro,
+    resolver_sha,
     revalidar_mapeos,
     revocar_acceso_docente,
     sincronizar_acceso_docente,
@@ -72,7 +76,7 @@ def _procesar_un_trabajo(sesion: Session, *, tomado_por: str) -> bool:
         trabajos_repo.marcar_reintentar(
             sesion,
             trabajo,
-            proximo_intento_en=datetime.now(),
+            proximo_intento_en=ahora_utc(),
             error=f"sin manejador para {trabajo.tipo}",
         )
         sesion.commit()
@@ -81,10 +85,17 @@ def _procesar_un_trabajo(sesion: Session, *, tomado_por: str) -> bool:
     try:
         manejador(sesion, trabajo)
         trabajos_repo.marcar_ok(sesion, trabajo)
+    except trabajos_repo.PosponerTrabajo as pospuesto:
+        trabajos_repo.marcar_pospuesto(
+            sesion, trabajo, cuando=pospuesto.cuando, motivo=pospuesto.motivo
+        )
+        _logger.info("trabajo.pospuesto", tipo=trabajo.tipo, motivo=pospuesto.motivo)
     except Exception as exc:  # noqa: BLE001 - clasificado explicitamente abajo
         familia = exc.familia if isinstance(exc, ErrorClasificado) else FamiliaError.TRANSITORIO
         intento = trabajo.intentos + 1
-        cuando = proximo_intento_en(ahora=datetime.now(), intento=intento)
+        # UTC con zona: un `datetime.now()` ingenuo se guardaba como UTC y, en la
+        # zona del servidor, dejaba el reintento horas en el pasado.
+        cuando = proximo_intento_en(ahora=ahora_utc(), intento=intento)
         if familia == FamiliaError.PERMANENTE:
             trabajo.max_intentos = 0  # cero reintentos: pasa a REQUIERE_ATENCION de inmediato
         trabajos_repo.marcar_reintentar(sesion, trabajo, proximo_intento_en=cuando, error=str(exc))
@@ -127,6 +138,7 @@ def main() -> None:
         # El despacho del outbox es global: existe aunque ningun curso haya
         # activado todavia una tarea (S14.7.4).
         programacion_repo.asegurar_periodicos_globales(sesion)
+        programacion_repo.asegurar_periodicos_de_cursos_activos(sesion)
         sesion.commit()
     tomado_por = _id_trabajador()
     _logger.info("ejecutor.arrancando", tomado_por=tomado_por)

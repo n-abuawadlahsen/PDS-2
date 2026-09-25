@@ -3,6 +3,7 @@ import { Acceso } from "./paginas/Acceso";
 import { Checklist } from "./paginas/Checklist";
 import { Confirmar } from "./paginas/Confirmar";
 import { Cursos } from "./paginas/Cursos";
+import { EntregasTarea } from "./paginas/EntregasTarea";
 import { Equipo } from "./paginas/Equipo";
 import { GithubRetorno } from "./paginas/GithubRetorno";
 import { InvitacionPublica } from "./paginas/InvitacionPublica";
@@ -28,6 +29,7 @@ export function App() {
         <Route path="/cursos/:cursoId/pendientes" element={<Pendientes />} />
         <Route path="/cursos/:cursoId/tareas" element={<Tareas />} />
         <Route path="/cursos/:cursoId/tareas/:tareaId" element={<Tarea />} />
+        <Route path="/cursos/:cursoId/tareas/:tareaId/entregas" element={<EntregasTarea />} />
         <Route path="/vinculacion/github/retorno" element={<GithubRetorno />} />
         <Route path="/invitaciones/:token" element={<InvitacionPublica />} />
         <Route path="/perfil" element={<PerfilPagina />} />

@@ -21,6 +21,13 @@ def limpiar_tablas_identidad():
         sesion.execute(text("DELETE FROM bitacora"))
         # Etapa P8: lo que referencia repositorio, sujeto y regla_fecha primero.
         sesion.execute(text("DELETE FROM mensaje_saliente"))
+        # Etapa F4: `version_entrega` es evidencia y su disparador rechaza todo
+        # DELETE; solo la limpieza de pruebas lo apaga durante la sentencia.
+        sesion.execute(
+            text("ALTER TABLE version_entrega DISABLE TRIGGER version_entrega_inmutable")
+        )
+        sesion.execute(text("DELETE FROM version_entrega"))
+        sesion.execute(text("ALTER TABLE version_entrega ENABLE TRIGGER version_entrega_inmutable"))
         sesion.execute(text("DELETE FROM fecha_efectiva"))
         sesion.execute(text("DELETE FROM regla_fecha"))
         sesion.execute(text("DELETE FROM acceso_repositorio"))

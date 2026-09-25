@@ -18,6 +18,7 @@ from app.adaptadores import (  # noqa: F401
     modelos_mapeo,
     modelos_padron,
     modelos_tarea,
+    modelos_version,
 )
 from app.adaptadores.base import Base
 

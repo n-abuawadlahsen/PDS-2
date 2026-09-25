@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.modelos_infraestructura import TrabajoPeriodico
+from app.dominio.estados import EstadoTarea
 
 # Cadencias del catalogo cerrado de 31 (app/trabajos/catalogo.py), en segundos.
 PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
@@ -27,9 +28,14 @@ PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
     ("materializar_sujetos", 300),
     ("aprovisionar_repositorios", 120),
     ("reconciliar_accesos", 900),
+    # F4: solo su parte de verificacion de versiones (S9.8.5, S9.10.2).
+    ("barrido_completo_actividad", 86_400),
 )
 
-PERIODICOS_GLOBALES: tuple[tuple[str, int], ...] = (("despachar_outbox", 30),)
+PERIODICOS_GLOBALES: tuple[tuple[str, int], ...] = (
+    ("despachar_outbox", 30),
+    ("resolver_sha", 60),  # F4: el tick de captura (S9.6.1)
+)
 
 
 def _asegurar(bd: Session, *, tipo: str, curso_id: uuid.UUID | None, cadencia: int) -> None:
@@ -57,6 +63,17 @@ def asegurar_periodicos_de_curso(bd: Session, curso_id: uuid.UUID) -> None:
     for tipo, cadencia in PERIODICOS_DE_CURSO:
         _asegurar(bd, tipo=tipo, curso_id=curso_id, cadencia=cadencia)
     bd.flush()
+
+
+def asegurar_periodicos_de_cursos_activos(bd: Session) -> None:
+    """Al arrancar el trabajador: un curso que ya tenia tareas activas antes
+    de un despliegue recibe los periodicos que ese despliegue agrego."""
+    from app.adaptadores.modelos_tarea import Tarea
+
+    for (curso_id,) in (
+        bd.query(Tarea.curso_id).filter(Tarea.estado == EstadoTarea.ACTIVA.value).distinct()
+    ):
+        asegurar_periodicos_de_curso(bd, curso_id)
 
 
 def asegurar_periodicos_globales(bd: Session) -> None:

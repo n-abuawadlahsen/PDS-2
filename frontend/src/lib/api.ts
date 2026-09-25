@@ -880,6 +880,111 @@ export async function obtenerHistorialFechas(cursoId: string, entregaId: string)
   return respuesta.json();
 }
 
+// --- Etapa F4: versiones de entrega (SPEC 09 S9.6-S9.9) ---
+
+export interface VersionEntrega {
+  id: string;
+  intento: number;
+  vigente: boolean;
+  estado: string;
+  motivo: string | null;
+  commit_sha: string | null;
+  commit_mensaje: string | null;
+  rama: string | null;
+  fecha_corte: string;
+  capturada_en: string;
+  captura_tardia_minutos: number | null;
+  tag_nombre: string | null;
+  tag_estado: string;
+  tag_motivo: string | null;
+  tag_error: string | null;
+  advertencias: string[];
+  verificacion: Record<string, unknown>;
+  origen_captura: string;
+  motivo_manual: string | null;
+  creada_por: string | null;
+  integrantes: { nombre: string; github_login: string | null }[];
+  sujeto_etiqueta: string;
+  repositorio_full_name: string | null;
+  fecha_origen: string | null;
+  canvas_override_id: number | null;
+  comparacion_base: string | null;
+  enlaces: { arbol: string | null; comparacion: string | null; zip: string | null };
+}
+
+export interface FilaCaptura {
+  sujeto_id: string;
+  sujeto: string;
+  fecha: string;
+  estado_captura: string;
+  version: VersionEntrega | null;
+}
+
+export interface ProgresoCaptura {
+  entrega_id: string;
+  estado_validacion: string;
+  vencidas: number;
+  registradas: number;
+  por_estado: Record<string, number>;
+  capturas_tardias: number;
+  filas: FilaCaptura[];
+}
+
+export interface FichaVersion {
+  sujeto: string;
+  vigente: VersionEntrega | null;
+  anteriores: VersionEntrega[];
+  acceso_docente: string | null;
+}
+
+/** Los enlaces a GitHub pasan por la redireccion auditada del servidor (S9.9.4). */
+export function urlApi(ruta: string): string {
+  return `${API_BASE_URL}${ruta}`;
+}
+
+export async function obtenerProgresoCaptura(cursoId: string, entregaId: string): Promise<ProgresoCaptura> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/progreso-captura`);
+  if (!respuesta.ok) throw new Error(`GET progreso-captura -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerFichaVersion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+): Promise<FichaVersion> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/sujetos/${sujetoId}/version`);
+  if (!respuesta.ok) throw new Error(`GET version -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export type AccionVersion =
+  | { tipo: "capturar-ahora"; motivo_manual: string }
+  | { tipo: "recapturar"; motivo_manual: string; fecha_corte: string }
+  | { tipo: "fijar-sha"; motivo_manual: string; sha: string };
+
+/** S9.8.8: las tres acciones manuales; siempre con motivo escrito. */
+export async function accionVersion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  accion: AccionVersion,
+): Promise<Resultado<VersionEntrega>> {
+  const { tipo, ...cuerpo } = accion;
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/sujetos/${sujetoId}/version/${tipo}`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export async function registrarVersiones(cursoId: string, entregaId: string): Promise<Resultado<{ encoladas: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/registrar-versiones`, { method: "POST" }),
+  );
+}
+
 export async function obtenerRepositoriosTarea(cursoId: string, tareaId: string): Promise<RepositoriosTarea> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorios`);
   if (!respuesta.ok) throw new Error(`GET repositorios -> ${respuesta.status}`);

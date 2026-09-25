@@ -27,6 +27,7 @@ from app.adaptadores import (
     programacion_repo,
     sincronizacion_repo,
     trabajos_repo,
+    versiones_repo,
 )
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
@@ -745,7 +746,13 @@ def _nueva_entrega(
         only_visible_to_overrides=fila.only_visible_to_overrides,
         due_at_base=fila.due_at,
         all_day=bool(payload.get("all_day", False)),
-        estado_validacion=EstadoValidacionEntrega.VIGENTE.value,
+        # S9.6.7 (A-203): vinculada con la fecha base ya vencida, nada se
+        # captura hasta que alguien lo confirma.
+        estado_validacion=(
+            EstadoValidacionEntrega.VINCULADA_TRAS_EL_CIERRE.value
+            if fila.due_at is not None and fila.due_at <= ahora_utc()
+            else EstadoValidacionEntrega.VIGENTE.value
+        ),
         validaciones=[],
         advertencias=[],
         ciclos_ausente=0,
@@ -962,8 +969,10 @@ def desvincular_entrega(
     restantes = renumerar_al_desvincular(
         [EntregaOrden(id=e.id, orden=e.orden, tipo=TipoEntrega(e.tipo)) for e in existentes],
         quitar_id=entrega.id,
-        # TODO(bloque-1): consultar `version_entrega` cuando exista.
-        tiene_versiones_capturadas=False,
+        # CA-8.2-03: con alguna version registrada solo cabe excluir.
+        tiene_versiones_capturadas=any(
+            versiones_repo.entrega_tiene_versiones(bd, e.id) for e in existentes
+        ),
     )
     if not restantes and tarea.estado != EstadoTarea.BORRADOR.value:
         raise RechazoTarea(

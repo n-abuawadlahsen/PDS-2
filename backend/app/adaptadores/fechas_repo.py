@@ -18,7 +18,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.adaptadores import incidencia_repo, trabajos_repo
+from app.adaptadores import incidencia_repo, trabajos_repo, versiones_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.modelos_aprovisionamiento import FechaEfectiva, ReglaFecha, Sujeto
@@ -408,6 +408,13 @@ def _materializar(
         if vigente is not None:
             vigente.estado = EstadoFechaEfectiva.SUPERSEDIDA.value
             vigente.vigente_hasta = ahora
+            versiones_repo.al_cambiar_la_fecha(
+                bd,
+                entrega_id=entrega.id,
+                sujeto_id=sujeto.id,
+                fecha_anterior=vigente.due_at_utc,
+                fecha_nueva=None,
+            )
         return
     if (
         vigente is not None
@@ -420,6 +427,16 @@ def _materializar(
         vigente.estado = EstadoFechaEfectiva.SUPERSEDIDA.value
         vigente.vigente_hasta = ahora
         bd.flush()
+        if vigente.due_at_utc != resultado.due_at_utc:
+            # S9.8.2 (A-103): la version capturada con la fecha anterior se
+            # supersede; el barrido captura de nuevo con la nueva.
+            versiones_repo.al_cambiar_la_fecha(
+                bd,
+                entrega_id=entrega.id,
+                sujeto_id=sujeto.id,
+                fecha_anterior=vigente.due_at_utc,
+                fecha_nueva=resultado.due_at_utc,
+            )
     bd.add(
         FechaEfectiva(
             entrega_id=entrega.id,

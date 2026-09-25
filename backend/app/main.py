@@ -25,6 +25,7 @@ from app.api.rutas import (
     salud,
     tareas,
     verificacion,
+    versiones,
     vinculacion,
 )
 from app.infraestructura.config import obtener_configuracion
@@ -61,6 +62,7 @@ def crear_app() -> FastAPI:
     app.include_router(tareas.router)
     app.include_router(repositorios.router)
     app.include_router(fechas.router)
+    app.include_router(versiones.router)
 
     return app
 
