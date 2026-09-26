@@ -33,11 +33,13 @@ PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
     # F4-F5: relleno hacia atras, reconciliacion completa y verificacion.
     ("barrido_completo_actividad", 86_400),
     ("informe_diario", 1800),  # F9: 07:00 y barrido cada 30 min hasta las 23:00
+    ("comunicaciones_programadas", 300),  # F10: recordatorios y cambios de fecha
 )
 
 PERIODICOS_GLOBALES: tuple[tuple[str, int], ...] = (
     ("despachar_outbox", 30),
     ("resolver_sha", 60),  # F4: el tick de captura (S9.6.1)
+    ("purga_retencion", 86_400),  # F10: retenido mas de 7 dias caduca
 )
 
 

@@ -1497,3 +1497,153 @@ export async function aplicarBaja(token: string, accion: "baja" | "alta"): Promi
   if (!respuesta.ok) return null;
   return respuesta.json();
 }
+
+// --- Etapa F10: comunicaciones ampliadas (SPEC 11 S11.6-S11.8, S11.10) ---
+
+export interface MensajeBandeja {
+  id: string;
+  canal: string;
+  evento: string;
+  estado: string;
+  etiqueta_estado: string;
+  motivo: string | null;
+  destinatario: string;
+  asunto: string | null;
+  cuerpo: string | null;
+  origen: string;
+  generacion: number;
+  reemplaza_a_id: string | null;
+  tarea_id: string | null;
+  creado_en: string;
+  enviado_en: string | null;
+  programado_para: string | null;
+  enlace_canvas: string | null;
+  motivo_sin_enlace: string | null;
+  ultimo_error: string | null;
+}
+
+export interface Bandeja {
+  comunicaciones_salientes: string;
+  suspension_motivo: string | null;
+  canal_activo: string | null;
+  mensajes: MensajeBandeja[];
+}
+
+export async function obtenerBandeja(cursoId: string, filtros: Record<string, string>): Promise<Bandeja> {
+  const q = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v));
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/comunicaciones?${q}`);
+  if (!respuesta.ok) throw new Error(`GET comunicaciones -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function accionSobreMensaje(
+  cursoId: string,
+  mensajeId: string,
+  accion: "reintentar" | "reenviar" | "cancelar" | "retractar",
+): Promise<Resultado<MensajeBandeja>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/comunicaciones/${mensajeId}/${accion}`, { method: "POST" }));
+}
+
+export async function enviarMensajeManual(
+  cursoId: string,
+  cuerpo: {
+    estudiante_ids: string[];
+    grupo_id: string | null;
+    asunto: string;
+    cuerpo: string;
+    confirmar_no_activos?: boolean;
+  },
+): Promise<Resultado<{ encolados: number; aviso: string }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones/mensajes`, { method: "POST", body: JSON.stringify(cuerpo) }),
+  );
+}
+
+export async function publicarAnuncio(
+  cursoId: string,
+  cuerpo: { titulo: string; cuerpo_html: string; seccion_ids: string[]; confirmacion_destinatarios?: number },
+): Promise<Resultado<{ destinatarios: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones/anuncios`, { method: "POST", body: JSON.stringify(cuerpo) }),
+  );
+}
+
+export async function cambiarSuspension(
+  cursoId: string,
+  suspendidas: boolean,
+  motivo: string | null,
+): Promise<Resultado<{ comunicaciones_salientes: string }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones`, {
+      method: "PATCH",
+      body: JSON.stringify({ suspendidas, motivo }),
+    }),
+  );
+}
+
+export interface ReglaComunicacion {
+  evento: string;
+  titulo: string;
+  activa: boolean;
+  por_defecto: boolean;
+  advertencia_al_apagar: string | null;
+  destinatarios_hoy: number | null;
+  vista_previa_asunto: string;
+  vista_previa_cuerpo: string;
+  vista_previa_con_ejemplo: boolean;
+}
+
+export async function obtenerReglasTarea(cursoId: string, tareaId: string): Promise<ReglaComunicacion[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/comunicaciones`);
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export async function cambiarReglaTarea(
+  cursoId: string,
+  tareaId: string,
+  evento: string,
+  activa: boolean,
+): Promise<Resultado<Record<string, number | boolean | string>>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/comunicaciones/${evento}`, {
+      method: "PUT",
+      body: JSON.stringify({ activa }),
+    }),
+  );
+}
+
+export async function obtenerReglaMapeo(cursoId: string): Promise<ReglaComunicacion | null> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/comunicaciones-curso/recordatorio-mapeo`);
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}
+
+export async function cambiarReglaMapeo(cursoId: string, activa: boolean): Promise<Resultado<Record<string, unknown>>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones-curso/recordatorio-mapeo`, {
+      method: "PUT",
+      body: JSON.stringify({ activa }),
+    }),
+  );
+}
+
+export async function suprimirComunicaciones(
+  cursoId: string,
+  estudianteId: string,
+  alcance: "TODAS_AUTOMATICAS" | "SOLO_RECORDATORIOS",
+  motivo: string,
+): Promise<Resultado<{ alcance: string }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/estudiantes/${estudianteId}/supresion`, {
+      method: "POST",
+      body: JSON.stringify({ alcance, motivo }),
+    }),
+  );
+}
+
+export async function levantarSupresion(cursoId: string, estudianteId: string): Promise<Resultado<{ levantada: boolean }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/estudiantes/${estudianteId}/supresion`, { method: "DELETE" }),
+  );
+}

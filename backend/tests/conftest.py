@@ -20,7 +20,16 @@ def limpiar_tablas_identidad():
         # Orden que respeta las FK RESTRICT: lo que referencia primero.
         sesion.execute(text("DELETE FROM bitacora"))
         # Etapa P8: lo que referencia repositorio, sujeto y regla_fecha primero.
+        # Etapa F10: cambio_fecha referencia mensaje_saliente.
+        sesion.execute(text("DELETE FROM cambio_fecha"))
         sesion.execute(text("DELETE FROM mensaje_saliente"))
+        for tabla in (
+            "plantilla_mensaje",
+            "supresion_comunicacion",
+            "regla_comunicacion",
+            "ventana_supresion",
+        ):
+            sesion.execute(text(f"DELETE FROM {tabla}"))
         # Etapa F9: informe y suscripcion referencian curso y usuario.
         sesion.execute(text("DELETE FROM informe_diario"))
         sesion.execute(text("DELETE FROM suscripcion_informe"))
@@ -85,3 +94,13 @@ def limpiar_tablas_identidad():
         sesion.execute(text("DELETE FROM curso"))
         sesion.execute(text("DELETE FROM usuario"))
         sesion.commit()
+
+
+@pytest.fixture(autouse=True)
+def _sin_franja_horaria(monkeypatch):
+    """La franja 08:00-21:00 (S11.6.5) depende del reloj real: se apaga para
+    que las pruebas no cambien de resultado segun la hora. Las pruebas de la
+    franja la encienden."""
+    from app.adaptadores import outbox_repo
+
+    monkeypatch.setattr(outbox_repo, "FRANJA_ACTIVA", False)

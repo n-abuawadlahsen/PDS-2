@@ -10,6 +10,7 @@ import { InvitacionPublica } from "./paginas/InvitacionPublica";
 import { PerfilPagina } from "./paginas/Perfil";
 import { Pendientes } from "./paginas/Pendientes";
 import { Personas } from "./paginas/Personas";
+import { Comunicaciones } from "./paginas/Comunicaciones";
 import { Baja } from "./paginas/Baja";
 import { Informes } from "./paginas/Informes";
 import { MisNotificaciones } from "./paginas/MisNotificaciones";
@@ -35,6 +36,7 @@ export function App() {
         <Route path="/cursos/:cursoId/tareas" element={<Tareas />} />
         <Route path="/cursos/:cursoId/seguimiento" element={<Seguimiento />} />
         <Route path="/cursos/:cursoId/informes" element={<Informes />} />
+        <Route path="/cursos/:cursoId/comunicaciones" element={<Comunicaciones />} />
         <Route path="/cursos/:cursoId/informes/:fecha" element={<Informes />} />
         <Route path="/cursos/:cursoId/mis-notificaciones" element={<MisNotificaciones />} />
         <Route path="/baja/:token" element={<Baja />} />

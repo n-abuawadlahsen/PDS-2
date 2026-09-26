@@ -18,7 +18,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.adaptadores import incidencia_repo, trabajos_repo, versiones_repo
+from app.adaptadores import comunicaciones_repo, incidencia_repo, trabajos_repo, versiones_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.modelos_aprovisionamiento import FechaEfectiva, ReglaFecha, Sujeto
@@ -444,6 +444,17 @@ def _materializar(
                 sujeto_id=sujeto.id,
                 fecha_anterior=vigente.due_at_utc,
                 fecha_nueva=resultado.due_at_utc,
+            )
+            # S11.6.2, S11.8.3 (F10): cancela el aviso de cierre con la fecha
+            # vieja y agrupa el cambio para anunciarlo.
+            comunicaciones_repo.al_cambiar_fecha(
+                bd,
+                entrega=entrega,
+                sujeto=sujeto,
+                anterior=vigente.due_at_utc,
+                nueva=resultado.due_at_utc,
+                origen=resultado.origen.value,
+                ahora=ahora,
             )
     bd.add(
         FechaEfectiva(

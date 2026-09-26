@@ -103,6 +103,17 @@ class Curso(Base, ConId):
             f"registro_estado IN {tuple(e.value for e in EstadoTareaRegistro)}",
             name="registro_estado_valido",
         ),
+        CheckConstraint(
+            "comunicaciones_salientes IN ('ACTIVAS', 'SUSPENDIDAS')",
+            name="comunicaciones_salientes_valida",
+        ),
+        CheckConstraint(
+            "modo_escritura IN ('COMPLETO', 'SOLO_LECTURA')", name="modo_escritura_valido"
+        ),
+        CheckConstraint(
+            "NOT (modo_escritura = 'SOLO_LECTURA' AND comunicaciones_salientes = 'ACTIVAS')",
+            name="solo_lectura_suspende",
+        ),
     )
 
     estado: Mapped[str] = mapped_column(Text, nullable=False, default=EstadoCurso.BORRADOR.value)
@@ -127,6 +138,18 @@ class Curso(Base, ConId):
         Text, nullable=False, default=ViaAnuncioSeccion.NO_VERIFICADO.value
     )
     canal_comunicacion_activo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Etapa F10 (A-225): suspension de lo que se escribe en Canvas.
+    comunicaciones_salientes: Mapped[str] = mapped_column(
+        Text, nullable=False, default="ACTIVAS", server_default="ACTIVAS"
+    )
+    suspension_motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suspension_desde: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
+    suspension_por: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=True
+    )
+    modo_escritura: Mapped[str] = mapped_column(
+        Text, nullable=False, default="COMPLETO", server_default="COMPLETO"
+    )
     # Columnas de Etapa P6 (tarea de registro de GitHub), SPEC 07 S7.2.3.
     canvas_assignment_id_registro: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     registro_creado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { RecordatorioMapeo } from "./RecordatorioMapeo";
 import {
   crearRegistroGithub,
   declararMapeoManual,
@@ -147,6 +148,7 @@ export function Personas() {
   return (
     <main style={{ maxWidth: 1000, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Personas</h1>
+      {cursoId && <RecordatorioMapeo cursoId={cursoId} />}
       {cabecera && (
         <p>
           <strong>

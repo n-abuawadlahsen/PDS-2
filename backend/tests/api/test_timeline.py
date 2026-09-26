@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
@@ -110,11 +111,15 @@ def test_ca_10_9_03_franja_coincide_con_la_comparacion_del_tablero(cliente: Test
     repos = _retrodatar(curso_id)
     grupo = repos["Grupo 1"]
     _aceptar(grupo)
+    # Los tres el mismo dia del curso, sin importar a que hora corra la prueba.
+    ayer = (ahora_utc().astimezone(ZoneInfo("America/Santiago")) - timedelta(days=1)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
     for i in range(3):
         agregar_commit_doble(
             _ORG,
             grupo.nombre,
-            fecha=ahora_utc() - timedelta(hours=i + 1),
+            fecha=ayer + timedelta(minutes=i),
             mensaje=f"ana {i}",
             autor_github_user_id=_ANA,
         )

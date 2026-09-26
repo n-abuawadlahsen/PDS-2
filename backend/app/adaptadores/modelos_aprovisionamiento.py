@@ -40,6 +40,7 @@ from app.dominio.estados import (
     MotivoDegradado,
     MotivoDesactivacionSujeto,
     MotivoEsperandoInformacion,
+    MotivoEstadoMensaje,
     MotivoInaccesible,
     OrigenFechaEfectiva,
     OrigenMensaje,
@@ -313,6 +314,14 @@ class MensajeSaliente(Base, ConId):
         CheckConstraint(f"canal IN {_valores(CanalMensaje)}", name="canal_valido"),
         CheckConstraint(f"estado IN {_valores(EstadoMensaje)}", name="estado_valido"),
         CheckConstraint(f"origen IN {_valores(OrigenMensaje)}", name="origen_valido"),
+        CheckConstraint(
+            f"motivo_estado IS NULL OR motivo_estado IN {_valores(MotivoEstadoMensaje)}",
+            name="motivo_estado_valido",
+        ),
+        CheckConstraint(
+            "reserva IS NULL OR reserva IN ('INFORME', 'OPERATIVO', 'MARGEN')",
+            name="reserva_valida",
+        ),
     )
 
     curso_id: Mapped[uuid.UUID] = mapped_column(
@@ -371,3 +380,21 @@ class MensajeSaliente(Base, ConId):
     # Reserva de la cuota diaria de correo solicitada; al enviar, la consumida.
     reserva: Mapped[str | None] = mapped_column(Text, nullable=True)
     proveedor_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Etapa F10 (S11.2.1): entrega, envio de prueba, anuncios y retractacion.
+    entrega_id: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("entrega.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    es_prueba: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    cuerpo_truncado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    canvas_html_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retraccion_solicitada: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    retractado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
+    retractado_por: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=True
+    )

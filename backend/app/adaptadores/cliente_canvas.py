@@ -13,6 +13,7 @@ una instancia de Canvas de verdad.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -97,6 +98,19 @@ def _escribir_config_registro_doble(
         "grading_type": config.grading_type,
     }
     _ARCHIVO_ESTADO_REGISTRO_DOBLE.write_text(json.dumps(datos))
+
+
+@dataclass(frozen=True)
+class AnuncioCreado:
+    topic_id: int
+    html_url: str | None
+
+
+# Solo para pruebas: lo que el doble «publico» y «envio».
+conversaciones_doble: list[dict[str, Any]] = []
+anuncios_doble: list[dict[str, Any]] = []
+anuncios_borrados_doble: list[int] = []
+rechazar_secciones_doble = False
 
 
 class FalloProveedorCanvas(Exception):
@@ -206,8 +220,27 @@ class ClienteCanvas(Protocol):
     def enviar_conversacion(
         self, token: str, *, destinatarios_canvas_user_ids: list[int], asunto: str, cuerpo: str
     ) -> bool:
-        """SPEC 04 S4.7.2/SPEC 05 S5.5.1: `POST /conversations`, usado por la
-        via 4 (reintento asistido, S7.4.5)."""
+        """SPEC 04 S4.7.2/SPEC 05 S5.5.1: `POST /conversations`, una llamada
+        por destinatario con `group_conversation=false` y sin `bulk_message`
+        (S11.7.2, CA-11.7-01). `True` si todas terminaron en 2xx."""
+        ...
+
+    def crear_anuncio(
+        self,
+        token: str,
+        canvas_course_id: int,
+        *,
+        titulo: str,
+        mensaje_html: str,
+        secciones: list[int] | None,
+    ) -> AnuncioCreado | None:
+        """`POST .../discussion_topics` con `is_announcement=true`, cerrado a
+        comentarios. Nunca `published=false` (CA-11.8-01). `None` si Canvas lo
+        rechazo con 4xx."""
+        ...
+
+    def borrar_anuncio(self, token: str, canvas_course_id: int, topic_id: int) -> bool:
+        """`DELETE .../discussion_topics/{id}`: retractar un anuncio publicado."""
         ...
 
     def obtener_assignments_paginado(
@@ -801,22 +834,66 @@ class ClienteCanvasReal:
     def enviar_conversacion(
         self, token: str, *, destinatarios_canvas_user_ids: list[int], asunto: str, cuerpo: str
     ) -> bool:
+        todas = True
+        for destinatario in destinatarios_canvas_user_ids:
+            respuesta = self._escribir(
+                "POST",
+                "/api/v1/conversations",
+                "/api/v1/conversations",
+                token=token,
+                json={
+                    "recipients": [str(destinatario)],
+                    "subject": asunto,
+                    "body": cuerpo,
+                    "group_conversation": False,
+                },
+            )
+            if respuesta.status_code >= 500:
+                raise FalloProveedorCanvas(f"Canvas respondio {respuesta.status_code}")
+            todas = todas and respuesta.status_code in (200, 201)
+        return todas
+
+    def crear_anuncio(
+        self,
+        token: str,
+        canvas_course_id: int,
+        *,
+        titulo: str,
+        mensaje_html: str,
+        secciones: list[int] | None,
+    ) -> AnuncioCreado | None:
+        payload: dict[str, Any] = {
+            "title": titulo,
+            "message": mensaje_html,
+            "is_announcement": True,
+            "locked": True,
+        }
+        if secciones:
+            payload["specific_sections"] = ",".join(str(x) for x in secciones)
         respuesta = self._escribir(
             "POST",
-            "/api/v1/conversations",
-            "/api/v1/conversations",
+            "/api/v1/courses/{course_id}/discussion_topics",
+            f"/api/v1/courses/{canvas_course_id}/discussion_topics",
             token=token,
-            json={
-                "recipients": [str(u) for u in destinatarios_canvas_user_ids],
-                "subject": asunto,
-                "body": cuerpo,
-                "group_conversation": True,
-                "bulk_message": True,
-            },
+            json=payload,
         )
         if respuesta.status_code >= 500:
             raise FalloProveedorCanvas(f"Canvas respondio {respuesta.status_code}")
-        return respuesta.status_code in (200, 201)
+        if respuesta.status_code not in (200, 201):
+            return None
+        datos = respuesta.json()
+        return AnuncioCreado(topic_id=int(datos["id"]), html_url=datos.get("html_url"))
+
+    def borrar_anuncio(self, token: str, canvas_course_id: int, topic_id: int) -> bool:
+        respuesta = self._escribir(
+            "DELETE",
+            "/api/v1/courses/{course_id}/discussion_topics/{topic_id}",
+            f"/api/v1/courses/{canvas_course_id}/discussion_topics/{topic_id}",
+            token=token,
+        )
+        if respuesta.status_code >= 500:
+            raise FalloProveedorCanvas(f"Canvas respondio {respuesta.status_code}")
+        return respuesta.status_code in (200, 204)
 
     def obtener_assignments_paginado(
         self, token: str, canvas_course_id: int
@@ -1117,6 +1194,47 @@ class ClienteCanvasDoble:
     def enviar_conversacion(
         self, token: str, *, destinatarios_canvas_user_ids: list[int], asunto: str, cuerpo: str
     ) -> bool:
+        for destinatario in destinatarios_canvas_user_ids:
+            conversaciones_doble.append(
+                {
+                    "recipients": [str(destinatario)],
+                    "subject": asunto,
+                    "body": cuerpo,
+                    "group_conversation": False,
+                }
+            )
+        return token == "valido"
+
+    def crear_anuncio(
+        self,
+        token: str,
+        canvas_course_id: int,
+        *,
+        titulo: str,
+        mensaje_html: str,
+        secciones: list[int] | None,
+    ) -> AnuncioCreado | None:
+        if token != "valido":
+            return None
+        if secciones and rechazar_secciones_doble:
+            return None
+        topic_id = 70_000 + len(anuncios_doble)
+        anuncios_doble.append(
+            {
+                "id": topic_id,
+                "title": titulo,
+                "message": mensaje_html,
+                "specific_sections": secciones,
+                "locked": True,
+            }
+        )
+        return AnuncioCreado(
+            topic_id=topic_id,
+            html_url=f"https://canvas.doble/courses/{canvas_course_id}/discussion_topics/{topic_id}",
+        )
+
+    def borrar_anuncio(self, token: str, canvas_course_id: int, topic_id: int) -> bool:
+        anuncios_borrados_doble.append(topic_id)
         return token == "valido"
 
     def ejecutar_prueba_anuncio(

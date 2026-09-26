@@ -37,7 +37,7 @@ BANDERAS: tuple[BanderaAlcance, ...] = (
     BanderaAlcance("ingesta_actividad", 2, "30 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("mis_notificaciones", 2, "3 de octubre", retirada_el="26-09-2026"),
     BanderaAlcance("informe_diario", 2, "3 de octubre", retirada_el="26-09-2026"),
-    BanderaAlcance("comunicaciones_automaticas", 3, "5 de octubre"),
+    BanderaAlcance("comunicaciones_automaticas", 3, "5 de octubre", retirada_el="26-09-2026"),
     BanderaAlcance("correccion", 2, "5 de octubre"),
 )
 

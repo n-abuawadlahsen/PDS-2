@@ -15,6 +15,7 @@ from app.api.rutas import (
     archivado,
     auth,
     capacidades,
+    comunicaciones,
     cursos,
     estado,
     fechas,
@@ -75,6 +76,7 @@ def crear_app() -> FastAPI:
     app.include_router(timeline.router)
     app.include_router(archivado.router)
     app.include_router(informes.router)
+    app.include_router(comunicaciones.router)
 
     return app
 
