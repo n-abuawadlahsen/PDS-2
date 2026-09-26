@@ -77,3 +77,11 @@ _(vacío — ninguna incidencia registrada todavía; el proyecto no está desple
 - **Recordatorio de cuenta de GitHub**: empieza 24 horas despues de crear la tarea de registro, a las 09:00 del curso, y hay como maximo 3 por persona, nunca en dias consecutivos.
 - **Conversaciones**: `enviar_conversacion` hace una llamada por destinatario con `group_conversation=false` y sin `bulk_message`. Esto corrige tambien el recordatorio manual de Pendientes (P6).
 - **Pendiente**: editar plantillas desde la interfaz (`plantilla_mensaje` existe y `validar_plantilla` esta lista; faltan la pantalla y las rutas), el reintento de invitacion vencida con DELETE + PUT, y `COMUNICACIONES_SUSPENDIDAS` a los 21 dias en `vigilancia`.
+
+## Correccion (Etapas F11-F12)
+
+- **Rubrica desde el espejo**: la pantalla lee la rubrica del `payload` de `assignment_canvas`, que `sync_tareas_y_fechas` renueva cada 5 minutos, en vez de llamar a Canvas en vivo con cache de 15 minutos (S12.9). Asi la vista no hace ninguna llamada externa (P1). La huella (`huella_rubrica`) se recalcula en cada lectura y detecta los cambios igual.
+- **Filas de correccion**: nacen con la primera apertura de la matriz o del reparto de una entrega, y despues `materializar_sujetos` agrega a los sujetos tardios: quedan `SIN_CORRECTOR` y abren `CORRECCION_SIN_CORRECTOR`, sin tocar las demas filas.
+- **Recaptura despues de corregir**: marca `version_desactualizada` y abre `CORRECCION_DESACTUALIZADA` (S12.15.5). El SPEC 09 nombra en su lugar `VERSION_REVISAR`, y se eligio el tipo propio del capitulo de correccion.
+- **Peso de reparto**: `membresia_curso.peso_correccion` nulo significa el valor por rol (ayudante 1, profesor 0).
+- **Pendiente**: el reparto por seccion (la funcion de dominio existe; falta la pantalla que elige un corrector por seccion), «realinear» asignaciones desalineadas, el boton «avisar a los profesores» y la fecha objetivo de correccion con `CORRECCION_ATRASADA`.

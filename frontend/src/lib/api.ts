@@ -1647,3 +1647,221 @@ export async function levantarSupresion(cursoId: string, estudianteId: string): 
     await apiFetch(`/api/cursos/${cursoId}/estudiantes/${estudianteId}/supresion`, { method: "DELETE" }),
   );
 }
+
+// --- Etapa F11: correccion (SPEC 12 S12.5-S12.8, S12.11) ---
+
+export interface AsignacionPropia {
+  entrega_id: string;
+  entrega: string;
+  tarea_id: string;
+  sujeto_id: string;
+  sujeto: string;
+  estado: string;
+  etiqueta: string;
+  sin_commits: boolean;
+  reclamo_abierto: boolean;
+  version_desactualizada: boolean;
+  nueva: boolean;
+  actualizado_en: string;
+}
+
+export interface BandejaCorreccion {
+  mis_asignaciones: AsignacionPropia[];
+  contador: { asignadas: number; corregidas: number; publicadas: number };
+  nuevas: number;
+  sin_corrector: number;
+  puede_repartir: boolean;
+  puede_publicar: boolean;
+  es_profesor: boolean;
+  tareas: { id: string; nombre: string; entregas: { id: string; nombre: string; orden: number }[] }[];
+}
+
+export interface CeldaCorreccion {
+  estado: string;
+  etiqueta: string;
+  corrector: string | null;
+  publicable: boolean;
+  motivo_no_publicable: string | null;
+  banderas: string[];
+  contraste: string;
+}
+
+export interface MatrizCorreccion {
+  entregas: { id: string; nombre: string; orden: number }[];
+  sujetos: { sujeto_id: string; sujeto: string; activo: boolean; seccion: string | null; celdas: Record<string, CeldaCorreccion> }[];
+  por_corrector: Record<string, Record<string, number>>;
+  por_entrega: Record<string, Record<string, number>>;
+  por_seccion: Record<string, Record<string, number>>;
+  contador: { corregidas: number; con_nota_en_canvas: number; total: number; comprobado_en: string | null };
+}
+
+export interface CriterioRubrica {
+  id: string;
+  description: string;
+  points: number;
+  ratings?: { id: string; description: string; points: number }[];
+  learning_outcome_id?: string;
+  criterion_use_range?: boolean;
+  ignore_for_scoring?: boolean;
+}
+
+export interface PantallaCorreccion {
+  entrega: {
+    id: string;
+    nombre: string;
+    tarea_id: string;
+    tarea: string;
+    grading_type: string;
+    puntos_posibles: number | null;
+    fecha_efectiva: string | null;
+    origen_fecha: string | null;
+  };
+  sujeto: { id: string; nombre: string; integrantes: string[]; activo: boolean };
+  estado: string;
+  etiqueta: string;
+  corrector: string | null;
+  es_propietario: boolean;
+  puede_publicar: boolean;
+  titular: string;
+  publicable: boolean;
+  motivo_no_publicable: string | null;
+  banderas: { version_desactualizada: boolean; reclamo_abierto: boolean; sin_commits: boolean; reconocimiento_sin_codigo: boolean };
+  version: {
+    id: string;
+    estado: string;
+    sha: string | null;
+    sha_corto: string | null;
+    tag: string | null;
+    repositorio: string | null;
+    fecha_corte: string;
+  } | null;
+  repositorio_estado: string | null;
+  acceso_docente: string | null;
+  motivo_sin_enlace: string | null;
+  borrador: {
+    nota: string | null;
+    rubrica: Record<string, { points?: number; rating_id?: string; comments?: string }> | null;
+    comentario: string | null;
+    version: number;
+  } | null;
+  rubrica: {
+    criterios: CriterioRubrica[];
+    ajustes: Record<string, unknown>;
+    usar_para_calificar: boolean;
+    suma_sugerida: number | null;
+    cambio_sin_revisar: boolean;
+  };
+  notas_internas: { clase: string; texto: string | null; desenlace: string | null; creada_en: string }[];
+  historial: { entrega: string; estado: string; nota_publicada: string | null }[];
+  canvas: { estudiante: string; score: number | null; calificada_en: string | null }[];
+  navegacion: { posicion: number; total: number; anterior: string | null; siguiente: string | null; siguiente_sin_corregir: string | null };
+}
+
+export async function obtenerBandejaCorreccion(cursoId: string): Promise<BandejaCorreccion> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion`);
+  if (!respuesta.ok) throw new Error(`GET correccion -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerMatrizCorreccion(cursoId: string, tareaId: string): Promise<MatrizCorreccion> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/correccion/estado`);
+  if (!respuesta.ok) throw new Error(`GET correccion/estado -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerPantallaCorreccion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+): Promise<PantallaCorreccion | null> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}`);
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}
+
+function rutaCorreccion(cursoId: string, entregaId: string, sujetoId: string) {
+  return `/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}`;
+}
+
+export async function guardarBorradorCorreccion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  cuerpo: { nota: string | null; rubrica: Record<string, unknown> | null; comentario: string | null; version: number | null },
+): Promise<Resultado<{ estado: string; version: number }>> {
+  return resultado(
+    await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/borrador`, {
+      method: "PUT",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export async function marcarCorreccionLista(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+): Promise<Resultado<{ estado: string; nota: string }>> {
+  return resultado(await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/lista`, { method: "POST" }));
+}
+
+export async function agregarNotaInterna(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  ruta: "notas" | "reclamos" | "reclamos/cerrar",
+  cuerpo: { texto: string; desenlace?: string },
+): Promise<Resultado<Record<string, unknown>>> {
+  return resultado(
+    await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/${ruta}`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export interface CorrectorCurso {
+  membresia_id: string;
+  nombre: string;
+  rol: string;
+  peso: number;
+  sin_github: boolean;
+}
+
+export async function obtenerCorrectores(cursoId: string): Promise<CorrectorCurso[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/correctores`);
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export interface PropuestaReparto {
+  filas: { sujeto_id: string; sujeto: string; actual: string | null; propuesto: string | null; estado: string; sobrescribe: boolean }[];
+  totales: Record<string, number>;
+  requiere_decision: string[];
+}
+
+export async function previsualizarReparto(
+  cursoId: string,
+  entregaId: string,
+  cuerpo: { criterio: string; reasignar: boolean; manual?: Record<string, string | null> },
+): Promise<Resultado<PropuestaReparto>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/reparto/previsualizar`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export async function aplicarReparto(
+  cursoId: string,
+  entregaId: string,
+  cuerpo: { criterio: string; reasignar: boolean; manual?: Record<string, string | null> },
+): Promise<Resultado<{ cambios: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/reparto/aplicar`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}

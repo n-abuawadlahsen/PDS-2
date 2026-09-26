@@ -109,6 +109,7 @@ export function Tareas() {
         <Link to={`/cursos/${cursoId}/seguimiento`}>Seguimiento del curso: todas las tareas activas</Link> ·{" "}
         <Link to={`/cursos/${cursoId}/informes`}>Informe diario</Link> ·{" "}
         <Link to={`/cursos/${cursoId}/comunicaciones`}>Comunicaciones</Link> ·{" "}
+        <Link to={`/cursos/${cursoId}/correccion`}>Corrección</Link> ·{" "}
         <Link to={`/cursos/${cursoId}/mis-notificaciones`}>Mis notificaciones</Link>
       </p>
       {mensaje && <p role="status">{mensaje}</p>}

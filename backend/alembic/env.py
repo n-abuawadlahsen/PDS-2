@@ -13,6 +13,7 @@ from app.adaptadores import (  # noqa: F401
     modelos_aprovisionamiento,
     modelos_canvas,
     modelos_comunicacion,
+    modelos_correccion,
     modelos_curso,
     modelos_github,
     modelos_identidad,

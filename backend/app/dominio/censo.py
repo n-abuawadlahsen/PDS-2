@@ -120,6 +120,17 @@ ENTIDADES_ETAPA_F10: frozenset[str] = frozenset(
     }
 )
 
+# Etapas F11-F12 - correccion y publicacion de notas (SPEC 12 S12.2).
+ENTIDADES_ETAPA_F11: frozenset[str] = frozenset(
+    {
+        "asignacion_correccion",
+        "correccion",
+        "nota_interna_correccion",
+        "estado_canvas_submission",
+        "publicacion_nota",
+    }
+)
+
 CENSO: frozenset[str] = (
     ENTIDADES_ETAPA_0
     | ENTIDADES_ETAPA_P1
@@ -135,6 +146,7 @@ CENSO: frozenset[str] = (
     | ENTIDADES_ETAPA_F6
     | ENTIDADES_ETAPA_F9
     | ENTIDADES_ETAPA_F10
+    | ENTIDADES_ETAPA_F11
 )
 
 # Valor especial admitido en bitacora.entidad ademas del censo (A-184).

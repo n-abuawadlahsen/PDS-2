@@ -30,6 +30,7 @@ class _EjecutorSql(Protocol):
 _ESPACIO_CANVAS = 1
 _ESPACIO_GITHUB = 2
 _ESPACIO_REPOSITORIO = 3
+_ESPACIO_REPARTO = 4
 
 
 def _clave_curso(curso_id: uuid.UUID) -> str:
@@ -90,4 +91,14 @@ def cerrojo_repositorio(sesion: Session, clave_repositorio: str) -> None:
     sesion.execute(
         text("SELECT pg_advisory_xact_lock(:espacio, hashtext(:clave))"),
         {"espacio": _ESPACIO_REPOSITORIO, "clave": clave_repositorio},
+    )
+
+
+def cerrojo_reparto(sesion: Session, entrega_id: uuid.UUID) -> None:
+    """`pg_advisory_xact_lock(4, hashtext(entrega))` (S12.5.6): dos repartos
+    automaticos de la misma entrega nunca corren a la vez; el segundo ve el
+    resultado del primero. Se libera con la transaccion."""
+    sesion.execute(
+        text("SELECT pg_advisory_xact_lock(:espacio, hashtext(:clave))"),
+        {"espacio": _ESPACIO_REPARTO, "clave": str(entrega_id)},
     )

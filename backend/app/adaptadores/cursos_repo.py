@@ -162,6 +162,10 @@ def retirar_membresia(
     suscripciones_repo.al_retirarse(
         bd, curso_id=membresia.curso_id, usuario_id=membresia.usuario_id
     )
+    # S12.5.5 (F11): lo no publicado vuelve a SIN_CORRECTOR con su borrador.
+    from app.adaptadores import correccion_repo
+
+    correccion_repo.al_retirar_miembro(bd, membresia, actor_usuario_id=actor.id)
 
 
 def reincorporar_membresia(

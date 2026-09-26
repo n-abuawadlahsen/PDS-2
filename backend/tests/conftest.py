@@ -20,6 +20,15 @@ def limpiar_tablas_identidad():
         # Orden que respeta las FK RESTRICT: lo que referencia primero.
         sesion.execute(text("DELETE FROM bitacora"))
         # Etapa P8: lo que referencia repositorio, sujeto y regla_fecha primero.
+        # Etapas F11-F12: lo que referencia correccion, y correccion misma.
+        for tabla in (
+            "publicacion_nota",
+            "nota_interna_correccion",
+            "estado_canvas_submission",
+            "asignacion_correccion",
+            "correccion",
+        ):
+            sesion.execute(text(f"DELETE FROM {tabla}"))
         # Etapa F10: cambio_fecha referencia mensaje_saliente.
         sesion.execute(text("DELETE FROM cambio_fecha"))
         sesion.execute(text("DELETE FROM mensaje_saliente"))

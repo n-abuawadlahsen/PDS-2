@@ -21,6 +21,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    SmallInteger,
     Text,
     text,
 )
@@ -170,6 +171,10 @@ class MembresiaCurso(Base, ConId):
     __tablename__ = "membresia_curso"
     __table_args__ = (
         Index("uq_membresia_curso_curso_id_usuario_id", "curso_id", "usuario_id", unique=True),
+        CheckConstraint(
+            "peso_correccion IS NULL OR peso_correccion BETWEEN 0 AND 10",
+            name="peso_correccion_rango",
+        ),
         CheckConstraint(f"rol IN {_VALORES_ROL}", name="rol_valido"),
         CheckConstraint(f"estado IN {_VALORES_ESTADO_MEMBRESIA}", name="estado_valido"),
         CheckConstraint(
@@ -206,6 +211,10 @@ class MembresiaCurso(Base, ConId):
     retirada_por: Mapped[uuid.UUID | None] = mapped_column(
         _UUID, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=True
     )
+    # Etapa F11 (S12.2.7): peso en el reparto equitativo (nulo = por rol:
+    # ayudante 1, profesor 0) y ultima vez que vio sus asignaciones.
+    peso_correccion: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    correccion_vista_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
 
 
 class InvitacionEquipo(Base, ConId):

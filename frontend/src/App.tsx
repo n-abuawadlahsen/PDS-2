@@ -10,6 +10,8 @@ import { InvitacionPublica } from "./paginas/InvitacionPublica";
 import { PerfilPagina } from "./paginas/Perfil";
 import { Pendientes } from "./paginas/Pendientes";
 import { Personas } from "./paginas/Personas";
+import { Correccion } from "./paginas/Correccion";
+import { CorreccionSujeto } from "./paginas/CorreccionSujeto";
 import { Comunicaciones } from "./paginas/Comunicaciones";
 import { Baja } from "./paginas/Baja";
 import { Informes } from "./paginas/Informes";
@@ -37,6 +39,8 @@ export function App() {
         <Route path="/cursos/:cursoId/seguimiento" element={<Seguimiento />} />
         <Route path="/cursos/:cursoId/informes" element={<Informes />} />
         <Route path="/cursos/:cursoId/comunicaciones" element={<Comunicaciones />} />
+        <Route path="/cursos/:cursoId/correccion" element={<Correccion />} />
+        <Route path="/cursos/:cursoId/correccion/:entregaId/:sujetoId" element={<CorreccionSujeto />} />
         <Route path="/cursos/:cursoId/informes/:fecha" element={<Informes />} />
         <Route path="/cursos/:cursoId/mis-notificaciones" element={<MisNotificaciones />} />
         <Route path="/baja/:token" element={<Baja />} />

@@ -106,6 +106,28 @@ class AnuncioCreado:
     html_url: str | None
 
 
+RUBRICA_DOBLE: list[dict[str, Any]] = [
+    {
+        "id": "c1",
+        "description": "Correctitud",
+        "points": 60,
+        "ratings": [
+            {"id": "r11", "description": "Completa", "points": 60},
+            {"id": "r12", "description": "Parcial", "points": 30},
+            {"id": "r13", "description": "No funciona", "points": 0},
+        ],
+    },
+    {
+        "id": "c2",
+        "description": "Estilo",
+        "points": 40,
+        "ratings": [
+            {"id": "r21", "description": "Claro", "points": 40},
+            {"id": "r22", "description": "Mejorable", "points": 20},
+        ],
+    },
+]
+
 # Solo para pruebas: lo que el doble «publico» y «envio».
 conversaciones_doble: list[dict[str, Any]] = []
 anuncios_doble: list[dict[str, Any]] = []
@@ -1263,7 +1285,22 @@ class ClienteCanvasDoble:
             only_visible_to_overrides: bool = False,
             assignment_visibility: list[int] | None = None,
         ) -> AssignmentCanvasCrudo:
-            payload = {"id": canvas_assignment_id, "name": nombre, "published": True}
+            payload: dict[str, Any] = {
+                "id": canvas_assignment_id,
+                "name": nombre,
+                "published": True,
+                "grade_group_students_individually": False,
+            }
+            if canvas_assignment_id == 9101:
+                # F11: rubrica de ejemplo, embebida en el assignment como en Canvas.
+                payload["rubric"] = RUBRICA_DOBLE
+                payload["rubric_settings"] = {
+                    "points_possible": 100,
+                    "free_form_criterion_comments": False,
+                    "hide_points": False,
+                    "hide_score_total": False,
+                }
+                payload["use_rubric_for_grading"] = False
             return AssignmentCanvasCrudo(
                 canvas_assignment_id=canvas_assignment_id,
                 nombre=nombre,
