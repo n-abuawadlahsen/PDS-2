@@ -1380,3 +1380,120 @@ export async function previsualizarArchivoBase(
     await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/archivos/${rutaCodificada(ruta)}`),
   );
 }
+
+// --- Etapa F9: informe docente diario y suscripcion (SPEC 11 S11.3-S11.5) ---
+
+export interface InformesCurso {
+  se_genera_desde: string | null;
+  informes: { fecha: string; estado: string; motivo: string | null; origen: string }[];
+}
+
+export interface InformeDia {
+  fecha: string;
+  estado: string;
+  motivo: string | null;
+  html: string | null;
+  texto: string | null;
+  asunto: string | null;
+}
+
+export interface VistaPreviaInforme {
+  hay_tareas_activas: boolean;
+  mensaje: string | null;
+  html: string | null;
+  texto: string | null;
+}
+
+export interface SuscripcionInforme {
+  curso_id: string;
+  curso_nombre: string;
+  curso_codigo: string;
+  activa: boolean;
+  origen_baja: string | null;
+  se_genera_desde: string | null;
+}
+
+export async function obtenerInformes(cursoId: string): Promise<InformesCurso> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/informes`);
+  if (!respuesta.ok) throw new Error(`GET informes -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerInformeDia(cursoId: string, fecha: string): Promise<InformeDia | null> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/informes/${fecha}`);
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}
+
+export async function obtenerVistaPreviaInforme(cursoId: string): Promise<VistaPreviaInforme> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/vista-previa`);
+  if (!respuesta.ok) throw new Error(`GET vista previa -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function enviarmeInforme(cursoId: string): Promise<Resultado<{ encolados: number }>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/enviarme`, { method: "POST" }));
+}
+
+export async function enviarInformeASuscritos(cursoId: string): Promise<Resultado<{ encolados: number }>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/enviar`, { method: "POST" }));
+}
+
+export async function obtenerMisNotificaciones(cursoId: string): Promise<SuscripcionInforme> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/mis-notificaciones`);
+  if (!respuesta.ok) throw new Error(`GET mis-notificaciones -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function cambiarMisNotificaciones(cursoId: string, activa: boolean): Promise<SuscripcionInforme> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/mis-notificaciones`, {
+    method: "PUT",
+    body: JSON.stringify({ activa }),
+  });
+  if (!respuesta.ok) throw new Error(`PUT mis-notificaciones -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerNotificacionesPerfil(): Promise<SuscripcionInforme[]> {
+  const respuesta = await apiFetch("/api/perfil/notificaciones");
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export async function cambiarTodasLasNotificaciones(activa: boolean): Promise<SuscripcionInforme[]> {
+  const respuesta = await apiFetch("/api/perfil/notificaciones", {
+    method: "PUT",
+    body: JSON.stringify({ activa }),
+  });
+  if (!respuesta.ok) throw new Error(`PUT notificaciones -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function regenerarEnlacesDeBaja(): Promise<boolean> {
+  const respuesta = await apiFetch("/api/perfil/enlaces-de-baja/regenerar", { method: "POST" });
+  return respuesta.ok;
+}
+
+export interface EstadoBaja {
+  curso_nombre: string;
+  curso_codigo: string;
+  activa: boolean;
+  otros_cursos_suscritos: number;
+}
+
+export async function obtenerBaja(token: string): Promise<EstadoBaja | null> {
+  const respuesta = await fetch(`${API_BASE_URL}/api/baja/${encodeURIComponent(token)}`, {
+    credentials: "include",
+  });
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}
+
+export async function aplicarBaja(token: string, accion: "baja" | "alta"): Promise<EstadoBaja | null> {
+  const respuesta = await fetch(`${API_BASE_URL}/api/baja/${encodeURIComponent(token)}?accion=${accion}`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}

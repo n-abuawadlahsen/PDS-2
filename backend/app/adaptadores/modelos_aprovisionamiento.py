@@ -361,3 +361,13 @@ class MensajeSaliente(Base, ConId):
     canvas_id_resultante: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     enviado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(_TZ, nullable=False)
+    # Etapa F9 (S11.5, A-228): el canal CORREO va a un docente, no a un estudiante.
+    membresia_id: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("membresia_curso.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    disparado_por_usuario_id: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=True
+    )
+    # Reserva de la cuota diaria de correo solicitada; al enviar, la consumida.
+    reserva: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proveedor_id: Mapped[str | None] = mapped_column(Text, nullable=True)

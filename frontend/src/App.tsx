@@ -10,6 +10,9 @@ import { InvitacionPublica } from "./paginas/InvitacionPublica";
 import { PerfilPagina } from "./paginas/Perfil";
 import { Pendientes } from "./paginas/Pendientes";
 import { Personas } from "./paginas/Personas";
+import { Baja } from "./paginas/Baja";
+import { Informes } from "./paginas/Informes";
+import { MisNotificaciones } from "./paginas/MisNotificaciones";
 import { RepositorioTimeline } from "./paginas/RepositorioTimeline";
 import { Seguimiento } from "./paginas/Seguimiento";
 import { Tarea } from "./paginas/Tarea";
@@ -31,6 +34,10 @@ export function App() {
         <Route path="/cursos/:cursoId/pendientes" element={<Pendientes />} />
         <Route path="/cursos/:cursoId/tareas" element={<Tareas />} />
         <Route path="/cursos/:cursoId/seguimiento" element={<Seguimiento />} />
+        <Route path="/cursos/:cursoId/informes" element={<Informes />} />
+        <Route path="/cursos/:cursoId/informes/:fecha" element={<Informes />} />
+        <Route path="/cursos/:cursoId/mis-notificaciones" element={<MisNotificaciones />} />
+        <Route path="/baja/:token" element={<Baja />} />
         <Route path="/cursos/:cursoId/tareas/:tareaId" element={<Tarea />} />
         <Route path="/cursos/:cursoId/tareas/:tareaId/entregas" element={<EntregasTarea />} />
         <Route path="/cursos/:cursoId/tareas/:tareaId/repos/:repoId" element={<RepositorioTimeline />} />

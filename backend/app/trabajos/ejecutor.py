@@ -36,6 +36,7 @@ from app.trabajos import (  # noqa: F401 (registra manejadores)
     crear_etiqueta,
     despachar_outbox,
     ejecutar_checklist_vinculacion,
+    informe_diario,
     materializar_sujetos,
     planificador,
     procesar_webhooks,

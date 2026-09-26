@@ -19,6 +19,7 @@ from app.api.rutas import (
     estado,
     fechas,
     identidades,
+    informes,
     interno,
     pendientes,
     perfil,
@@ -73,6 +74,7 @@ def crear_app() -> FastAPI:
     app.include_router(tablero.router)
     app.include_router(timeline.router)
     app.include_router(archivado.router)
+    app.include_router(informes.router)
 
     return app
 

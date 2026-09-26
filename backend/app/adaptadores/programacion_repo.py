@@ -32,6 +32,7 @@ PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
     ("agregar_metricas", 600),  # F6: recomputa agregados y alertas
     # F4-F5: relleno hacia atras, reconciliacion completa y verificacion.
     ("barrido_completo_actividad", 86_400),
+    ("informe_diario", 1800),  # F9: 07:00 y barrido cada 30 min hasta las 23:00
 )
 
 PERIODICOS_GLOBALES: tuple[tuple[str, int], ...] = (

@@ -16,6 +16,7 @@ from app.adaptadores import (  # noqa: F401
     modelos_github,
     modelos_identidad,
     modelos_infraestructura,
+    modelos_informe,
     modelos_mapeo,
     modelos_metricas,
     modelos_padron,

@@ -9,10 +9,11 @@ renderiza en el despacho, no al encolar (S11.2.1).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adaptadores import canvas_repo
@@ -251,8 +252,11 @@ def _despachar_uno(
     bd: Session, mensaje: MensajeSaliente, *, tomado_por: str, ahora: datetime
 ) -> None:
     curso = bd.get(Curso, mensaje.curso_id)
-    estudiante = bd.get(Estudiante, mensaje.estudiante_id) if mensaje.estudiante_id else None
     assert curso is not None
+    if mensaje.canal == CanalMensaje.CORREO.value:
+        _despachar_correo(bd, mensaje, curso, tomado_por=tomado_por, ahora=ahora)
+        return
+    estudiante = bd.get(Estudiante, mensaje.estudiante_id) if mensaje.estudiante_id else None
 
     guarda = guardas_outbox(
         ahora=ahora,
@@ -353,3 +357,138 @@ def _reintentar(mensaje: MensajeSaliente, *, ahora: datetime, error: str) -> Non
     mensaje.estado = EstadoMensaje.REINTENTAR.value
     espera = min(2 * (2 ** (mensaje.intentos - 1)), 300)
     mensaje.programado_para = ahora + timedelta(seconds=espera)
+
+
+# --- Canal CORREO (S11.5; A-228; Etapa F9) ---
+
+
+def _usados_hoy(bd: Session, ahora: datetime) -> dict[str, int]:
+    """Cuota del despliegue y del dia (UTC), por la reserva consumida."""
+    inicio = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+    filas = (
+        bd.query(MensajeSaliente.reserva, func.count(MensajeSaliente.id))
+        .filter(
+            MensajeSaliente.canal == CanalMensaje.CORREO.value,
+            MensajeSaliente.estado == EstadoMensaje.ENVIADO.value,
+            MensajeSaliente.enviado_en >= inicio,
+        )
+        .group_by(MensajeSaliente.reserva)
+        .all()
+    )
+    return {str(r): int(n) for r, n in filas if r}
+
+
+def _proximo_dia_0005(curso: Curso, ahora: datetime) -> datetime:
+    local = ahora.astimezone(ZoneInfo(curso.zona_horaria))
+    manana = (local + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+    return manana.astimezone(UTC)
+
+
+def _despachar_correo(
+    bd: Session, mensaje: MensajeSaliente, curso: Curso, *, tomado_por: str, ahora: datetime
+) -> None:
+    from app.adaptadores import incidencia_repo, informe_repo
+    from app.adaptadores.modelos_curso import MembresiaCurso
+    from app.adaptadores.modelos_identidad import Usuario
+    from app.adaptadores.modelos_informe import InformeDiario, SuscripcionInforme
+    from app.adaptadores.proveedor_correo import (
+        CorreoSaliente,
+        FalloProveedorCorreo,
+        crear_proveedor_correo,
+    )
+    from app.dominio.informe import reserva_a_consumir
+
+    membresia = bd.get(MembresiaCurso, mensaje.membresia_id) if mensaje.membresia_id else None
+    usuario = bd.get(Usuario, membresia.usuario_id) if membresia is not None else None
+    suscripcion = (
+        bd.get(SuscripcionInforme, (curso.id, membresia.usuario_id))
+        if membresia is not None
+        else None
+    )
+    # Guarda 2 para docentes (S11.4.6): membresia ACTIVA y, salvo que la
+    # persona lo haya pedido para si misma, suscripcion activa.
+    pedido_propio = mensaje.origen == OrigenMensaje.MANUAL.value
+    if (
+        membresia is None
+        or usuario is None
+        or membresia.estado != "ACTIVA"
+        or (not pedido_propio and (suscripcion is None or not suscripcion.activa))
+    ):
+        mensaje.estado = EstadoMensaje.SUPRIMIDO.value
+        mensaje.motivo_estado = "MATRICULA_NO_ACTIVA"
+        bd.flush()
+        return
+
+    reserva = reserva_a_consumir(mensaje.reserva or "INFORME", _usados_hoy(bd, ahora))
+    if reserva is None:
+        # A-228: no se pierde; vuelve a intentarse a las 00:05 del dia siguiente.
+        mensaje.estado = EstadoMensaje.DIFERIDO.value
+        mensaje.motivo_estado = "CUOTA_AGOTADA"
+        mensaje.programado_para = _proximo_dia_0005(curso, ahora)
+        bd.flush()
+        incidencia_repo.abrir_o_actualizar(
+            bd,
+            tipo="CUOTA_CORREO_AGOTADA",
+            severidad="ADVERTENCIA",
+            sujeto_tipo="CURSO",
+            curso_id=curso.id,
+            sujeto_id=curso.id,
+            detalle={"reserva": mensaje.reserva},
+        )
+        return
+
+    informe = bd.get(InformeDiario, uuid.UUID(mensaje.referencia["informe_diario_id"]))
+    if informe is None or informe.contenido_html is None:
+        mensaje.estado = EstadoMensaje.CANCELADO.value
+        mensaje.motivo_estado = "ACCION_DOCENTE"
+        bd.flush()
+        return
+    token = informe_repo.emitir_token_baja(curso.id, usuario, ahora=ahora)
+    enlace_baja = informe_repo.url_baja(token)
+    enlace_notificaciones = f"{informe_repo._url_app()}/cursos/{curso.id}/mis-notificaciones"
+    pie_html = (
+        '<p style="color:#777;font-size:12px">'
+        f'<a href="{enlace_baja}">Darme de baja de este informe</a> · '
+        f'<a href="{enlace_notificaciones}">Mis notificaciones</a></p>'
+    )
+    texto = (
+        f"{informe.contenido_texto}\n\nDarme de baja: {enlace_baja}\n"
+        f"Mis notificaciones: {enlace_notificaciones}"
+    )
+    mensaje.asunto = str((informe.contenido or {}).get("asunto", ""))[:255]
+    mensaje.cuerpo_renderizado = texto[:16384]
+    mensaje.estado = EstadoMensaje.EN_CURSO.value
+    mensaje.tomado_por = tomado_por
+    mensaje.tomado_en = ahora
+    mensaje.intentos += 1
+    bd.flush()
+    proveedor = crear_proveedor_correo(obtener_configuracion())
+    try:
+        proveedor_id = proveedor.enviar(
+            CorreoSaliente(
+                destinatario=usuario.email,
+                asunto=mensaje.asunto,
+                html=informe.contenido_html + pie_html,
+                texto=texto,
+                clave_idempotencia=mensaje.clave_idempotencia,
+                reserva=reserva,
+                cabeceras={
+                    "List-Unsubscribe": f"<{enlace_baja}>",
+                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+                },
+            )
+        )
+    except FalloProveedorCorreo as exc:
+        mensaje.ultimo_codigo_http = exc.codigo_http
+        if exc.reintentable:
+            _reintentar(mensaje, ahora=ahora, error=exc.literal)
+        else:
+            mensaje.estado = EstadoMensaje.FALLIDO.value
+            mensaje.ultimo_error_literal = exc.literal
+        bd.flush()
+        return
+    mensaje.estado = EstadoMensaje.ENVIADO.value
+    mensaje.enviado_en = ahora
+    mensaje.proveedor_id = proveedor_id
+    mensaje.reserva = reserva
+    bd.flush()

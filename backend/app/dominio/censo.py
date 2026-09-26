@@ -106,6 +106,9 @@ ENTIDADES_ETAPA_F6: frozenset[str] = frozenset(
     {"metrica_repositorio_dia", "participacion_entrega", "resumen_tarea"}
 )
 
+# Etapa F9 - informe docente diario y suscripcion (SPEC 11 S11.3-S11.4).
+ENTIDADES_ETAPA_F9: frozenset[str] = frozenset({"informe_diario", "suscripcion_informe"})
+
 CENSO: frozenset[str] = (
     ENTIDADES_ETAPA_0
     | ENTIDADES_ETAPA_P1
@@ -119,6 +122,7 @@ CENSO: frozenset[str] = (
     | ENTIDADES_ETAPA_F4
     | ENTIDADES_ETAPA_F5
     | ENTIDADES_ETAPA_F6
+    | ENTIDADES_ETAPA_F9
 )
 
 # Valor especial admitido en bitacora.entidad ademas del censo (A-184).

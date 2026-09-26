@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch, obtenerPerfil, type Perfil as PerfilTipo } from "../lib/api";
+import { NotificacionesPerfil } from "./NotificacionesPerfil";
 
 interface FilaSesion {
   id: number;
@@ -101,6 +102,8 @@ export function PerfilPagina() {
         </ul>
         <button onClick={cerrarOtrasSesiones}>Cerrar las demás sesiones</button>
       </section>
+
+      <NotificacionesPerfil />
 
       <section>
         <h2>Cerrar mi cuenta</h2>

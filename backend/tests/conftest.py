@@ -21,6 +21,9 @@ def limpiar_tablas_identidad():
         sesion.execute(text("DELETE FROM bitacora"))
         # Etapa P8: lo que referencia repositorio, sujeto y regla_fecha primero.
         sesion.execute(text("DELETE FROM mensaje_saliente"))
+        # Etapa F9: informe y suscripcion referencian curso y usuario.
+        sesion.execute(text("DELETE FROM informe_diario"))
+        sesion.execute(text("DELETE FROM suscripcion_informe"))
         # Etapa F4: `version_entrega` es evidencia y su disparador rechaza todo
         # DELETE; solo la limpieza de pruebas lo apaga durante la sentencia.
         sesion.execute(

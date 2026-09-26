@@ -11,6 +11,7 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.adaptadores import suscripciones_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.modelos_curso import Curso, InvitacionEquipo, MembresiaCurso
 from app.adaptadores.modelos_identidad import Usuario
@@ -62,6 +63,7 @@ def crear_curso(
     )
     bd.add(membresia)
     bd.flush()
+    suscripciones_repo.al_entrar(bd, curso_id=curso.id, usuario_id=creador.id)
     return curso
 
 
@@ -157,6 +159,9 @@ def retirar_membresia(
     membresia.permisos = []
     membresia.version += 1
     bd.flush()
+    suscripciones_repo.al_retirarse(
+        bd, curso_id=membresia.curso_id, usuario_id=membresia.usuario_id
+    )
 
 
 def reincorporar_membresia(
@@ -171,6 +176,7 @@ def reincorporar_membresia(
     )
     membresia.version += 1
     bd.flush()
+    suscripciones_repo.al_entrar(bd, curso_id=membresia.curso_id, usuario_id=membresia.usuario_id)
 
 
 @dataclass(frozen=True)
@@ -309,4 +315,6 @@ def aceptar_invitacion(
     invitacion.estado = EstadoInvitacion.ACEPTADA.value
     invitacion.aceptada_en = ahora
     bd.flush()
+    # CA-11.4-02: la suscripcion nace en la misma transaccion que la membresia.
+    suscripciones_repo.al_entrar(bd, curso_id=invitacion.curso_id, usuario_id=usuario.id)
     return membresia
