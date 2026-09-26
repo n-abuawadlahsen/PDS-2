@@ -1077,6 +1077,14 @@ def resolver_identidad(
         actor_usuario_id=actor_usuario_id,
         confirmacion=confirmacion,
     )
+    # S10.3.4 regla 5: recomputo inmediato de los repositorios afectados.
+    from app.adaptadores import metricas_repo
+
+    metricas_repo.encolar(
+        bd,
+        curso_id=identidad.curso_id,
+        motivo=f"identidad:{identidad.id}:{ahora_utc().isoformat()}",
+    )
     for repositorio_id in propagar_a:
         destino = (
             bd.query(IdentidadGit)

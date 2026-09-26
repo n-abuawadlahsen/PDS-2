@@ -29,6 +29,7 @@ PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
     ("aprovisionar_repositorios", 120),
     ("reconciliar_accesos", 900),
     ("reconciliar_actividad", 900),  # F5: la red de seguridad por ETag
+    ("agregar_metricas", 600),  # F6: recomputa agregados y alertas
     # F4-F5: relleno hacia atras, reconciliacion completa y verificacion.
     ("barrido_completo_actividad", 86_400),
 )

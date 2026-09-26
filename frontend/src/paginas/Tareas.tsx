@@ -105,6 +105,9 @@ export function Tareas() {
   return (
     <main style={{ maxWidth: 900, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Tareas</h1>
+      <p>
+        <Link to={`/cursos/${cursoId}/seguimiento`}>Seguimiento del curso: todas las tareas activas</Link>
+      </p>
       {mensaje && <p role="status">{mensaje}</p>}
 
       <section>

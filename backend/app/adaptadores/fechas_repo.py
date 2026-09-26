@@ -164,6 +164,14 @@ def sincronizar_fechas_entrega(
         )
     recalcular_fechas_entrega(bd, curso_id=curso_id, entrega=entrega)
     _revisar_overrides(bd, curso_id=curso_id, entrega=entrega)
+    # S10.6.6: las ventanas no se persisten; el recomputo las deja correctas.
+    trabajos_repo.encolar(
+        bd,
+        tipo="agregar_metricas",
+        clave_idempotencia=f"metricas:{curso_id}:fechas:{entrega.id}:{huella.hex()}",
+        max_intentos=2,
+        curso_id=curso_id,
+    )
     return True
 
 

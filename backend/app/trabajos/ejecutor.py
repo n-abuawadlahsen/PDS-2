@@ -29,6 +29,7 @@ from app.infraestructura.db import crear_engine, crear_fabrica_sesiones
 from app.infraestructura.logs import configurar_logs, obtener_logger
 from app.infraestructura.migraciones import aplicar_migraciones
 from app.trabajos import (  # noqa: F401 (registra manejadores)
+    agregar_metricas,
     aprovisionar_repositorios,
     barrido_completo_actividad,
     crear_etiqueta,

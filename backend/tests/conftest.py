@@ -28,6 +28,9 @@ def limpiar_tablas_identidad():
         )
         sesion.execute(text("DELETE FROM version_entrega"))
         # Etapa F5: la autoria y los commits referencian identidad_git y repositorio.
+        sesion.execute(text("DELETE FROM metrica_repositorio_dia"))
+        sesion.execute(text("DELETE FROM participacion_entrega"))
+        sesion.execute(text("DELETE FROM resumen_tarea"))
         sesion.execute(text("DELETE FROM autoria_commit"))
         sesion.execute(text("DELETE FROM commit"))
         sesion.execute(text("DELETE FROM identidad_git"))

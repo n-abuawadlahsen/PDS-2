@@ -985,6 +985,142 @@ export async function registrarVersiones(cursoId: string, entregaId: string): Pr
   );
 }
 
+// --- Etapa F6: tablero y seguimiento (SPEC 10 S10.7-S10.8, S10.10.6) ---
+
+export interface IntegranteTablero {
+  estudiante_id: string;
+  nombre: string;
+  commits: number;
+  dias_activos: number;
+  adiciones: number | null;
+  eliminaciones: number | null;
+  causa: string | null;
+  retirado: boolean;
+  en_grupo_desde: string | null;
+  salio_del_grupo: string | null;
+}
+
+export interface FilaTablero {
+  repositorio_id: string;
+  nombre: string;
+  sujeto: string;
+  sujeto_tipo: "ESTUDIANTE" | "GRUPO";
+  seccion: string | null;
+  estado: string;
+  grupo_estado: string;
+  motivo: string | null;
+  no_aplica: boolean;
+  actividad: string;
+  dias_observados: number;
+  umbral_dias: number;
+  commits_periodo: number;
+  commits_sin_atribuir: number;
+  dias_desde_ultimo_commit: number | null;
+  sparkline: number[];
+  alertas: string[];
+  integrantes: IntegranteTablero[];
+  indice_desequilibrio: number | null;
+  reparto_concentrado: boolean;
+}
+
+export interface Tablero {
+  tarea: { id: string; nombre: string; modalidad: string; estado: string };
+  procedencia: {
+    ultima_ingesta: string | null;
+    ultima_reconciliacion: string | null;
+    datos_posiblemente_desactualizados: boolean;
+    calculado_en: string | null;
+    llamadas_externas: number;
+    render_ms: number;
+  };
+  periodos: { clave: string; etiqueta: string }[];
+  periodo: string;
+  entregas: {
+    entrega_id: string;
+    orden: number;
+    nombre: string;
+    tipo: string;
+    estado: string;
+    fechas_distintas: number;
+    sujetos: number;
+    versiones_registradas: number;
+  }[];
+  repositorios: ResumenRepositorios;
+  tarjetas: {
+    repositorios_creados: number;
+    sin_actividad: number;
+    sin_dato_suficiente: number;
+    sin_datos_todavia: number;
+    sin_participacion: Record<string, number>;
+    invitaciones_sin_aceptar: number;
+    bloqueantes: number;
+  };
+  serie: { dia: string; commits: number }[];
+  cierres: string[];
+  histograma_previo_al_cierre: { dia: string; commits: number }[];
+  progreso_frente_al_cierre: number | null;
+  posicion_frente_al_curso: {
+    commits: [number, number, number] | null;
+    dias_activos: [number, number, number] | null;
+    mediana_por_seccion: Record<string, number>;
+    sujetos: number;
+    excluidos: number;
+  } | null;
+  filas: FilaTablero[];
+  total_filas: number;
+  pagina: number;
+  definicion_commit_contable: string;
+  aviso_alcance: string;
+}
+
+export async function obtenerTablero(
+  cursoId: string,
+  tareaId: string,
+  filtros: { periodo?: string; seccion?: string; grupoEstado?: string; soloAlertas?: boolean },
+): Promise<Tablero> {
+  const q = new URLSearchParams();
+  if (filtros.periodo) q.set("periodo", filtros.periodo);
+  if (filtros.seccion) q.set("seccion", filtros.seccion);
+  if (filtros.grupoEstado) q.set("grupo_estado", filtros.grupoEstado);
+  if (filtros.soloAlertas) q.set("solo_alertas", "true");
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/tablero?${q.toString()}`);
+  if (!respuesta.ok) throw new Error(`GET tablero -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function actualizarTablero(
+  cursoId: string,
+  tareaId: string,
+): Promise<{ encolada: boolean; en_curso: boolean; disponible_en: string }> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/tablero/actualizar`, {
+    method: "POST",
+  });
+  return respuesta.json();
+}
+
+export async function silenciarIncidencia(cursoId: string, incidenciaId: string): Promise<boolean> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/incidencias/${incidenciaId}/silenciar`, {
+    method: "POST",
+  });
+  return respuesta.ok;
+}
+
+export interface FilaSeguimiento {
+  tarea_id: string;
+  nombre: string;
+  modalidad: string;
+  repositorios: ResumenRepositorios;
+  sin_actividad: number;
+  sin_participacion: number;
+  invitaciones_sin_aceptar: number;
+}
+
+export async function obtenerSeguimiento(cursoId: string): Promise<FilaSeguimiento[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/seguimiento`);
+  if (!respuesta.ok) throw new Error(`GET seguimiento -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
 export async function obtenerRepositoriosTarea(cursoId: string, tareaId: string): Promise<RepositoriosTarea> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorios`);
   if (!respuesta.ok) throw new Error(`GET repositorios -> ${respuesta.status}`);

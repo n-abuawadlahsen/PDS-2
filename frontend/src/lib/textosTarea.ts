@@ -152,6 +152,26 @@ const ORIGEN_CAPTURA: Record<string, string> = {
   MANUAL_SHA: "manual: commit fijado",
 };
 
+// SPEC 10 S10.6.1: el estado agregado de una entrega, nueve valores.
+const ESTADO_ENTREGA_AGREGADO: Record<string, string> = {
+  EXCLUIDA: "Excluida por el equipo docente",
+  ELIMINADA_EN_CANVAS: "Eliminada en Canvas",
+  NO_PUBLICADA: "No publicada en Canvas",
+  VINCULADA_TRAS_EL_CIERRE: "Versiones no registradas: la fecha ya había pasado al vincular",
+  SIN_FECHA: "Sin fecha de cierre",
+  ABIERTA: "Abierta",
+  EN_CIERRE: "Cerrando",
+  CERRADA_CAPTURANDO: "Cerrada, registrando versiones",
+  CERRADA_REGISTRADA: "Cerrada, versiones registradas",
+};
+
+// SPEC 10 S10.5.3: las tres causas, cada una con su acción.
+const CAUSA_PARTICIPACION: Record<string, string> = {
+  SIN_ACCESO: "no ha aceptado su invitación: reenvíala o avisa por Canvas",
+  SIN_ATRIBUIR: "hay commits sin atribuir: puede haber usado otro correo de Git",
+  SIN_COMMITS: "sin commits: contacta al estudiante",
+};
+
 function traducir(tabla: Record<string, string>, valor: string | null | undefined): string {
   if (!valor) return "—";
   return tabla[valor] ?? valor.toLowerCase().replaceAll("_", " ");
@@ -161,6 +181,8 @@ export const textoEstadoTarea = (v: string | null | undefined) => traducir(ESTAD
 export const textoModalidad = (v: string | null | undefined) => traducir(MODALIDAD, v);
 export const textoTipoEntrega = (v: string | null | undefined) => traducir(TIPO_ENTREGA, v);
 export const textoEstadoEntrega = (v: string | null | undefined) => traducir(ESTADO_ENTREGA, v);
+export const textoEstadoEntregaAgregado = (v: string | null | undefined) => traducir(ESTADO_ENTREGA_AGREGADO, v);
+export const textoCausaParticipacion = (v: string | null | undefined) => traducir(CAUSA_PARTICIPACION, v);
 export const textoEstadoCaptura = (v: string | null | undefined) => traducir(ESTADO_CAPTURA, v);
 export const textoMotivoVersion = (v: string | null | undefined) => traducir(MOTIVO_VERSION, v);
 export const textoEstadoEtiqueta = (v: string | null | undefined) => traducir(ESTADO_ETIQUETA, v);

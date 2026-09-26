@@ -29,6 +29,7 @@ import {
   textoTipoEntrega,
 } from "../lib/textosTarea";
 import { BloqueRepositorios, LineaFechas } from "./RepositoriosTarea";
+import { TableroTarea } from "./TableroTarea";
 
 const ESTILO_MOTIVO = { fontSize: "0.85rem", color: "#666" } as const;
 const ESTILO_ERROR = { background: "#fee", padding: "0.75rem" } as const;
@@ -171,6 +172,7 @@ export function Tarea() {
         </section>
       )}
 
+      {tarea.estado !== "BORRADOR" && <TableroTarea cursoId={cursoId} tareaId={tareaId} />}
       {tarea.estado !== "BORRADOR" && <BloqueRepositorios cursoId={cursoId} tareaId={tareaId} />}
 
       <section>

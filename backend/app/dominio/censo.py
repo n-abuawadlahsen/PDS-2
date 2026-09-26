@@ -101,6 +101,11 @@ ENTIDADES_ETAPA_F5: frozenset[str] = frozenset(
     {"evento_webhook", "evento_push", "commit", "autoria_commit", "identidad_git"}
 )
 
+# Etapa F6 - tablero de tarea y comparacion (SPEC 10 S10.4).
+ENTIDADES_ETAPA_F6: frozenset[str] = frozenset(
+    {"metrica_repositorio_dia", "participacion_entrega", "resumen_tarea"}
+)
+
 CENSO: frozenset[str] = (
     ENTIDADES_ETAPA_0
     | ENTIDADES_ETAPA_P1
@@ -113,6 +118,7 @@ CENSO: frozenset[str] = (
     | ENTIDADES_ETAPA_P8
     | ENTIDADES_ETAPA_F4
     | ENTIDADES_ETAPA_F5
+    | ENTIDADES_ETAPA_F6
 )
 
 # Valor especial admitido en bitacora.entidad ademas del censo (A-184).
