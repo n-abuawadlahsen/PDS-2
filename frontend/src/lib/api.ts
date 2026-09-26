@@ -1121,6 +1121,153 @@ export async function obtenerSeguimiento(cursoId: string): Promise<FilaSeguimien
   return respuesta.json();
 }
 
+// --- Etapas F5 y F7: timeline e identidades de Git (SPEC 10 S10.3.7, S10.9) ---
+
+export interface CommitTimeline {
+  sha: string;
+  sha_corto: string;
+  fecha: string;
+  mensaje: string | null;
+  autor: string | null;
+  regla_atribucion: string;
+  senal_debil: boolean;
+  etiqueta_exclusion: string | null;
+  rama: string | null;
+  destacado: string | null;
+  hito: string | null;
+  posterior_al_cierre_de: number | null;
+  url: string | null;
+}
+
+export interface Timeline {
+  repositorio: { id: string; nombre: string; estado: string; rama_por_defecto: string | null };
+  sujeto: string;
+  periodos: { clave: string; etiqueta: string }[];
+  periodo: string;
+  dias: { dia: string; colapsado: boolean; hasta: string | null; n_dias: number; commits: CommitTimeline[] }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ciclo_de_vida: { fecha: string; tipo: string; detalle: Record<string, any> }[];
+  marcas_entrega: {
+    orden: number;
+    entrega: string;
+    fecha: string | null;
+    aplica: boolean;
+    versiones: { intento: number; vigente: boolean; estado: string; motivo: string | null; commit_sha: string | null }[];
+  }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  composicion: Record<string, any>[];
+  franja: {
+    periodo: string;
+    entrega: string;
+    integrantes: {
+      estudiante_id: string;
+      nombre: string;
+      commits: number;
+      dias_activos: number;
+      causa: string | null;
+    }[];
+    sin_atribuir: number;
+  }[];
+  enlaces: { motivo: string | null };
+  identidades_sin_resolver: number;
+  sin_commits_contables: boolean;
+  causa_vacia: string | null;
+}
+
+export async function obtenerTimeline(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  filtros: { periodo?: string; integrante?: string },
+): Promise<Timeline> {
+  const q = new URLSearchParams();
+  if (filtros.periodo) q.set("periodo", filtros.periodo);
+  if (filtros.integrante) q.set("integrante", filtros.integrante);
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/timeline?${q}`);
+  if (!respuesta.ok) throw new Error(`GET timeline -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function marcarHito(cursoId: string, tareaId: string, repoId: string, sha: string, nota: string) {
+  return apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/commits/${sha}/hito`, {
+    method: "POST",
+    body: JSON.stringify({ nota }),
+  });
+}
+
+export async function desmarcarHito(cursoId: string, tareaId: string, repoId: string, sha: string) {
+  return apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/commits/${sha}/hito`, {
+    method: "DELETE",
+  });
+}
+
+export interface IdentidadGit {
+  id: string;
+  email: string | null;
+  nombre_visto: string | null;
+  estado: string;
+  estudiante: string | null;
+  commits_contables: number;
+}
+
+export interface CandidatoPropagacion {
+  repositorio_id: string;
+  repositorio: string;
+  identidad_id: string;
+  nombre_visto: string | null;
+  commits: number;
+  marcada: boolean;
+}
+
+function baseIdentidades(cursoId: string, tareaId: string, repoId: string) {
+  return `/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/identidades`;
+}
+
+export async function listarIdentidades(cursoId: string, tareaId: string, repoId: string): Promise<IdentidadGit[]> {
+  const respuesta = await apiFetch(baseIdentidades(cursoId, tareaId, repoId));
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export async function obtenerPropagacion(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  identidadId: string,
+): Promise<CandidatoPropagacion[]> {
+  const respuesta = await apiFetch(`${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/propagacion`);
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export async function resolverIdentidad(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  identidadId: string,
+  cuerpo: { estudiante_id?: string; no_es_estudiante?: boolean; propagar_a: string[]; confirmacion?: string },
+): Promise<Resultado<IdentidadGit>> {
+  return resultado(
+    await apiFetch(`${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/resolver`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export async function revelarIdentidad(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  identidadId: string,
+): Promise<string | null> {
+  const respuesta = await apiFetch(`${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/revelar`, {
+    method: "POST",
+  });
+  if (!respuesta.ok) return null;
+  return (await respuesta.json()).email;
+}
+
 export async function obtenerRepositoriosTarea(cursoId: string, tareaId: string): Promise<RepositoriosTarea> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repositorios`);
   if (!respuesta.ok) throw new Error(`GET repositorios -> ${respuesta.status}`);

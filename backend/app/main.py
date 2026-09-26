@@ -26,6 +26,7 @@ from app.api.rutas import (
     salud,
     tablero,
     tareas,
+    timeline,
     verificacion,
     versiones,
     vinculacion,
@@ -69,6 +70,7 @@ def crear_app() -> FastAPI:
     app.include_router(webhooks.router)
     app.include_router(identidades.router)
     app.include_router(tablero.router)
+    app.include_router(timeline.router)
 
     return app
 

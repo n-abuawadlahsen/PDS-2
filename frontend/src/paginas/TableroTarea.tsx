@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { actualizarTablero, obtenerTablero, urlApi, type FilaTablero, type Tablero } from "../lib/api";
 import { textoEstadoEntregaAgregado, textoCausaParticipacion } from "../lib/textosTarea";
 
@@ -218,7 +218,7 @@ export function TableroTarea({ cursoId, tareaId }: { cursoId: string; tareaId: s
         </thead>
         <tbody>
           {datos.filas.map((f) => (
-            <Fila key={f.repositorio_id} fila={f} />
+            <Fila key={f.repositorio_id} fila={f} enlace={`/cursos/${cursoId}/tareas/${tareaId}/repos/${f.repositorio_id}`} />
           ))}
         </tbody>
       </table>
@@ -231,13 +231,13 @@ export function TableroTarea({ cursoId, tareaId }: { cursoId: string; tareaId: s
   );
 }
 
-function Fila({ fila: f }: { fila: FilaTablero }) {
+function Fila({ fila: f, enlace }: { fila: FilaTablero; enlace: string }) {
   const [abierta, setAbierta] = useState(false);
   return (
     <>
       <tr>
         <td>
-          {f.sujeto}
+          <Link to={enlace}>{f.sujeto}</Link>
           {f.seccion && <div style={ESTILO_MOTIVO}>{f.seccion}</div>}
         </td>
         <td>{GRUPOS_ESTADO[f.grupo_estado] ?? f.grupo_estado}</td>
