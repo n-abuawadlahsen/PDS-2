@@ -664,7 +664,23 @@ def guardar_borrador(
     errores = validar_rubrica_local(criterios, rubrica)
     if errores:
         raise RechazoCorreccion("; ".join(errores), codigo=422)
+    if c.estado == EstadoCorreccion.SIN_CORRECTOR.value:
+        # Quien puede repartir y escribe en una fila sin corrector se la
+        # asigna a si mismo, de forma explicita y con bitacora.
+        a.membresia_id = membresia.id
+        a.asignada_por = membresia.id
+        a.asignada_en = ahora_utc()
+        a.criterio = CriterioAsignacion.MANUAL.value
+        transicionar(
+            bd,
+            c,
+            EstadoCorreccion.ASIGNADA,
+            actor_usuario_id=membresia.usuario_id,
+            curso_id=entrega.curso_id,
+            detalle={"criterio": "MANUAL", "al_corregir": True},
+        )
     if c.estado == EstadoCorreccion.ASIGNADA.value:
+        a.iniciada_en = a.iniciada_en or ahora_utc()
         transicionar(
             bd,
             c,

@@ -9,19 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any
 
 TOLERANCIA = 0.001
-
-
-class _Publicacion(Protocol):
-    score_devuelto: Any
-    intentada_en: datetime
-
-
-class _FilaCanvas(Protocol):
-    score: Any
-    graded_at: datetime | None
 
 
 def _num(valor: Any) -> float | None:

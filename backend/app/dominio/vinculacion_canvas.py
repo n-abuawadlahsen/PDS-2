@@ -8,6 +8,7 @@ y deciden. La llamada HTTP real es de `app/adaptadores/cliente_canvas.py`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 
@@ -95,9 +96,11 @@ class SeccionCanvas:
 
 @dataclass(frozen=True)
 class PeriodoCalificacionCanvas:
-    """`GET /courses/:id/grading_periods` (item 11)."""
+    """`GET /courses/:id/grading_periods` (item 11; fechas desde F12)."""
 
     is_closed: bool
+    start_date: datetime | None = None
+    end_date: datetime | None = None
 
 
 @dataclass(frozen=True)

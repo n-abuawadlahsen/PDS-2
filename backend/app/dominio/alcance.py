@@ -38,7 +38,7 @@ BANDERAS: tuple[BanderaAlcance, ...] = (
     BanderaAlcance("mis_notificaciones", 2, "3 de octubre", retirada_el="26-09-2026"),
     BanderaAlcance("informe_diario", 2, "3 de octubre", retirada_el="26-09-2026"),
     BanderaAlcance("comunicaciones_automaticas", 3, "5 de octubre", retirada_el="26-09-2026"),
-    BanderaAlcance("correccion", 2, "5 de octubre"),
+    BanderaAlcance("correccion", 2, "5 de octubre", retirada_el="26-09-2026"),
 )
 
 assert len(BANDERAS) == 12, "el catalogo de banderas de alcance tiene exactamente 12 (S1.11)"

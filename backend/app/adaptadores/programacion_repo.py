@@ -34,6 +34,7 @@ PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
     ("barrido_completo_actividad", 86_400),
     ("informe_diario", 1800),  # F9: 07:00 y barrido cada 30 min hasta las 23:00
     ("comunicaciones_programadas", 300),  # F10: recordatorios y cambios de fecha
+    ("reconciliar_notas_canvas", 1800),  # F12: 30 min en ventana; 1/dia fuera
 )
 
 PERIODICOS_GLOBALES: tuple[tuple[str, int], ...] = (

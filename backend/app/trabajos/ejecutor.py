@@ -45,6 +45,7 @@ from app.trabajos import (  # noqa: F401 (registra manejadores)
     recolector_mapeos,
     reconciliar_accesos,
     reconciliar_actividad,
+    reconciliar_notas_canvas,
     registro,
     resolver_sha,
     revalidar_mapeos,

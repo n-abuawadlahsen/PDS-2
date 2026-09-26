@@ -619,3 +619,207 @@ def aplicar_reparto(
         por_seccion=datos.por_seccion,
     )
     return {"cambios": cambios}
+
+
+# --- Etapa F12: publicacion de notas (S12.10, S12.13-S12.15) ---
+
+
+def _rechazo_publicacion(exc: Any) -> HTTPException:
+    return HTTPException(
+        status_code=exc.codigo,
+        detail={"codigo": "PUBLICACION", "motivo": exc.motivo, **exc.detalle},
+    )
+
+
+class PublicarEntrada(BaseModel):
+    resolucion: str | None = Field(default=None, pattern="^PUBLICAR_MIA$")
+    version_revisada: bool = False
+    confirmacion_reclamo: str | None = None
+    reconocimiento_sin_codigo: bool = False
+
+
+@router.post(
+    "/api/cursos/{curso_id}/correccion/{entrega_id}/{sujeto_id}/publicar",
+    dependencies=[Depends(exigir_csrf)],
+)
+def publicar(
+    curso_id: uuid.UUID,
+    entrega_id: uuid.UUID,
+    sujeto_id: uuid.UUID,
+    datos: PublicarEntrada,
+    bd: Session = Depends(obtener_sesion_bd),
+    membresia: MembresiaCurso = Depends(requiere(Permiso.NOTA_PUBLICAR)),
+) -> dict[str, Any]:
+    """Escritura sincrona #5 (A-169). Con `publicable = false` responde 409
+    sin llamar a Canvas (CA-12.3-03)."""
+    from app.adaptadores import publicacion_repo
+
+    curso = _curso(bd, curso_id)
+    entrega = _entrega(bd, curso_id, entrega_id)
+    try:
+        c, _ = correccion_repo.fila(bd, entrega.id, sujeto_id)
+        return publicacion_repo.publicar(
+            bd,
+            c,
+            entrega=entrega,
+            curso=curso,
+            actor=membresia,
+            resolucion=datos.resolucion,
+            version_revisada=datos.version_revisada,
+            confirmacion_reclamo=datos.confirmacion_reclamo,
+            reconocimiento_sin_codigo=datos.reconocimiento_sin_codigo,
+        )
+    except correccion_repo.RechazoCorreccion as exc:
+        raise _rechazo(exc) from exc
+    except publicacion_repo.RechazoPublicacion as exc:
+        bd.commit()  # el motivo de no publicable o la incidencia quedan escritos
+        raise _rechazo_publicacion(exc) from exc
+
+
+class MotivoEntrada(BaseModel):
+    motivo: str = Field(default="", max_length=2000)
+
+
+@router.post(
+    "/api/cursos/{curso_id}/correccion/{entrega_id}/{sujeto_id}/{accion}",
+    dependencies=[Depends(exigir_csrf)],
+)
+def accion_de_publicacion(
+    curso_id: uuid.UUID,
+    entrega_id: uuid.UUID,
+    sujeto_id: uuid.UUID,
+    accion: str,
+    datos: MotivoEntrada,
+    bd: Session = Depends(obtener_sesion_bd),
+    membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
+) -> dict[str, Any]:
+    """reintentar, reabrir y adoptar-canvas exigen `nota.publicar`;
+    rubrica-revisada exige ser quien corrige."""
+    from app.adaptadores import publicacion_repo
+
+    entrega = _entrega(bd, curso_id, entrega_id)
+    try:
+        c, a = correccion_repo.fila(bd, entrega.id, sujeto_id)
+    except correccion_repo.RechazoCorreccion as exc:
+        raise _rechazo(exc) from exc
+    if accion == "rubrica-revisada":
+        if not correccion_repo.es_propietario(membresia, a):
+            raise HTTPException(
+                status_code=403, detail="Esta corrección está asignada a otra persona."
+            )
+        criterios, ajustes, _ = correccion_repo.rubrica_de(bd, entrega)
+        c.huella_rubrica = huella_rubrica(criterios, ajustes) if criterios else None
+        c.rubrica_revisada_en = ahora_utc()
+        return {"revisada": True}
+    if accion not in ("reintentar", "reabrir", "adoptar-canvas"):
+        raise HTTPException(status_code=404)
+    if Permiso.NOTA_PUBLICAR not in _permisos(membresia):
+        raise HTTPException(status_code=403, detail={"codigo": "PERMISO_INSUFICIENTE"})
+    try:
+        if accion == "reintentar":
+            publicacion_repo.reintentar(bd, c, actor=membresia, curso_id=curso_id)
+        elif accion == "reabrir":
+            publicacion_repo.reabrir(bd, c, actor=membresia, curso_id=curso_id, motivo=datos.motivo)
+        else:
+            publicacion_repo.adoptar_nota_de_canvas(bd, c, entrega=entrega, actor=membresia)
+    except publicacion_repo.RechazoPublicacion as exc:
+        raise _rechazo_publicacion(exc) from exc
+    except correccion_repo.RechazoCorreccion as exc:
+        raise _rechazo(exc) from exc
+    return {"estado": c.estado, "nota": c.nota_local}
+
+
+@router.post(
+    "/api/cursos/{curso_id}/correccion/{entrega_id}/comprobar",
+    status_code=202,
+    dependencies=[Depends(exigir_csrf)],
+)
+def comprobar_contra_canvas(
+    curso_id: uuid.UUID,
+    entrega_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    _m: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
+) -> dict[str, bool]:
+    """Encola la lectura de Canvas; la pantalla no espera (CA-12.11-05)."""
+    from app.adaptadores import publicacion_repo
+
+    entrega = _entrega(bd, curso_id, entrega_id)
+    publicacion_repo.encolar_reconciliacion(
+        bd, curso_id, entrega.id, motivo=f"manual:{ahora_utc():%Y%m%d%H%M}"
+    )
+    return {"encolada": True}
+
+
+class SinEntregaEntrada(BaseModel):
+    sujeto_ids: list[uuid.UUID]
+    nota: str = Field(min_length=1, max_length=20)
+    comentario: str = Field(min_length=1, max_length=4000)
+    confirmacion: str = Field(min_length=10, max_length=500)
+
+
+@router.post(
+    "/api/cursos/{curso_id}/correccion/{entrega_id}/sin-entrega",
+    dependencies=[Depends(exigir_csrf)],
+)
+def preparar_sin_entrega(
+    curso_id: uuid.UUID,
+    entrega_id: uuid.UUID,
+    datos: SinEntregaEntrada,
+    bd: Session = Depends(obtener_sesion_bd),
+    membresia: MembresiaCurso = Depends(requiere(Permiso.NOTA_PUBLICAR)),
+) -> dict[str, int]:
+    """S12.10.7: deja lista la misma nota y comentario para los sujetos sin
+    commits elegidos; la publicacion sigue por «publicar seleccionadas», una
+    por una y con el pre-chequeo completo."""
+    entrega = _entrega(bd, curso_id, entrega_id)
+    preparadas = 0
+    for sujeto_id in datos.sujeto_ids:
+        try:
+            c, a = correccion_repo.fila(bd, entrega.id, sujeto_id)
+        except correccion_repo.RechazoCorreccion:
+            continue
+        if (
+            not c.sin_commits
+            or c.estado in TERMINALES
+            or c.estado == EstadoCorreccion.PUBLICANDO.value
+        ):
+            continue
+        if c.estado == EstadoCorreccion.SIN_CORRECTOR.value:
+            a.membresia_id = membresia.id
+            a.asignada_por = membresia.id
+            a.asignada_en = ahora_utc()
+            correccion_repo.transicionar(
+                bd,
+                c,
+                EstadoCorreccion.ASIGNADA,
+                actor_usuario_id=membresia.usuario_id,
+                curso_id=curso_id,
+            )
+        try:
+            correccion_repo.guardar_borrador(
+                bd,
+                c,
+                a,
+                entrega=entrega,
+                membresia=membresia,
+                nota=datos.nota,
+                rubrica=None,
+                comentario=datos.comentario,
+                version_esperada=None,
+            )
+            correccion_repo.marcar_lista(bd, c, a, entrega=entrega, membresia=membresia)
+        except correccion_repo.RechazoCorreccion as exc:
+            raise _rechazo(exc) from exc
+        preparadas += 1
+    from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
+
+    registrar_bitacora(
+        bd,
+        accion="SIN_ENTREGA_PREPARADA",
+        entidad="entrega",
+        entidad_id=str(entrega.id),
+        actor_usuario_id=membresia.usuario_id,
+        curso_id=curso_id,
+        despues={"sujetos": preparadas, "confirmacion": datos.confirmacion},
+    )
+    return {"preparadas": preparadas}

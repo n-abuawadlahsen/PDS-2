@@ -1865,3 +1865,68 @@ export async function aplicarReparto(
     }),
   );
 }
+
+// --- Etapa F12: publicacion de notas (SPEC 12 S12.10, S12.14) ---
+
+export interface ResultadoPublicacion {
+  ok: boolean;
+  status: number;
+  datos: { estado: string; error?: string } | null;
+  detalle: {
+    codigo?: string;
+    motivo?: string;
+    conflictos?: { estudiante: string; nota_canvas: number | null; calificada_en: string | null }[];
+    nota_propia?: string | null;
+  } | null;
+}
+
+export async function publicarCorreccion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  cuerpo: {
+    resolucion?: "PUBLICAR_MIA";
+    version_revisada?: boolean;
+    confirmacion_reclamo?: string;
+    reconocimiento_sin_codigo?: boolean;
+  },
+): Promise<ResultadoPublicacion> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}/publicar`, {
+    method: "POST",
+    body: JSON.stringify(cuerpo),
+  });
+  let json: unknown = null;
+  try {
+    json = await respuesta.json();
+  } catch {
+    json = null;
+  }
+  if (respuesta.ok) return { ok: true, status: respuesta.status, datos: json as { estado: string }, detalle: null };
+  const detalle = (json as { detail?: unknown } | null)?.detail;
+  return {
+    ok: false,
+    status: respuesta.status,
+    datos: null,
+    detalle: typeof detalle === "object" && detalle ? (detalle as ResultadoPublicacion["detalle"]) : { motivo: String(detalle ?? "") },
+  };
+}
+
+export async function accionPublicacion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  accion: "reintentar" | "reabrir" | "adoptar-canvas" | "rubrica-revisada",
+  motivo = "",
+): Promise<Resultado<{ estado?: string; nota?: string }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}/${accion}`, {
+      method: "POST",
+      body: JSON.stringify({ motivo }),
+    }),
+  );
+}
+
+export async function comprobarContraCanvas(cursoId: string, entregaId: string): Promise<boolean> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/comprobar`, { method: "POST" });
+  return respuesta.ok;
+}
