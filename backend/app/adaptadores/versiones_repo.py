@@ -6,14 +6,15 @@ terminal en cuanto el SHA queda resuelto -- nunca antes (S9.6.1) -- y
 `crear_etiqueta` solo mueve la etiqueta. Un `403` al etiquetar nunca impide
 registrar la evidencia.
 
-Simplificaciones de esta etapa, cada una con su TODO donde toca:
-- El espejo propio de actividad (`commit`) llega con la ingesta del Bloque 2:
-  hasta entonces GitHub es la unica fuente del commit de cierre y
-  `verificacion.espejo_sha` queda nulo. Por lo mismo no hay `precierre_actividad`
-  ni el indicador de commits posteriores al cierre, ni la deteccion de push
-  retrodatado o historia reescrita (S9.8.3-S9.8.4). TODO(etapa-F5).
-- `HAY_COMMITS_EN_OTRAS_RAMAS` exige listar ramas y su actividad: queda para
-  cuando exista el espejo. TODO(etapa-F5).
+Desde F5 el espejo propio (`commit`) es la fuente primaria del commit de
+cierre y GitHub la de contraste (A-102); mientras un repositorio no tenga su
+relleno hacia atras completo, el espejo no se usa y GitHub es la unica fuente.
+
+Simplificaciones, cada una con su TODO donde toca:
+- La deteccion de push retrodatado e historia reescrita sobre una version ya
+  capturada (S9.8.4) no marca todavia las advertencias de la version.
+  TODO(S9.8.4).
+- `HAY_COMMITS_EN_OTRAS_RAMAS` no se calcula todavia. TODO(S9.6.4).
 - Sin receptor de webhooks, la etiqueta borrada o movida la detecta solo la
   verificacion diaria (S9.8.5).
 """
@@ -27,7 +28,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.adaptadores import incidencia_repo, trabajos_repo
+from app.adaptadores import actividad_repo, incidencia_repo, trabajos_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.cliente_github import (
@@ -229,6 +230,7 @@ def barrido(bd: Session, *, ahora: datetime | None = None) -> int:
     """El tick de `resolver_sha` (cada minuto, global): encola una captura por
     cada `(entrega, sujeto)` vencido. Devuelve cuantas encolo."""
     ahora = ahora or ahora_utc()
+    encolar_precierres(bd, ahora=ahora)
     encoladas = 0
     for fecha in candidatos(bd, ahora=ahora):
         entrega = bd.get(Entrega, fecha.entrega_id)
@@ -236,6 +238,37 @@ def barrido(bd: Session, *, ahora: datetime | None = None) -> int:
         if encolar_captura(bd, entrega=entrega, sujeto_id=fecha.sujeto_id, corte=fecha.due_at_utc):
             encoladas += 1
     return encoladas
+
+
+VENTANA_PRECIERRE = timedelta(minutes=15)
+
+
+def encolar_precierres(bd: Session, *, ahora: datetime) -> int:
+    """S14.7.4 fila 24: en los 15 minutos previos a cada fecha efectiva, una
+    puesta al dia del espejo por repositorio, clave `(repositorio, corte_epoch)`.
+    Lo que se adelanta es el espejo, no el corte."""
+    encolados = 0
+    for fecha, repositorio in (
+        bd.query(FechaEfectiva, Repositorio)
+        .join(Repositorio, Repositorio.sujeto_id == FechaEfectiva.sujeto_id)
+        .filter(
+            FechaEfectiva.estado == EstadoFechaEfectiva.VIGENTE.value,
+            FechaEfectiva.due_at_utc > ahora,
+            FechaEfectiva.due_at_utc <= ahora + VENTANA_PRECIERRE,
+            Repositorio.github_repo_id.isnot(None),
+        )
+    ):
+        assert fecha.due_at_utc is not None
+        if trabajos_repo.encolar(
+            bd,
+            tipo="precierre_actividad",
+            clave_idempotencia=f"precierre:{repositorio.id}:{int(fecha.due_at_utc.timestamp())}",
+            max_intentos=2,
+            curso_id=repositorio.curso_id,
+            payload={"repositorio_id": str(repositorio.id)},
+        ):
+            encolados += 1
+    return encolados
 
 
 # --- Fase 1: resolver el SHA y escribir la fila ---
@@ -359,8 +392,9 @@ def capturar(
                 org, nombre_repo, rama=rama or "HEAD", corte=corte, token_instalacion=token
             )
             resultado = resolver_captura(
-                # TODO(etapa-F5): el espejo propio como fuente primaria.
-                espejo=None,
+                espejo=actividad_repo.commit_de_cierre_en_espejo(bd, repositorio, corte)
+                if actividad_repo.espejo_fiable(bd, repositorio)
+                else None,
                 github=seleccionar_commit_cierre(commits, corte=corte),
                 commit_inicial_sha=repositorio.commit_inicial_sha,
             )

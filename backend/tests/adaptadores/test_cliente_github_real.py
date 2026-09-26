@@ -137,3 +137,49 @@ def test_sin_instalaciones_consulta_sin_autenticar(cliente, monkeypatch):
 
     assert cliente.existe_como_organizacion("PDS-2") is True
     assert github.autorizaciones == [None]
+
+
+def test_ca_6_8_04_compare_paginado_no_pierde_commits(monkeypatch: pytest.MonkeyPatch):
+    """Un push de 260 commits: `compare` sin paginar se corta en 250; paginado
+    por `Link` con `per_page=100` llegan los 260."""
+    total = 260
+    commits = [
+        {
+            "sha": f"{i:040x}",
+            "parents": [{"sha": f"{i - 1:040x}"}] if i else [],
+            "author": {"id": 70001, "type": "User", "login": "x"},
+            "committer": {"id": 70001, "login": "x"},
+            "commit": {
+                "author": {"name": "A", "email": "a@x.cl", "date": "2026-09-20T12:00:00Z"},
+                "committer": {"date": "2026-09-20T12:00:00Z"},
+                "message": f"c{i}",
+            },
+        }
+        for i in range(total)
+    ]
+
+    def falso(metodo: str, url: str, *, headers: dict[str, str], params=None, **_: Any):
+        pagina = int(httpx.URL(url).params.get("page", "1"))
+        inicio = (pagina - 1) * 100
+        cabeceras = {}
+        if inicio + 100 < total:
+            siguiente = (
+                f"https://api.github.com/repos/o/r/compare/a...b?per_page=100&page={pagina + 1}"
+            )
+            cabeceras["Link"] = f'<{siguiente}>; rel="next"'
+        cuerpo = {
+            "status": "ahead",
+            "total_commits": total,
+            "commits": commits[inicio : inicio + 100],
+        }
+        return httpx.Response(
+            200, json=cuerpo, headers=cabeceras, request=httpx.Request(metodo, url)
+        )
+
+    monkeypatch.setattr(httpx, "request", falso)
+    cliente = ClienteGitHubReal(app_id="1", private_key_pem_base64="x")
+    resultado = cliente.comparar("o", "r", "a", "b", "token")
+    assert (resultado.estado, resultado.truncado) == ("ahead", False)
+    assert len({c.sha for c in resultado.commits}) == total
+    assert resultado.commits[1].parent_shas == (f"{0:040x}",)
+    assert resultado.commits[0].autor_github_user_id == 70001

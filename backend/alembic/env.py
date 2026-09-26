@@ -9,6 +9,7 @@ from alembic import context
 
 # Importar todos los modulos de modelos para que Base.metadata los conozca.
 from app.adaptadores import (  # noqa: F401
+    modelos_actividad,
     modelos_aprovisionamiento,
     modelos_canvas,
     modelos_curso,

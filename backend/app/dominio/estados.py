@@ -566,3 +566,63 @@ class AdvertenciaVersion(StrEnum):
     USA_GIT_LFS = "USA_GIT_LFS"
     TIENE_SUBMODULOS = "TIENE_SUBMODULOS"
     ARBOL_TRUNCADO = "ARBOL_TRUNCADO"
+
+
+class EstadoEventoWebhook(StrEnum):
+    """S10.2.5: ocho valores. `SIN_DESTINO_PENDIENTE` (no «huerfano», que es de
+    un commit)."""
+
+    RECIBIDO = "RECIBIDO"
+    PENDIENTE_BLOQUE_2 = "PENDIENTE_BLOQUE_2"
+    PROCESADO = "PROCESADO"
+    IGNORADO = "IGNORADO"
+    SIN_DESTINO_PENDIENTE = "SIN_DESTINO_PENDIENTE"
+    DESCARTADO_ESPERADO = "DESCARTADO_ESPERADO"
+    DESCARTADO_SIN_DESTINO = "DESCARTADO_SIN_DESTINO"
+    ERROR = "ERROR"
+
+
+class OrigenIngesta(StrEnum):
+    WEBHOOK = "WEBHOOK"
+    RELLENO_COMPARE = "RELLENO_COMPARE"
+    RECORRIDO = "RECORRIDO"
+    RECONCILIACION = "RECONCILIACION"
+    BARRIDO = "BARRIDO"
+    BACKFILL_INICIAL = "BACKFILL_INICIAL"
+
+
+class MotivoExclusionCommit(StrEnum):
+    """S10.5.1: exactamente tres motivos de exclusion."""
+
+    NINGUNO = "NINGUNO"
+    MERGE = "MERGE"
+    COMMIT_INICIAL = "COMMIT_INICIAL"
+    HUERFANO = "HUERFANO"
+
+
+class ReglaAtribucion(StrEnum):
+    """S10.3.1: la cascada, en su orden."""
+
+    AUTOR_GITHUB = "AUTOR_GITHUB"
+    EMAIL_NOREPLY = "EMAIL_NOREPLY"
+    EMAIL_DIRECTO = "EMAIL_DIRECTO"
+    IDENTIDAD_DOCENTE = "IDENTIDAD_DOCENTE"
+    SIN_ATRIBUIR = "SIN_ATRIBUIR"
+
+
+class FirmaEstadoCommit(StrEnum):
+    VERIFICADA = "VERIFICADA"
+    NO_VERIFICADA = "NO_VERIFICADA"
+    DESCONOCIDA = "DESCONOCIDA"
+
+
+class PapelAutoria(StrEnum):
+    AUTOR = "AUTOR"
+    COAUTOR = "COAUTOR"
+
+
+class EstadoIdentidadGit(StrEnum):
+    SIN_RESOLVER = "SIN_RESOLVER"
+    RESUELTA = "RESUELTA"
+    NO_ES_ESTUDIANTE = "NO_ES_ESTUDIANTE"
+    SUPERSEDIDA = "SUPERSEDIDA"

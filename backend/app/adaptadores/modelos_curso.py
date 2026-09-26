@@ -113,6 +113,9 @@ class Curso(Base, ConId):
     zona_horaria: Mapped[str] = mapped_column(Text, nullable=False)
     umbral_dias_sin_actividad: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     umbral_desbalance_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=70)
+    # S10.2.6 (F5): desde cuando el espejo de actividad es fiable, escrito al
+    # terminar el relleno hacia atras de todos los repositorios del curso.
+    ingesta_actividad_desde: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     # Columnas de Etapa P3 (vinculacion Canvas), creadas ahora por S14.8.1.
     canvas_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     canvas_course_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

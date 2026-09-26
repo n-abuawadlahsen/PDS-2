@@ -22,7 +22,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.adaptadores import versiones_repo
+from app.adaptadores import actividad_repo, versiones_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.cliente_github import (
@@ -138,6 +138,7 @@ class VersionSalida(BaseModel):
     fecha_origen: str | None
     canvas_override_id: int | None
     comparacion_base: str | None
+    commits_posteriores_al_cierre: int | None
     enlaces: EnlacesSalida
 
 
@@ -178,12 +179,22 @@ def _salida(bd: Session, version: VersionEntrega, zona: str) -> VersionSalida:
         fecha_origen=version.fecha_origen,
         canvas_override_id=version.canvas_override_id,
         comparacion_base=etiqueta_base,
+        # S9.8.3: derivado del espejo, sin coste de API; nulo si el espejo de
+        # ese repositorio aun no tuvo su lectura completa.
+        commits_posteriores_al_cierre=_posteriores(bd, version),
         enlaces=EnlacesSalida(
             arbol=f"{base}arbol" if tiene_sha else None,
             comparacion=f"{base}comparacion" if tiene_sha and etiqueta_base else None,
             zip=f"{base}zip" if tiene_sha else None,
         ),
     )
+
+
+def _posteriores(bd: Session, version: VersionEntrega) -> int | None:
+    repositorio = bd.get(Repositorio, version.repositorio_id) if version.repositorio_id else None
+    if repositorio is None or not actividad_repo.espejo_fiable(bd, repositorio):
+        return None
+    return actividad_repo.commits_posteriores_al_cierre(bd, repositorio.id, version.fecha_corte_utc)
 
 
 def _curso_de(bd: Session, version: VersionEntrega) -> uuid.UUID:

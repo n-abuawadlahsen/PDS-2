@@ -27,6 +27,12 @@ def limpiar_tablas_identidad():
             text("ALTER TABLE version_entrega DISABLE TRIGGER version_entrega_inmutable")
         )
         sesion.execute(text("DELETE FROM version_entrega"))
+        # Etapa F5: la autoria y los commits referencian identidad_git y repositorio.
+        sesion.execute(text("DELETE FROM autoria_commit"))
+        sesion.execute(text("DELETE FROM commit"))
+        sesion.execute(text("DELETE FROM identidad_git"))
+        sesion.execute(text("DELETE FROM evento_push"))
+        sesion.execute(text("DELETE FROM evento_webhook"))
         sesion.execute(text("ALTER TABLE version_entrega ENABLE TRIGGER version_entrega_inmutable"))
         sesion.execute(text("DELETE FROM fecha_efectiva"))
         sesion.execute(text("DELETE FROM regla_fecha"))

@@ -96,6 +96,11 @@ ENTIDADES_ETAPA_P8: frozenset[str] = frozenset(
 # Etapa F4 - captura y versiones de entrega (SPEC 09 S9.6-S9.9).
 ENTIDADES_ETAPA_F4: frozenset[str] = frozenset({"version_entrega"})
 
+# Etapa F5 - ingesta de actividad de GitHub (SPEC 10 S10.2-S10.3).
+ENTIDADES_ETAPA_F5: frozenset[str] = frozenset(
+    {"evento_webhook", "evento_push", "commit", "autoria_commit", "identidad_git"}
+)
+
 CENSO: frozenset[str] = (
     ENTIDADES_ETAPA_0
     | ENTIDADES_ETAPA_P1
@@ -107,6 +112,7 @@ CENSO: frozenset[str] = (
     | ENTIDADES_ETAPA_P7
     | ENTIDADES_ETAPA_P8
     | ENTIDADES_ETAPA_F4
+    | ENTIDADES_ETAPA_F5
 )
 
 # Valor especial admitido en bitacora.entidad ademas del censo (A-184).

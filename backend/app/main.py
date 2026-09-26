@@ -17,6 +17,7 @@ from app.api.rutas import (
     cursos,
     estado,
     fechas,
+    identidades,
     interno,
     pendientes,
     perfil,
@@ -27,6 +28,7 @@ from app.api.rutas import (
     verificacion,
     versiones,
     vinculacion,
+    webhooks,
 )
 from app.infraestructura.config import obtener_configuracion
 from app.infraestructura.db import crear_fabrica_sesiones
@@ -63,6 +65,8 @@ def crear_app() -> FastAPI:
     app.include_router(repositorios.router)
     app.include_router(fechas.router)
     app.include_router(versiones.router)
+    app.include_router(webhooks.router)
+    app.include_router(identidades.router)
 
     return app
 
