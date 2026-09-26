@@ -50,6 +50,8 @@ from app.infraestructura.config import obtener_configuracion
 
 EVENTO_REPOSITORIO_DISPONIBLE = "repositorio_disponible"
 EVENTO_INVITACION_ACEPTADA = "invitacion_aceptada"
+EVENTO_AVISO_ARCHIVADO_PREVIO = "aviso_archivado_previo"
+EVENTO_AVISO_ARCHIVADO = "aviso_archivado"
 
 # S11.2.2: seis intentos con retroceso, tope 5 minutos.
 _MAX_INTENTOS = 6
@@ -119,6 +121,55 @@ def encolar_aviso_acceso(
         origen=OrigenMensaje.AUTOMATICO.value,
         disparado_por_trabajo_id=trabajo_id,
         # S11.2.4: `repositorio_disponible` e `invitacion_aceptada` nunca caducan.
+        caduca_en=None,
+        estado=EstadoMensaje.PENDIENTE.value,
+        intentos=0,
+        creado_en=ahora_utc(),
+    )
+    bd.add(mensaje)
+    bd.flush()
+    return mensaje
+
+
+def encolar_aviso_archivado(
+    bd: Session,
+    *,
+    curso: Curso,
+    tarea: Tarea,
+    repositorio: Repositorio,
+    estudiante: Estudiante,
+    evento: str,
+    origen: OrigenMensaje,
+    trabajo_id: uuid.UUID | None = None,
+) -> MensajeSaliente | None:
+    """Guarda 4 de A-197: un aviso por `(tarea, repositorio, estudiante)` y
+    evento. Devuelve la fila nueva, o `None` si ese aviso ya existia."""
+    canal = _canal_para(curso)
+    clave = clave_idempotencia(
+        canal=canal.value,
+        destinatario=str(estudiante.canvas_user_id),
+        plantilla=evento,
+        entidad=f"{tarea.id}:{repositorio.id}:{estudiante.id}",
+    )
+    if bd.query(MensajeSaliente.id).filter(MensajeSaliente.clave_idempotencia == clave).first():
+        return None
+    mensaje = MensajeSaliente(
+        curso_id=curso.id,
+        canal=canal.value,
+        evento=evento,
+        clave_idempotencia=clave,
+        generacion=1,
+        tarea_id=tarea.id,
+        sujeto_id=repositorio.sujeto_id,
+        repositorio_id=repositorio.id,
+        estudiante_id=estudiante.id,
+        referencia={},
+        destinatario=estudiante.nombre,
+        destinatario_canvas_user_id=estudiante.canvas_user_id,
+        plantilla=evento,
+        plantilla_version=PLANTILLAS[evento].version,
+        origen=origen.value,
+        disparado_por_trabajo_id=trabajo_id,
         caduca_en=None,
         estado=EstadoMensaje.PENDIENTE.value,
         intentos=0,

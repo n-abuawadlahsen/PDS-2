@@ -31,7 +31,7 @@ BANDERAS: tuple[BanderaAlcance, ...] = (
     BanderaAlcance("tarea_modalidad_grupal", 3, "23 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("fechas_excepciones", 3, "23 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("versiones_entrega", 3, "23 de septiembre", retirada_el="25-09-2026"),
-    BanderaAlcance("tarea_archivado", 2, "30 de septiembre"),
+    BanderaAlcance("tarea_archivado", 2, "30 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("tablero_actividad", 2, "30 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("repositorio_timeline", 2, "30 de septiembre", retirada_el="25-09-2026"),
     BanderaAlcance("ingesta_actividad", 2, "30 de septiembre", retirada_el="25-09-2026"),

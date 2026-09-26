@@ -316,6 +316,13 @@ class ClienteGitHub(Protocol):
         """`PATCH /repos/{o}/{r}` con `is_template: true` y nada mas (S6.11.2)."""
         ...
 
+    def cambiar_archivado(
+        self, org_login: str, repo: str, archivado: bool, token_instalacion: str
+    ) -> None:
+        """`PATCH /repos/{o}/{r}` con `archived: true|false` y nada mas (A-197).
+        Solo la llama `archivar_repositorios`, por accion de un profesor."""
+        ...
+
     def reemplazar_topics(
         self, org_login: str, repo: str, topics: list[str], token_instalacion: str
     ) -> None:
@@ -874,6 +881,17 @@ class ClienteGitHubReal:
         _exigir_exito(respuesta)
         return _repo_desde_json(respuesta.json())
 
+    def cambiar_archivado(
+        self, org_login: str, repo: str, archivado: bool, token_instalacion: str
+    ) -> None:
+        respuesta = self._peticion(
+            "PATCH",
+            f"https://api.github.com/repos/{org_login}/{repo}",
+            token=token_instalacion,
+            json={"archived": archivado},
+        )
+        _exigir_exito(respuesta)
+
     def reemplazar_topics(
         self, org_login: str, repo: str, topics: list[str], token_instalacion: str
     ) -> None:
@@ -1191,6 +1209,7 @@ _repos_con_lectura_equipo: set[tuple[str, str, str]] = set()
 _commits: dict[tuple[str, str], dict[str, CommitGithub]] = {}
 _ramas: dict[tuple[str, str], dict[str, str]] = {}
 _tags: dict[tuple[str, str], dict[str, str]] = {}
+_archivados: set[tuple[str, str]] = set()
 
 
 def agregar_commit_doble(
@@ -1277,6 +1296,11 @@ def retrodatar_repo_doble(org_login: str, repo: str, fecha: datetime) -> None:
 def tags_doble(org_login: str, repo: str) -> dict[str, str]:
     """Solo para el doble: las etiquetas del repositorio, mutables en pruebas."""
     return _tags.setdefault((org_login, repo), {})
+
+
+def repo_archivado_doble(org_login: str, repo: str) -> bool:
+    """Solo para el doble: si el repositorio esta archivado en «GitHub»."""
+    return (org_login, repo) in _archivados
 
 
 def aceptar_invitacion_doble(org_login: str, repo: str, login: str) -> None:
@@ -1551,6 +1575,16 @@ class ClienteGitHubDoble:
         _repos[(org_login, repo)] = info
         return info
 
+    def cambiar_archivado(
+        self, org_login: str, repo: str, archivado: bool, token_instalacion: str
+    ) -> None:
+        if (org_login, repo) not in _repos:
+            raise RechazoProveedorGithub(404, "Not Found")
+        if archivado:
+            _archivados.add((org_login, repo))
+        else:
+            _archivados.discard((org_login, repo))
+
     def reemplazar_topics(
         self, org_login: str, repo: str, topics: list[str], token_instalacion: str
     ) -> None:
@@ -1700,6 +1734,8 @@ class ClienteGitHubDoble:
     ) -> None:
         if (org_login, repo) not in _repos:
             raise RechazoProveedorGithub(404, "Not Found")
+        if (org_login, repo) in _archivados:
+            raise RechazoProveedorGithub(403, "Repository was archived so is read-only.")
         tags = _tags.setdefault((org_login, repo), {})
         if nombre in tags:
             raise RechazoProveedorGithub(422, "Reference already exists")

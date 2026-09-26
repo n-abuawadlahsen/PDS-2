@@ -86,9 +86,62 @@ INVITACION_ACEPTADA = Plantilla(
     obligatorias=frozenset({"repositorio.url"}),
 )
 
+# Guarda 4 de A-197: aviso obligatorio y sin interruptor, catorce dias antes
+# de archivar y de nuevo al ejecutar. Nadie descubre que su repositorio paso
+# a solo lectura al intentar subir un cambio.
+AVISO_ARCHIVADO_PREVIO = Plantilla(
+    clave="aviso_archivado_previo",
+    version=1,
+    asunto="Tu repositorio de «{{tarea.nombre}}» se archivará en dos semanas",
+    cuerpo=(
+        "Hola {{estudiante.nombre}}:\n"
+        "\n"
+        "El equipo docente del curso {{curso.nombre}} archivará tu repositorio "
+        "{{repositorio.nombre}} de la tarea «{{tarea.nombre}}» no antes de catorce días "
+        "desde este aviso:\n"
+        "{{repositorio.url}}\n"
+        "\n"
+        "Archivado, el repositorio queda en sólo lectura: podrás seguir viéndolo y "
+        "descargándolo, pero no subir cambios. Las versiones que ya entregaste no cambian.\n"
+        "\n"
+        "Si todavía necesitas subir algo, hazlo antes de esa fecha o escríbele al equipo "
+        "docente.\n"
+    ),
+    variables=frozenset(
+        {
+            "estudiante.nombre",
+            "curso.nombre",
+            "tarea.nombre",
+            "repositorio.nombre",
+            "repositorio.url",
+        }
+    ),
+    obligatorias=frozenset({"repositorio.nombre"}),
+)
+
+AVISO_ARCHIVADO = Plantilla(
+    clave="aviso_archivado",
+    version=1,
+    asunto="Tu repositorio de «{{tarea.nombre}}» quedó archivado",
+    cuerpo=(
+        "Hola {{estudiante.nombre}}:\n"
+        "\n"
+        "El equipo docente archivó hoy tu repositorio {{repositorio.nombre}} de la tarea "
+        "«{{tarea.nombre}}». Desde ahora está en sólo lectura: puedes verlo y descargarlo, "
+        "pero no subir cambios.\n"
+        "{{repositorio.url}}\n"
+    ),
+    variables=frozenset(
+        {"estudiante.nombre", "tarea.nombre", "repositorio.nombre", "repositorio.url"}
+    ),
+    obligatorias=frozenset({"repositorio.nombre"}),
+)
+
 PLANTILLAS: dict[str, Plantilla] = {
     REPOSITORIO_DISPONIBLE.clave: REPOSITORIO_DISPONIBLE,
     INVITACION_ACEPTADA.clave: INVITACION_ACEPTADA,
+    AVISO_ARCHIVADO_PREVIO.clave: AVISO_ARCHIVADO_PREVIO,
+    AVISO_ARCHIVADO.clave: AVISO_ARCHIVADO,
 }
 
 

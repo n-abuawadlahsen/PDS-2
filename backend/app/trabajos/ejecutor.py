@@ -31,6 +31,7 @@ from app.infraestructura.migraciones import aplicar_migraciones
 from app.trabajos import (  # noqa: F401 (registra manejadores)
     agregar_metricas,
     aprovisionar_repositorios,
+    archivar_repositorios,
     barrido_completo_actividad,
     crear_etiqueta,
     despachar_outbox,

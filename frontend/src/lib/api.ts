@@ -531,6 +531,8 @@ async function resultado<T>(respuesta: Response): Promise<Resultado<T>> {
   if (typeof detalle === "string") error = detalle;
   else if (detalle && typeof detalle === "object" && "detalle" in detalle) {
     error = String((detalle as { detalle: unknown }).detalle);
+  } else if (detalle && typeof detalle === "object" && "motivo" in detalle) {
+    error = String((detalle as { motivo: unknown }).motivo);
   }
   return { ok: false, status: respuesta.status, datos: null, error };
 }
@@ -1266,6 +1268,69 @@ export async function revelarIdentidad(
   });
   if (!respuesta.ok) return null;
   return (await respuesta.json()).email;
+}
+
+// --- Etapa F8: cierre de la tarea (A-168, A-197) ---
+
+export interface GuardaArchivado {
+  numero: number;
+  titulo: string;
+  cumple: boolean;
+  motivo: string | null;
+  confirmacion: "SIN_CAPTURA" | "SIN_AVISO" | null;
+  detalle: string[];
+}
+
+export interface EstadoArchivado {
+  tarea_estado: string;
+  archivables: number;
+  archivados: number;
+  fuera_de_alcance_o_inaccesibles: number;
+  guardas: GuardaArchivado[];
+  permitido: boolean;
+  aviso: {
+    destinatarios: number;
+    encolados: number;
+    enviados: number;
+    bloqueados: number;
+    ultimo_envio: string | null;
+    canal_bloqueado: boolean;
+  };
+  en_curso: number;
+  puede_desarchivar: boolean;
+}
+
+export async function obtenerArchivado(cursoId: string, tareaId: string): Promise<EstadoArchivado> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivado`);
+  if (!respuesta.ok) throw new Error(`GET archivado -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function enviarAvisoArchivado(
+  cursoId: string,
+  tareaId: string,
+): Promise<Resultado<{ encolados: number }>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivar/aviso`, { method: "POST" }));
+}
+
+export async function archivarTarea(
+  cursoId: string,
+  tareaId: string,
+  confirmaciones: { confirmacion_sin_captura: string | null; confirmacion_sin_aviso: string | null },
+): Promise<Resultado<{ repositorios: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivar`, {
+      method: "POST",
+      body: JSON.stringify(confirmaciones),
+    }),
+  );
+}
+
+export async function desarchivarTarea(
+  cursoId: string,
+  tareaId: string,
+): Promise<Resultado<{ repositorios: number }>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/desarchivar`, { method: "POST" }));
 }
 
 export async function obtenerRepositoriosTarea(cursoId: string, tareaId: string): Promise<RepositoriosTarea> {

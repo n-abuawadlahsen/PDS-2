@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.dependencias import configurar_fabrica_sesiones
 from app.api.rutas import (
+    archivado,
     auth,
     capacidades,
     cursos,
@@ -71,6 +72,7 @@ def crear_app() -> FastAPI:
     app.include_router(identidades.router)
     app.include_router(tablero.router)
     app.include_router(timeline.router)
+    app.include_router(archivado.router)
 
     return app
 

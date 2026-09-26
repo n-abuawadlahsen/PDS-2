@@ -21,6 +21,7 @@ import {
   textoOrigenCaptura,
   textoTipoEntrega,
 } from "../lib/textosTarea";
+import { CierreTarea } from "./CierreTarea";
 import { LineaFechas } from "./RepositoriosTarea";
 
 const ESTILO_MOTIVO = { fontSize: "0.85rem", color: "#666" } as const;
@@ -169,6 +170,8 @@ export function EntregasTarea() {
           </>
         )}
       </section>
+
+      {tarea.estado !== "BORRADOR" && <CierreTarea cursoId={cursoId} tareaId={tareaId} />}
     </main>
   );
 }
