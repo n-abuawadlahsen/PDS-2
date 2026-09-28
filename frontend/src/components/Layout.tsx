@@ -153,6 +153,10 @@ const SECCIONES = [
   ["personas", "Personas"],
   ["pendientes", "Pendientes"],
   ["tareas", "Tareas"],
+  ["seguimiento", "Seguimiento"],
+  ["correccion", "Corrección"],
+  ["comunicaciones", "Comunicaciones"],
+  ["informes", "Informe diario"],
   ["equipo", "Equipo docente"],
 ] as const;
 function EnlacesCurso({

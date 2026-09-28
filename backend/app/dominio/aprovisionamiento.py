@@ -89,6 +89,30 @@ def motivo_no_es_sujeto_individual(
     return None
 
 
+def es_integrante_elegible(*, estado_estudiante: str, visible_en_alguna_entrega: bool) -> bool:
+    """A-164 paso 2, tarea grupal: el integrante `accepted` cuenta si ademas
+    cumple las dos condiciones del sujeto individual."""
+    return (
+        motivo_no_es_sujeto_individual(
+            estado_estudiante=estado_estudiante,
+            visible_en_alguna_entrega=visible_en_alguna_entrega,
+        )
+        is None
+    )
+
+
+def motivo_no_es_sujeto_grupal(
+    *, grupo_activo: bool, integrantes_elegibles: int
+) -> MotivoDesactivacionSujeto | None:
+    """`None` = el grupo es sujeto de la tarea grupal: tiene al menos un
+    integrante `accepted` elegible (A-164 paso 2, A-048)."""
+    if not grupo_activo:
+        return MotivoDesactivacionSujeto.GRUPO_DISUELTO
+    if integrantes_elegibles == 0:
+        return MotivoDesactivacionSujeto.GRUPO_SIN_ACEPTADOS
+    return None
+
+
 # --- A-093 / A-094: la guarda y su motivo cerrado ---
 
 
@@ -104,6 +128,32 @@ def motivo_espera_individual(
     if estado_mapeo == EstadoMapeoGithub.VIGENTE.value:
         return None
     if estado_mapeo == EstadoMapeoGithub.EN_CONFLICTO.value:
+        return MotivoEsperandoInformacion.MAPEO_EN_CONFLICTO
+    return MotivoEsperandoInformacion.SIN_MAPEO_GITHUB
+
+
+def motivo_espera_grupal(
+    *,
+    estados_mapeo_integrantes: list[str | None],
+    hay_integrante_en_dos_grupos: bool,
+    estado_tarea: str,
+    solo_lectura: bool = False,
+) -> MotivoEsperandoInformacion | None:
+    """A-093, tarea grupal: basta **un** integrante `accepted` con mapeo
+    `VIGENTE` (R2.3.10, CA-8.5-01); los demas se incorporan despues. Un
+    integrante en dos grupos del mismo conjunto es dato sucio de Canvas: el
+    grupo espera hasta que se resuelva alli (A-049), sin frenar a los demas."""
+    if estado_tarea == EstadoTarea.INCONSISTENTE.value:
+        return MotivoEsperandoInformacion.TAREA_INCONSISTENTE
+    if solo_lectura:
+        return MotivoEsperandoInformacion.CURSO_EN_SOLO_LECTURA
+    if not estados_mapeo_integrantes:
+        return MotivoEsperandoInformacion.GRUPO_SIN_INTEGRANTES_ACEPTADOS
+    if hay_integrante_en_dos_grupos:
+        return MotivoEsperandoInformacion.ESTUDIANTE_EN_DOS_GRUPOS
+    if EstadoMapeoGithub.VIGENTE.value in estados_mapeo_integrantes:
+        return None
+    if EstadoMapeoGithub.EN_CONFLICTO.value in estados_mapeo_integrantes:
         return MotivoEsperandoInformacion.MAPEO_EN_CONFLICTO
     return MotivoEsperandoInformacion.SIN_MAPEO_GITHUB
 
@@ -243,6 +293,24 @@ def estado_acceso_tras_invitar(status_code: int) -> EstadoAccesoRepositorio:
     if status_code == 204:
         return EstadoAccesoRepositorio.ACCESO_DIRECTO
     return EstadoAccesoRepositorio.INVITADO
+
+
+_ESTADOS_CON_ACCESO_CONCEDIDO = frozenset(
+    {
+        EstadoAccesoRepositorio.INVITADO.value,
+        EstadoAccesoRepositorio.ACEPTADO.value,
+        EstadoAccesoRepositorio.ACCESO_DIRECTO.value,
+    }
+)
+
+
+def estado_acceso_tras_salir_del_grupo(estado: str) -> EstadoAccesoRepositorio | None:
+    """S8.8.3 (A-212): la salida de un integrante -- ya confirmada en dos
+    ciclos por `sync_grupos` -- solo **propone** la revocacion; ninguna persona
+    ha decidido todavia y GitHub no se toca. `None` = la fila no cambia."""
+    if estado in _ESTADOS_CON_ACCESO_CONCEDIDO:
+        return EstadoAccesoRepositorio.REVOCACION_PROPUESTA
+    return None
 
 
 # --- S8.9.2 / S8.7.2: progreso y estimacion ---

@@ -10,10 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Hashable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 from app.dominio.alcance import bandera_activa, motivo_capa_3
 from app.dominio.estados import (
+    AdvertenciaEntrega,
     EstadoEstudiante,
     EstadoRepositorioBase,
     EstadoTarea,
@@ -73,6 +75,7 @@ class MotivoRechazoTarea(StrEnum):
     MULTIENTREGA_NO_DISPONIBLE = "MULTIENTREGA_NO_DISPONIBLE"
     FINAL_NO_ELEGIDA = "FINAL_NO_ELEGIDA"
     DESVINCULAR_NO_PERMITIDO = "DESVINCULAR_NO_PERMITIDO"
+    EXCLUIR_NO_PERMITIDO = "EXCLUIR_NO_PERMITIDO"
     TAREA_NO_EDITABLE = "TAREA_NO_EDITABLE"
     GITIGNORE_FUERA_DE_LISTA = "GITIGNORE_FUERA_DE_LISTA"
     RUTA_INVALIDA = "RUTA_INVALIDA"
@@ -191,6 +194,71 @@ def renumerar_al_desvincular(
         )
         for posicion, e in enumerate(restantes, start=1)
     ]
+
+
+def validar_conjunto_para_vincular(
+    *, categorias_existentes: set[int], categoria_nueva: int | None
+) -> None:
+    """R2.3.3 en una tarea grupal: todas sus entregas usan el mismo conjunto de
+    grupos (A-047). El sujeto es el grupo; dos conjuntos distintos darian dos
+    juegos de sujetos para una sola tarea, lo que R2.3.4 prohibe."""
+    if categorias_existentes and categoria_nueva not in categorias_existentes:
+        raise RechazoTarea(
+            MotivoRechazoTarea.MODALIDAD_INCOMPATIBLE,
+            "Esta tarea de Canvas usa otro conjunto de grupos que las entregas ya vinculadas. "
+            "Todas las entregas de una tarea grupal deben usar el mismo conjunto de grupos: "
+            "elige otra tarea de Canvas o cambia su configuración en Canvas.",
+        )
+
+
+def validar_excluir(*, tipo: TipoEntrega, ya_excluida: bool) -> None:
+    """A-080 regla 3: excluir la entrega `FINAL` dejaria la tarea sin final.
+    Excluir conserva la entrega y lo ya registrado; solo deja de capturarse."""
+    if ya_excluida:
+        raise RechazoTarea(
+            MotivoRechazoTarea.EXCLUIR_NO_PERMITIDO, "Esta entrega ya está excluida."
+        )
+    if tipo == TipoEntrega.FINAL:
+        raise RechazoTarea(
+            MotivoRechazoTarea.EXCLUIR_NO_PERMITIDO,
+            "La entrega final no se puede excluir: una tarea tiene siempre exactamente una "
+            "entrega final. Vincula antes otra entrega como final.",
+        )
+
+
+@dataclass(frozen=True)
+class EntregaFechas:
+    id: Hashable
+    orden: int
+    tipo: TipoEntrega
+    due_at: datetime | None
+    lock_at: datetime | None
+    unlock_at: datetime | None
+
+
+def advertencias_de_entregas(
+    entregas: list[EntregaFechas],
+) -> dict[Hashable, list[AdvertenciaEntrega]]:
+    """S9.11 `entrega.advertencias`, sobre la fecha base: se advierte, nunca se
+    bloquea, y la interfaz sigue ordenando por `orden` (S9.7.3)."""
+    salida: dict[Hashable, list[AdvertenciaEntrega]] = {e.id: [] for e in entregas}
+    for e in entregas:
+        if e.due_at is not None and e.lock_at is not None and e.lock_at < e.due_at:
+            salida[e.id].append(AdvertenciaEntrega.LOCK_ANTES_DE_DUE)
+        if e.due_at is not None and e.unlock_at is not None and e.unlock_at > e.due_at:
+            salida[e.id].append(AdvertenciaEntrega.UNLOCK_DESPUES_DE_DUE)
+    final = next((e for e in entregas if e.tipo == TipoEntrega.FINAL), None)
+    if final is not None and final.due_at is not None:
+        if any(
+            e.tipo == TipoEntrega.PARCIAL and e.due_at is not None and e.due_at > final.due_at
+            for e in entregas
+        ):
+            salida[final.id].append(AdvertenciaEntrega.FINAL_ANTES_QUE_PARCIAL)
+    fechas = [e.due_at for e in entregas if e.due_at is not None]
+    for e in entregas:
+        if e.due_at is not None and fechas.count(e.due_at) > 1:
+            salida[e.id].append(AdvertenciaEntrega.DOS_ENTREGAS_MISMA_FECHA)
+    return salida
 
 
 def validar_vincular_otra_entrega(*, cantidad_actual: int, perfil_alcance: str) -> None:

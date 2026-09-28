@@ -21,6 +21,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    SmallInteger,
     Text,
     text,
 )
@@ -103,6 +104,17 @@ class Curso(Base, ConId):
             f"registro_estado IN {tuple(e.value for e in EstadoTareaRegistro)}",
             name="registro_estado_valido",
         ),
+        CheckConstraint(
+            "comunicaciones_salientes IN ('ACTIVAS', 'SUSPENDIDAS')",
+            name="comunicaciones_salientes_valida",
+        ),
+        CheckConstraint(
+            "modo_escritura IN ('COMPLETO', 'SOLO_LECTURA')", name="modo_escritura_valido"
+        ),
+        CheckConstraint(
+            "NOT (modo_escritura = 'SOLO_LECTURA' AND comunicaciones_salientes = 'ACTIVAS')",
+            name="solo_lectura_suspende",
+        ),
     )
 
     estado: Mapped[str] = mapped_column(Text, nullable=False, default=EstadoCurso.BORRADOR.value)
@@ -113,6 +125,9 @@ class Curso(Base, ConId):
     zona_horaria: Mapped[str] = mapped_column(Text, nullable=False)
     umbral_dias_sin_actividad: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     umbral_desbalance_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=70)
+    # S10.2.6 (F5): desde cuando el espejo de actividad es fiable, escrito al
+    # terminar el relleno hacia atras de todos los repositorios del curso.
+    ingesta_actividad_desde: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     # Columnas de Etapa P3 (vinculacion Canvas), creadas ahora por S14.8.1.
     canvas_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     canvas_course_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -124,6 +139,18 @@ class Curso(Base, ConId):
         Text, nullable=False, default=ViaAnuncioSeccion.NO_VERIFICADO.value
     )
     canal_comunicacion_activo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Etapa F10 (A-225): suspension de lo que se escribe en Canvas.
+    comunicaciones_salientes: Mapped[str] = mapped_column(
+        Text, nullable=False, default="ACTIVAS", server_default="ACTIVAS"
+    )
+    suspension_motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suspension_desde: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
+    suspension_por: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=True
+    )
+    modo_escritura: Mapped[str] = mapped_column(
+        Text, nullable=False, default="COMPLETO", server_default="COMPLETO"
+    )
     # Columnas de Etapa P6 (tarea de registro de GitHub), SPEC 07 S7.2.3.
     canvas_assignment_id_registro: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     registro_creado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
@@ -144,6 +171,10 @@ class MembresiaCurso(Base, ConId):
     __tablename__ = "membresia_curso"
     __table_args__ = (
         Index("uq_membresia_curso_curso_id_usuario_id", "curso_id", "usuario_id", unique=True),
+        CheckConstraint(
+            "peso_correccion IS NULL OR peso_correccion BETWEEN 0 AND 10",
+            name="peso_correccion_rango",
+        ),
         CheckConstraint(f"rol IN {_VALORES_ROL}", name="rol_valido"),
         CheckConstraint(f"estado IN {_VALORES_ESTADO_MEMBRESIA}", name="estado_valido"),
         CheckConstraint(
@@ -180,6 +211,10 @@ class MembresiaCurso(Base, ConId):
     retirada_por: Mapped[uuid.UUID | None] = mapped_column(
         _UUID, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=True
     )
+    # Etapa F11 (S12.2.7): peso en el reparto equitativo (nulo = por rol:
+    # ayudante 1, profesor 0) y ultima vez que vio sus asignaciones.
+    peso_correccion: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    correccion_vista_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
 
 
 class InvitacionEquipo(Base, ConId):

@@ -181,3 +181,111 @@ def test_estimacion_de_tiempo_restante():
     assert minutos_restantes(pendientes=1) == 1
     assert minutos_restantes(pendientes=60) == 6
     assert minutos_restantes(pendientes=90, ritmo_segundos=12) == 18
+
+
+# --- Etapa F1: modalidad grupal (S8.5.1 paso 2, S8.5.2; A-093, A-094) ---
+
+
+def test_f1_basta_un_integrante_con_mapeo_vigente_para_crear():
+    from app.dominio.aprovisionamiento import motivo_espera_grupal
+
+    # CA-8.5-01: uno de cuatro con mapeo VIGENTE ya cumple la guarda.
+    assert (
+        motivo_espera_grupal(
+            estados_mapeo_integrantes=["VIGENTE", None, "SIN_DATO", "NO_EXISTE"],
+            hay_integrante_en_dos_grupos=False,
+            estado_tarea="ACTIVA",
+        )
+        is None
+    )
+
+
+def test_f1_grupo_sin_ningun_mapeo_espera_con_motivo():
+    from app.dominio.aprovisionamiento import motivo_espera_grupal
+
+    assert (
+        motivo_espera_grupal(
+            estados_mapeo_integrantes=[None, "SIN_DATO"],
+            hay_integrante_en_dos_grupos=False,
+            estado_tarea="ACTIVA",
+        )
+        == MotivoEsperandoInformacion.SIN_MAPEO_GITHUB
+    )
+    assert (
+        motivo_espera_grupal(
+            estados_mapeo_integrantes=["EN_CONFLICTO"],
+            hay_integrante_en_dos_grupos=False,
+            estado_tarea="ACTIVA",
+        )
+        == MotivoEsperandoInformacion.MAPEO_EN_CONFLICTO
+    )
+    assert (
+        motivo_espera_grupal(
+            estados_mapeo_integrantes=[],
+            hay_integrante_en_dos_grupos=False,
+            estado_tarea="ACTIVA",
+        )
+        == MotivoEsperandoInformacion.GRUPO_SIN_INTEGRANTES_ACEPTADOS
+    )
+
+
+def test_f1_estudiante_en_dos_grupos_detiene_solo_a_esos_grupos():
+    from app.dominio.aprovisionamiento import motivo_espera_grupal
+
+    assert (
+        motivo_espera_grupal(
+            estados_mapeo_integrantes=["VIGENTE", "VIGENTE"],
+            hay_integrante_en_dos_grupos=True,
+            estado_tarea="ACTIVA",
+        )
+        == MotivoEsperandoInformacion.ESTUDIANTE_EN_DOS_GRUPOS
+    )
+    assert (
+        motivo_espera_grupal(
+            estados_mapeo_integrantes=["VIGENTE"],
+            hay_integrante_en_dos_grupos=False,
+            estado_tarea="INCONSISTENTE",
+        )
+        == MotivoEsperandoInformacion.TAREA_INCONSISTENTE
+    )
+
+
+def test_f1_grupo_deja_de_ser_sujeto_sin_aceptados_o_disuelto():
+    from app.dominio.aprovisionamiento import motivo_no_es_sujeto_grupal
+
+    assert motivo_no_es_sujeto_grupal(grupo_activo=True, integrantes_elegibles=1) is None
+    assert (
+        motivo_no_es_sujeto_grupal(grupo_activo=True, integrantes_elegibles=0)
+        == MotivoDesactivacionSujeto.GRUPO_SIN_ACEPTADOS
+    )
+    assert (
+        motivo_no_es_sujeto_grupal(grupo_activo=False, integrantes_elegibles=3)
+        == MotivoDesactivacionSujeto.GRUPO_DISUELTO
+    )
+
+
+def test_f1_integrante_pendiente_en_canvas_degrada_el_repositorio():
+    r = evaluar_predicado_operativo(
+        estados_acceso_estudiantes=["ACEPTADO", "ACCESO_DIRECTO"],
+        hay_errores_al_invitar=False,
+        integrantes_pendientes_en_canvas=True,
+        estado_acceso_docente="CONCEDIDO",
+    )
+    assert (r.estado, r.motivo) == (
+        EstadoRepositorio.DEGRADADO,
+        MotivoDegradado.INTEGRANTE_PENDIENTE_EN_CANVAS,
+    )
+
+
+def test_f1_salida_del_grupo_solo_propone_revocar():
+    from app.dominio.aprovisionamiento import estado_acceso_tras_salir_del_grupo
+
+    # S8.8.3 (A-212): nunca se revoca solo; queda propuesta para decision humana.
+    for estado in ("ACEPTADO", "ACCESO_DIRECTO", "INVITADO"):
+        assert (
+            estado_acceso_tras_salir_del_grupo(estado)
+            == EstadoAccesoRepositorio.REVOCACION_PROPUESTA
+        )
+    # Sin acceso concedido no hay nada que revocar: la fila no cambia.
+    for estado in ("SIN_MAPEO", "POR_INVITAR", "REVOCACION_PROPUESTA", "REVOCADO"):
+        assert estado_acceso_tras_salir_del_grupo(estado) is None

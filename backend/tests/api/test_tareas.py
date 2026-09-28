@@ -131,8 +131,9 @@ def test_sincronizar_espeja_las_tareas_de_canvas_con_su_motivo(cliente: TestClie
     por_id = {a["canvas_assignment_id"]: a for a in cuerpo["assignments"]}
     assert {9101, 9102, 9103, 9104} <= set(por_id)
     assert por_id[9101]["seleccionable"] is True
-    assert por_id[9102]["seleccionable"] is False
-    assert "23 de septiembre" in por_id[9102]["motivo"]
+    # F1: la bandera `tarea_modalidad_grupal` ya esta retirada.
+    assert por_id[9102]["seleccionable"] is True
+    assert por_id[9102]["motivo"] is None
     assert cuerpo["sincronizado_en"] is not None
 
 
@@ -163,9 +164,8 @@ def test_crear_tarea_individual_con_su_entrega_final(cliente: TestClient):
     assert entrega["slug"] == "tarea-1-ordenamiento"
     # R2.3.5: sin base, la tarea se activa sin ninguna comprobacion de base (CA-8.3-01).
     assert tarea["activar"] == {"habilitada": True, "motivo": None}
-    # Bandera `tarea_multientrega`: capa 3 con fecha.
-    assert tarea["vincular_otra_entrega"]["habilitada"] is False
-    assert "23 de septiembre" in tarea["vincular_otra_entrega"]["motivo"]
+    # F2: bandera `tarea_multientrega` retirada.
+    assert tarea["vincular_otra_entrega"] == {"habilitada": True, "motivo": None}
 
     listado = cliente.get(f"/api/cursos/{curso_id}/tareas").json()
     assert [t["slug"] for t in listado] == ["t1-ordenamiento"]
@@ -187,15 +187,17 @@ def test_la_visibilidad_de_la_entrega_se_calcula_en_la_sincronizacion(cliente: T
     assert all(f.visible and f.origen == "TODOS" for f in filas)
 
 
-def test_tarea_grupal_se_rechaza_con_motivo_y_fecha(cliente: TestClient):
+def test_tarea_grupal_se_crea_con_su_conjunto_de_grupos(cliente: TestClient):
+    """F1 (R2.3.3): la modalidad se deriva de Canvas y el conjunto de grupos
+    sale del `group_category_id` del assignment."""
     curso_id = _preparar_curso(cliente, slug="pds-t7-e", email="profe.t7e@gmail.com")
     respuesta = cliente.post(
         f"/api/cursos/{curso_id}/tareas",
         json={"nombre": "Compilador", "canvas_assignment_id": 9102},
     )
-    assert respuesta.status_code == 409, respuesta.text
-    assert respuesta.json()["detail"]["motivo"] == "MODALIDAD_GRUPAL_NO_DISPONIBLE"
-    assert cliente.get(f"/api/cursos/{curso_id}/tareas").json() == []
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json()["modalidad"] == "GRUPAL"
+    assert respuesta.json()["activar"]["motivo"] is None
 
 
 def test_una_tarea_de_canvas_no_se_vincula_dos_veces(cliente: TestClient):
@@ -220,15 +222,16 @@ def test_slug_repetido_no_se_sufija(cliente: TestClient):
     assert respuesta.json()["detail"]["motivo"] == "SLUG_OCUPADO"
 
 
-def test_segunda_entrega_rechazada_en_la_parcial(cliente: TestClient):
+def test_segunda_entrega_disponible_tras_retirar_su_bandera(cliente: TestClient):
+    # F2: `tarea_multientrega` retirada; la segunda entrega ya no es capa 3.
     curso_id = _preparar_curso(cliente, slug="pds-t7-h", email="profe.t7h@gmail.com")
     tarea = _crear_tarea(cliente, curso_id)
     respuesta = cliente.post(
         f"/api/cursos/{curso_id}/tareas/{tarea['id']}/entregas",
         json={"canvas_assignment_id": 9104, "final_canvas_assignment_id": 9104},
     )
-    assert respuesta.status_code == 409
-    assert respuesta.json()["detail"]["motivo"] == "MULTIENTREGA_NO_DISPONIBLE"
+    assert respuesta.status_code == 200, respuesta.text
+    assert len(respuesta.json()["entregas"]) == 2
 
 
 def test_tarea_sin_sincronizar_pide_sincronizar(cliente: TestClient):

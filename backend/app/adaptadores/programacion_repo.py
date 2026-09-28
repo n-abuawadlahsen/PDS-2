@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.modelos_infraestructura import TrabajoPeriodico
+from app.dominio.estados import EstadoTarea
 
 # Ajuste tras la prueba del 15-sep: adelantar aceptaciones sin esperar 15 min.
 CADENCIA_ACCESOS_SEGUNDOS = 60
@@ -30,11 +31,20 @@ PERIODICOS_DE_CURSO: tuple[tuple[str, int], ...] = (
     ("materializar_sujetos", 300),
     ("aprovisionar_repositorios", 120),
     ("reconciliar_accesos", CADENCIA_ACCESOS_SEGUNDOS),
+    ("reconciliar_actividad", 900),  # F5: la red de seguridad por ETag
+    ("agregar_metricas", 600),  # F6: recomputa agregados y alertas
+    # F4-F5: relleno hacia atras, reconciliacion completa y verificacion.
+    ("barrido_completo_actividad", 86_400),
+    ("informe_diario", 1800),  # F9: 07:00 y barrido cada 30 min hasta las 23:00
+    ("comunicaciones_programadas", 300),  # F10: recordatorios y cambios de fecha
+    ("reconciliar_notas_canvas", 1800),  # F12: 30 min en ventana; 1/dia fuera
 )
 
 PERIODICOS_GLOBALES: tuple[tuple[str, int], ...] = (
     ("despachar_outbox", 30),
     ("sincronizar_acceso_docente", 3600),
+    ("resolver_sha", 60),  # F4: el tick de captura (S9.6.1)
+    ("purga_retencion", 86_400),  # F10: retenido mas de 7 dias caduca
 )
 
 
@@ -65,6 +75,17 @@ def asegurar_periodicos_de_curso(bd: Session, curso_id: uuid.UUID) -> None:
     bd.flush()
 
 
+def asegurar_periodicos_de_cursos_activos(bd: Session) -> None:
+    """Al arrancar el trabajador: un curso que ya tenia tareas activas antes
+    de un despliegue recibe los periodicos que ese despliegue agrego."""
+    from app.adaptadores.modelos_tarea import Tarea
+
+    for (curso_id,) in (
+        bd.query(Tarea.curso_id).filter(Tarea.estado == EstadoTarea.ACTIVA.value).distinct()
+    ):
+        asegurar_periodicos_de_curso(bd, curso_id)
+
+
 def asegurar_periodicos_globales(bd: Session) -> None:
     for tipo, cadencia in PERIODICOS_GLOBALES:
         # `UNIQUE (tipo, curso_id)` no impide dos filas con `curso_id` nulo en
@@ -83,4 +104,21 @@ def actualizar_cadencia_accesos(bd: Session) -> None:
         fila.proxima_ejecucion = min(
             fila.proxima_ejecucion, ahora + timedelta(seconds=CADENCIA_ACCESOS_SEGUNDOS)
         )
+
+
+def ajustar_cadencia(bd: Session, *, tipo: str, curso_id: uuid.UUID, cadencia: int) -> None:
+    """Cambia la cadencia de un periodico ya sembrado (S9.4.4: 5 min / 1 min).
+    Si se acorta, la proxima ejecucion se adelanta para no esperar el ciclo
+    largo que ya estaba programado."""
+    fila = (
+        bd.query(TrabajoPeriodico)
+        .filter(TrabajoPeriodico.tipo == tipo, TrabajoPeriodico.curso_id == curso_id)
+        .one_or_none()
+    )
+    if fila is None or fila.cadencia_segundos == cadencia:
+        return
+    fila.cadencia_segundos = cadencia
+    limite = ahora_utc() + timedelta(seconds=cadencia)
+    if fila.proxima_ejecucion > limite:
+        fila.proxima_ejecucion = limite
     bd.flush()

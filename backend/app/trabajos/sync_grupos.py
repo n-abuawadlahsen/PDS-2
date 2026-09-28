@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.adaptadores import canvas_repo, padron_repo
+from app.adaptadores import canvas_repo, padron_repo, sincronizacion_repo
 from app.adaptadores.cliente_canvas import crear_cliente_canvas
 from app.adaptadores.modelos_curso import Curso
 from app.adaptadores.modelos_infraestructura import Trabajo
@@ -35,5 +35,15 @@ def ejecutar(sesion: Session, trabajo: Trabajo) -> None:
         modo=settings.canvas_modo, canvas_base_url=curso.canvas_base_url or settings.canvas_base_url
     )
 
-    with cerrojo_canvas(sesion, curso.id):
-        padron_repo.sincronizar_grupos(sesion, cliente, curso=curso, token=token)
+    try:
+        with cerrojo_canvas(sesion, curso.id):
+            padron_repo.sincronizar_grupos(sesion, cliente, curso=curso, token=token)
+    except Exception:
+        # S9.4.4 (CA-9.4-03): el ciclo fallido queda registrado para que
+        # `sync_tareas_y_fechas` no calcule fechas sobre un padron a medias.
+        sesion.rollback()
+        sincronizacion_repo.registrar_ciclo(
+            sesion, curso_id=curso.id, recurso="grupos", resultado="FALLIDA", contadores={}
+        )
+        sesion.commit()
+        raise

@@ -93,6 +93,44 @@ ENTIDADES_ETAPA_P8: frozenset[str] = frozenset(
     }
 )
 
+# Etapa F4 - captura y versiones de entrega (SPEC 09 S9.6-S9.9).
+ENTIDADES_ETAPA_F4: frozenset[str] = frozenset({"version_entrega"})
+
+# Etapa F5 - ingesta de actividad de GitHub (SPEC 10 S10.2-S10.3).
+ENTIDADES_ETAPA_F5: frozenset[str] = frozenset(
+    {"evento_webhook", "evento_push", "commit", "autoria_commit", "identidad_git"}
+)
+
+# Etapa F6 - tablero de tarea y comparacion (SPEC 10 S10.4).
+ENTIDADES_ETAPA_F6: frozenset[str] = frozenset(
+    {"metrica_repositorio_dia", "participacion_entrega", "resumen_tarea"}
+)
+
+# Etapa F9 - informe docente diario y suscripcion (SPEC 11 S11.3-S11.4).
+ENTIDADES_ETAPA_F9: frozenset[str] = frozenset({"informe_diario", "suscripcion_informe"})
+
+# Etapa F10 - comunicaciones ampliadas (SPEC 11 S11.2, S11.6, S11.8; A-225).
+ENTIDADES_ETAPA_F10: frozenset[str] = frozenset(
+    {
+        "plantilla_mensaje",
+        "supresion_comunicacion",
+        "cambio_fecha",
+        "regla_comunicacion",
+        "ventana_supresion",
+    }
+)
+
+# Etapas F11-F12 - correccion y publicacion de notas (SPEC 12 S12.2).
+ENTIDADES_ETAPA_F11: frozenset[str] = frozenset(
+    {
+        "asignacion_correccion",
+        "correccion",
+        "nota_interna_correccion",
+        "estado_canvas_submission",
+        "publicacion_nota",
+    }
+)
+
 CENSO: frozenset[str] = (
     ENTIDADES_ETAPA_0
     | ENTIDADES_ETAPA_P1
@@ -103,6 +141,12 @@ CENSO: frozenset[str] = (
     | ENTIDADES_ETAPA_P6
     | ENTIDADES_ETAPA_P7
     | ENTIDADES_ETAPA_P8
+    | ENTIDADES_ETAPA_F4
+    | ENTIDADES_ETAPA_F5
+    | ENTIDADES_ETAPA_F6
+    | ENTIDADES_ETAPA_F9
+    | ENTIDADES_ETAPA_F10
+    | ENTIDADES_ETAPA_F11
 )
 
 # Valor especial admitido en bitacora.entidad ademas del censo (A-184).

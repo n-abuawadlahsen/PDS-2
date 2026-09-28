@@ -24,6 +24,7 @@ import {
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
+import { RecordatorioMapeo } from "./RecordatorioMapeo";
 
 function EditorMapeo({
   estudianteId,
@@ -311,6 +312,7 @@ export function Personas() {
           <span>Secciones</span>
         </div>
       </div>
+      <RecordatorioMapeo cursoId={curso.id} />
       <section className="panel">
         <div className="panel-header">
           <div>

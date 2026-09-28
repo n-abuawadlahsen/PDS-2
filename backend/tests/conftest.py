@@ -20,7 +20,44 @@ def limpiar_tablas_identidad():
         # Orden que respeta las FK RESTRICT: lo que referencia primero.
         sesion.execute(text("DELETE FROM bitacora"))
         # Etapa P8: lo que referencia repositorio, sujeto y regla_fecha primero.
+        # Etapas F11-F12: lo que referencia correccion, y correccion misma.
+        for tabla in (
+            "publicacion_nota",
+            "nota_interna_correccion",
+            "estado_canvas_submission",
+            "asignacion_correccion",
+            "correccion",
+        ):
+            sesion.execute(text(f"DELETE FROM {tabla}"))
+        # Etapa F10: cambio_fecha referencia mensaje_saliente.
+        sesion.execute(text("DELETE FROM cambio_fecha"))
         sesion.execute(text("DELETE FROM mensaje_saliente"))
+        for tabla in (
+            "plantilla_mensaje",
+            "supresion_comunicacion",
+            "regla_comunicacion",
+            "ventana_supresion",
+        ):
+            sesion.execute(text(f"DELETE FROM {tabla}"))
+        # Etapa F9: informe y suscripcion referencian curso y usuario.
+        sesion.execute(text("DELETE FROM informe_diario"))
+        sesion.execute(text("DELETE FROM suscripcion_informe"))
+        # Etapa F4: `version_entrega` es evidencia y su disparador rechaza todo
+        # DELETE; solo la limpieza de pruebas lo apaga durante la sentencia.
+        sesion.execute(
+            text("ALTER TABLE version_entrega DISABLE TRIGGER version_entrega_inmutable")
+        )
+        sesion.execute(text("DELETE FROM version_entrega"))
+        # Etapa F5: la autoria y los commits referencian identidad_git y repositorio.
+        sesion.execute(text("DELETE FROM metrica_repositorio_dia"))
+        sesion.execute(text("DELETE FROM participacion_entrega"))
+        sesion.execute(text("DELETE FROM resumen_tarea"))
+        sesion.execute(text("DELETE FROM autoria_commit"))
+        sesion.execute(text("DELETE FROM commit"))
+        sesion.execute(text("DELETE FROM identidad_git"))
+        sesion.execute(text("DELETE FROM evento_push"))
+        sesion.execute(text("DELETE FROM evento_webhook"))
+        sesion.execute(text("ALTER TABLE version_entrega ENABLE TRIGGER version_entrega_inmutable"))
         sesion.execute(text("DELETE FROM fecha_efectiva"))
         sesion.execute(text("DELETE FROM regla_fecha"))
         sesion.execute(text("DELETE FROM acceso_repositorio"))
@@ -66,3 +103,13 @@ def limpiar_tablas_identidad():
         sesion.execute(text("DELETE FROM curso"))
         sesion.execute(text("DELETE FROM usuario"))
         sesion.commit()
+
+
+@pytest.fixture(autouse=True)
+def _sin_franja_horaria(monkeypatch):
+    """La franja 08:00-21:00 (S11.6.5) depende del reloj real: se apaga para
+    que las pruebas no cambien de resultado segun la hora. Las pruebas de la
+    franja la encienden."""
+    from app.adaptadores import outbox_repo
+
+    monkeypatch.setattr(outbox_repo, "FRANJA_ACTIVA", False)

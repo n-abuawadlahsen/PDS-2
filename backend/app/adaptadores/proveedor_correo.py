@@ -1,6 +1,7 @@
 """Correo transaccional por HTTPS; fuera de produccion nunca envia a terceros."""
 
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from typing import Protocol
 
 import httpx
@@ -22,6 +23,21 @@ class ResultadoCorreo:
     simulado: bool = False
 
 
+@dataclass(frozen=True)
+class CorreoSimulado:
+    """Lo que el proveedor de consola «envio». Solo lo leen las pruebas; vive en
+    memoria del proceso y nunca se registra en el log."""
+
+    destinatario: str
+    asunto: str
+    html: str
+    texto: str
+    cabeceras: dict[str, str] = field(default_factory=dict)
+
+
+correos_consola: deque[CorreoSimulado] = deque(maxlen=50)
+
+
 class ProveedorCorreo(Protocol):
     def enviar(
         self,
@@ -32,6 +48,7 @@ class ProveedorCorreo(Protocol):
         texto: str,
         clave_idempotencia: str,
         reserva: str,
+        cabeceras: dict[str, str] | None = None,
     ) -> ResultadoCorreo: ...
 
 
@@ -45,8 +62,12 @@ class CorreoConsola:
         texto: str,
         clave_idempotencia: str,
         reserva: str,
+        cabeceras: dict[str, str] | None = None,
     ) -> ResultadoCorreo:
         # No registrar el enlace nominal, el cuerpo ni el correo personal.
+        correos_consola.append(
+            CorreoSimulado(destinatario, asunto, html, texto, dict(cabeceras or {}))
+        )
         obtener_logger(__name__).info("correo.simulado", clave=clave_idempotencia, reserva=reserva)
         return ResultadoCorreo(id=f"consola:{clave_idempotencia}", simulado=True)
 
@@ -64,6 +85,7 @@ class CorreoResend:
         texto: str,
         clave_idempotencia: str,
         reserva: str,
+        cabeceras: dict[str, str] | None = None,
     ) -> ResultadoCorreo:
         try:
             r = httpx.post(
@@ -80,6 +102,7 @@ class CorreoResend:
                     "subject": asunto,
                     "html": html,
                     "text": texto,
+                    **({"headers": cabeceras} if cabeceras else {}),
                 },
             )
         except httpx.TransportError as exc:

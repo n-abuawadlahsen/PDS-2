@@ -206,7 +206,11 @@ class AccesoRepositorio(Base, ConId):
 
 
 class ReglaFecha(Base, ConId):
-    """A-080: copia cruda de lo que devuelve Canvas; una fila `BASE` por entrega."""
+    """A-080: copia cruda de lo que devuelve Canvas; una fila `BASE` por entrega.
+
+    Un override que desaparece de Canvas no se borra: queda con `retirada_en`
+    (Ley 2), para que el historial de fechas siga diciendo que regla justifico
+    cada fecha superseda (S9.4.1). Si reaparece con el mismo id, se reactiva."""
 
     __tablename__ = "regla_fecha"
     __table_args__ = (
@@ -249,6 +253,7 @@ class ReglaFecha(Base, ConId):
     lock_at: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     titulo: Mapped[str | None] = mapped_column(Text, nullable=True)
     sincronizado_en: Mapped[datetime] = mapped_column(_TZ, nullable=False)
+    retirada_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
 
 
 class FechaEfectiva(Base, ConId):
@@ -310,6 +315,10 @@ class MensajeSaliente(Base, ConId):
         CheckConstraint(f"canal IN {_valores(CanalMensaje)}", name="canal_valido"),
         CheckConstraint(f"estado IN {_valores(EstadoMensaje)}", name="estado_valido"),
         CheckConstraint(f"origen IN {_valores(OrigenMensaje)}", name="origen_valido"),
+        CheckConstraint(
+            "reserva IS NULL OR reserva IN ('INFORME', 'OPERATIVO', 'MARGEN')",
+            name="reserva_valida",
+        ),
     )
 
     curso_id: Mapped[uuid.UUID] = mapped_column(
@@ -358,3 +367,31 @@ class MensajeSaliente(Base, ConId):
     canvas_id_resultante: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     enviado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(_TZ, nullable=False)
+    # Etapa F9 (S11.5, A-228): el canal CORREO va a un docente, no a un estudiante.
+    membresia_id: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("membresia_curso.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    disparado_por_usuario_id: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=True
+    )
+    # Reserva de la cuota diaria de correo solicitada; al enviar, la consumida.
+    reserva: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proveedor_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Etapa F10 (S11.2.1): entrega, envio de prueba, anuncios y retractacion.
+    entrega_id: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("entrega.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    es_prueba: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    cuerpo_truncado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    canvas_html_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retraccion_solicitada: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    retractado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
+    retractado_por: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=True
+    )

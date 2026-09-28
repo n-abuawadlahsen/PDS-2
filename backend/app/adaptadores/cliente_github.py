@@ -25,12 +25,14 @@ from urllib.parse import quote
 import httpx
 import jwt
 
+from app.dominio.actividad import CommitGithub
 from app.dominio.repositorio_github import (
     ArchivoGithub,
     InvitacionGithub,
     RepoGithubInfo,
     ResultadoInvitacion,
 )
+from app.dominio.versiones import CommitCierre
 from app.dominio.vinculacion_github import CuentaUsuarioInfo, InstalacionInfo, OrganizacionInfo
 
 _TIMEOUT_SEGUNDOS = 20.0
@@ -39,6 +41,24 @@ _JWT_VIGENCIA_SEGUNDOS = 600
 _JWT_MARGEN_RELOJ_SEGUNDOS = 60
 _ALGORITMO_STATE = "HS256"
 _EXPIRACION_STATE_INSTALACION = timedelta(minutes=15)
+
+
+@dataclass(frozen=True)
+class ListadoCommits:
+    """`no_modificado`: la API respondio `304` al ETag; `truncado`: se agoto el
+    tope de paginas sin topar con un SHA conocido."""
+
+    commits: list[CommitGithub]
+    etag: str | None
+    no_modificado: bool
+    truncado: bool
+
+
+@dataclass(frozen=True)
+class Comparacion:
+    estado: str  # identical | ahead | behind | diverged
+    commits: list[CommitGithub]
+    truncado: bool
 
 
 class FalloProveedorGithub(Exception):
@@ -296,6 +316,13 @@ class ClienteGitHub(Protocol):
         """`PATCH /repos/{o}/{r}` con `is_template: true` y nada mas (S6.11.2)."""
         ...
 
+    def cambiar_archivado(
+        self, org_login: str, repo: str, archivado: bool, token_instalacion: str
+    ) -> None:
+        """`PATCH /repos/{o}/{r}` con `archived: true|false` y nada mas (A-197).
+        Solo la llama `archivar_repositorios`, por accion de un profesor."""
+        ...
+
     def reemplazar_topics(
         self, org_login: str, repo: str, topics: list[str], token_instalacion: str
     ) -> None:
@@ -303,7 +330,7 @@ class ClienteGitHub(Protocol):
         ...
 
     def obtener_archivo(
-        self, org_login: str, repo: str, ruta: str, token_instalacion: str
+        self, org_login: str, repo: str, ruta: str, token_instalacion: str, ref: str | None = None
     ) -> ArchivoGithub | None:
         """`GET /repos/{o}/{r}/contents/{ruta}`. No figura en la tabla de
         S6.5.2, pero es la "lectura antes del efecto" que el contrato de A-169
@@ -340,6 +367,73 @@ class ClienteGitHub(Protocol):
         """`DELETE /repos/{o}/{r}/contents/{ruta}`: solo sobre el base (S6.5.2)."""
         ...
 
+    # --- Etapa F4: captura de versiones (SPEC 09 S9.6, S9.8.5, S9.10.5) ---
+
+    def listar_commits_hasta(
+        self, org_login: str, repo: str, *, rama: str, corte: datetime, token_instalacion: str
+    ) -> list[CommitCierre]:
+        """`GET /repos/{o}/{r}/commits?sha=<rama>&until=<corte+1s>&per_page=100`
+        (A-102). Pide un segundo por encima del corte para que la inclusividad
+        de `until` deje de importar; si ninguna candidata cae en el corte, sigue
+        `Link` hasta 5 paginas. La seleccion del commit la hace el dominio."""
+        ...
+
+    def obtener_commit(
+        self, org_login: str, repo: str, sha: str, token_instalacion: str
+    ) -> CommitCierre | None:
+        """`GET /repos/{o}/{r}/commits/{sha}`: `None` si el SHA no existe en ese
+        repositorio (404/422), que es como se rechaza fijar un SHA ajeno."""
+        ...
+
+    def obtener_ref_tag(
+        self, org_login: str, repo: str, nombre: str, token_instalacion: str
+    ) -> str | None:
+        """`GET /repos/{o}/{r}/git/ref/tags/{nombre}`: el SHA al que apunta, o
+        `None` si la etiqueta no existe."""
+        ...
+
+    def crear_ref_tag(
+        self, org_login: str, repo: str, nombre: str, sha: str, token_instalacion: str
+    ) -> None:
+        """`POST /repos/{o}/{r}/git/refs` con `refs/tags/<nombre>` (A-104)."""
+        ...
+
+    # --- Etapa F5: ingesta de actividad (SPEC 10 S10.2) ---
+
+    def listar_ramas(
+        self, org_login: str, repo: str, token_instalacion: str
+    ) -> list[tuple[str, str]]:
+        """`GET /repos/{o}/{r}/branches`: `(nombre, sha de la cabeza)`."""
+        ...
+
+    def listar_commits_rama(
+        self,
+        org_login: str,
+        repo: str,
+        ref: str,
+        token_instalacion: str,
+        *,
+        etag: str | None = None,
+        conocidos: frozenset[str] = frozenset(),
+        max_paginas: int = 30,
+    ) -> ListadoCommits:
+        """`GET /repos/{o}/{r}/commits?sha=<ref>` con `If-None-Match` (A-072),
+        de la cabeza hacia atras hasta el primer SHA conocido, tope 30 paginas."""
+        ...
+
+    def comparar(
+        self,
+        org_login: str,
+        repo: str,
+        base: str,
+        cabeza: str,
+        token_instalacion: str,
+        *,
+        max_paginas: int = 30,
+    ) -> Comparacion:
+        """`GET /repos/{o}/{r}/compare/{base}...{cabeza}` paginado."""
+        ...
+
 
 class ClienteGitHubReal:
     def __init__(self, *, app_id: str, private_key_pem_base64: str) -> None:
@@ -364,12 +458,13 @@ class ClienteGitHubReal:
         token: str | None,
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        cabeceras_extra: dict[str, str] | None = None,
     ) -> httpx.Response:
         try:
             return httpx.request(
                 metodo,
                 url,
-                headers=_cabeceras(token),
+                headers={**_cabeceras(token), **(cabeceras_extra or {})},
                 json=json,
                 params=params,
                 timeout=_TIMEOUT_SEGUNDOS,
@@ -786,6 +881,17 @@ class ClienteGitHubReal:
         _exigir_exito(respuesta)
         return _repo_desde_json(respuesta.json())
 
+    def cambiar_archivado(
+        self, org_login: str, repo: str, archivado: bool, token_instalacion: str
+    ) -> None:
+        respuesta = self._peticion(
+            "PATCH",
+            f"https://api.github.com/repos/{org_login}/{repo}",
+            token=token_instalacion,
+            json={"archived": archivado},
+        )
+        _exigir_exito(respuesta)
+
     def reemplazar_topics(
         self, org_login: str, repo: str, topics: list[str], token_instalacion: str
     ) -> None:
@@ -798,12 +904,14 @@ class ClienteGitHubReal:
         _exigir_exito(respuesta)
 
     def obtener_archivo(
-        self, org_login: str, repo: str, ruta: str, token_instalacion: str
+        self, org_login: str, repo: str, ruta: str, token_instalacion: str, ref: str | None = None
     ) -> ArchivoGithub | None:
         respuesta = self._peticion(
             "GET",
             f"https://api.github.com/repos/{org_login}/{repo}/contents/{quote(ruta, safe='/')}",
             token=token_instalacion,
+            # F4 (S9.10.5): `ref` lee el arbol del commit capturado.
+            params={"ref": ref} if ref is not None else None,
         )
         if respuesta.status_code == 404:
             return None
@@ -866,6 +974,207 @@ class ClienteGitHubReal:
             return  # ya no estaba: el efecto buscado ya existe
         _exigir_exito(respuesta)
 
+    def listar_commits_hasta(
+        self, org_login: str, repo: str, *, rama: str, corte: datetime, token_instalacion: str
+    ) -> list[CommitCierre]:
+        url: str | None = f"https://api.github.com/repos/{org_login}/{repo}/commits"
+        params: dict[str, Any] | None = {
+            "sha": rama,
+            "until": (corte + timedelta(seconds=1)).astimezone(UTC).isoformat(),
+            "per_page": 100,
+        }
+        commits: list[CommitCierre] = []
+        for _ in range(_PAGINAS_COMMITS_MAXIMAS):
+            assert url is not None
+            respuesta = self._peticion("GET", url, token=token_instalacion, params=params)
+            if respuesta.status_code == 409:
+                return []  # repositorio vacio
+            _exigir_exito(respuesta)
+            commits.extend(_commit_desde_json(d) for d in respuesta.json())
+            url = respuesta.links.get("next", {}).get("url")
+            params = None
+            if url is None or any(c.fecha_committer <= corte for c in commits):
+                break
+        return commits
+
+    def obtener_commit(
+        self, org_login: str, repo: str, sha: str, token_instalacion: str
+    ) -> CommitCierre | None:
+        respuesta = self._peticion(
+            "GET",
+            f"https://api.github.com/repos/{org_login}/{repo}/commits/{sha}",
+            token=token_instalacion,
+        )
+        if respuesta.status_code in (404, 422):
+            return None
+        _exigir_exito(respuesta)
+        return _commit_desde_json(respuesta.json())
+
+    def obtener_ref_tag(
+        self, org_login: str, repo: str, nombre: str, token_instalacion: str
+    ) -> str | None:
+        ruta = quote(nombre, safe="/")
+        respuesta = self._peticion(
+            "GET",
+            f"https://api.github.com/repos/{org_login}/{repo}/git/ref/tags/{ruta}",
+            token=token_instalacion,
+        )
+        if respuesta.status_code == 404:
+            return None
+        _exigir_exito(respuesta)
+        return str(respuesta.json()["object"]["sha"])
+
+    def crear_ref_tag(
+        self, org_login: str, repo: str, nombre: str, sha: str, token_instalacion: str
+    ) -> None:
+        respuesta = self._peticion(
+            "POST",
+            f"https://api.github.com/repos/{org_login}/{repo}/git/refs",
+            token=token_instalacion,
+            json={"ref": f"refs/tags/{nombre}", "sha": sha},
+        )
+        _exigir_exito(respuesta)
+
+    # --- Etapa F5: ingesta de actividad (SPEC 10 S10.2.3, SPEC 06 S6.8.4) ---
+
+    def listar_ramas(
+        self, org_login: str, repo: str, token_instalacion: str
+    ) -> list[tuple[str, str]]:
+        respuesta = self._peticion(
+            "GET",
+            f"https://api.github.com/repos/{org_login}/{repo}/branches",
+            token=token_instalacion,
+            params={"per_page": 100},
+        )
+        _exigir_exito(respuesta)
+        return [(str(r["name"]), str(r["commit"]["sha"])) for r in respuesta.json()]
+
+    def listar_commits_rama(
+        self,
+        org_login: str,
+        repo: str,
+        ref: str,
+        token_instalacion: str,
+        *,
+        etag: str | None = None,
+        conocidos: frozenset[str] = frozenset(),
+        max_paginas: int = 30,
+    ) -> ListadoCommits:
+        url: str | None = f"https://api.github.com/repos/{org_login}/{repo}/commits"
+        params: dict[str, Any] | None = {"sha": ref, "per_page": 100}
+        cabeceras_extra = {"If-None-Match": etag} if etag else {}
+        salida: list[CommitGithub] = []
+        etag_nuevo: str | None = None
+        for pagina in range(max_paginas):
+            assert url is not None
+            respuesta = self._peticion(
+                "GET",
+                url,
+                token=token_instalacion,
+                params=params,
+                cabeceras_extra=cabeceras_extra if pagina == 0 else None,
+            )
+            if respuesta.status_code == 304:
+                return ListadoCommits(commits=[], etag=etag, no_modificado=True, truncado=False)
+            if respuesta.status_code == 409:
+                return ListadoCommits(commits=[], etag=None, no_modificado=False, truncado=False)
+            _exigir_exito(respuesta)
+            if pagina == 0:
+                etag_nuevo = respuesta.headers.get("ETag")
+            for d in respuesta.json():
+                if d["sha"] in conocidos:
+                    return ListadoCommits(
+                        commits=salida, etag=etag_nuevo, no_modificado=False, truncado=False
+                    )
+                salida.append(_commit_github_desde_json(d))
+            url = respuesta.links.get("next", {}).get("url")
+            params = None
+            if url is None:
+                return ListadoCommits(
+                    commits=salida, etag=etag_nuevo, no_modificado=False, truncado=False
+                )
+        return ListadoCommits(commits=salida, etag=etag_nuevo, no_modificado=False, truncado=True)
+
+    def comparar(
+        self,
+        org_login: str,
+        repo: str,
+        base: str,
+        cabeza: str,
+        token_instalacion: str,
+        *,
+        max_paginas: int = 30,
+    ) -> Comparacion:
+        """`compare/{base}...{cabeza}` paginado con `per_page=100`: el tope de
+        250 commits solo aplica a la llamada sin paginar (A-071). La cabeza de
+        la rama nunca se deduce de esta respuesta."""
+        url: str | None = (
+            f"https://api.github.com/repos/{org_login}/{repo}/compare/{base}...{cabeza}"
+        )
+        params: dict[str, Any] | None = {"per_page": 100}
+        commits: list[CommitGithub] = []
+        estado = "identical"
+        for _ in range(max_paginas):
+            assert url is not None
+            respuesta = self._peticion("GET", url, token=token_instalacion, params=params)
+            _exigir_exito(respuesta)
+            cuerpo = respuesta.json()
+            estado = str(cuerpo.get("status", estado))
+            commits.extend(_commit_github_desde_json(d) for d in cuerpo.get("commits", []))
+            url = respuesta.links.get("next", {}).get("url")
+            params = None
+            if url is None:
+                return Comparacion(estado=estado, commits=commits, truncado=False)
+        return Comparacion(estado=estado, commits=commits, truncado=True)
+
+
+_PAGINAS_COMMITS_MAXIMAS = 5
+
+
+def _fecha_github(valor: str | None) -> datetime | None:
+    if not valor:
+        return None
+    return datetime.fromisoformat(valor.replace("Z", "+00:00"))
+
+
+def _commit_github_desde_json(d: dict[str, Any]) -> CommitGithub:
+    """Un commit de la API REST. `author`/`committer` de primer nivel son las
+    cuentas de GitHub (pueden venir nulos); `commit.author` es el autor de Git.
+    Una edicion desde la web la firma la cuenta `web-flow`."""
+    datos = d.get("commit") or {}
+    autor_git = datos.get("author") or {}
+    fecha_committer = _fecha_github((datos.get("committer") or {}).get("date"))
+    assert fecha_committer is not None
+    cuenta_autor = d.get("author") or {}
+    cuenta_committer = d.get("committer") or {}
+    return CommitGithub(
+        sha=str(d["sha"]),
+        parent_shas=tuple(str(p["sha"]) for p in d.get("parents") or ()),
+        autor_nombre=autor_git.get("name"),
+        autor_email=autor_git.get("email"),
+        autor_github_user_id=cuenta_autor.get("id"),
+        autor_es_bot=cuenta_autor.get("type") == "Bot"
+        or str(cuenta_autor.get("login", "")).endswith("[bot]"),
+        committer_github_user_id=cuenta_committer.get("id"),
+        fecha_autor=_fecha_github(autor_git.get("date")),
+        fecha_committer=fecha_committer,
+        mensaje=datos.get("message"),
+        via_web=cuenta_committer.get("login") == "web-flow",
+    )
+
+
+def _commit_desde_json(d: dict[str, Any]) -> CommitCierre:
+    datos = d.get("commit") or {}
+    fecha_committer = _fecha_github((datos.get("committer") or {}).get("date"))
+    assert fecha_committer is not None
+    return CommitCierre(
+        sha=str(d["sha"]),
+        tree_sha=(datos.get("tree") or {}).get("sha"),
+        fecha_committer=fecha_committer,
+        fecha_autor=_fecha_github((datos.get("author") or {}).get("date")),
+        mensaje=datos.get("message"),
+    )
+
 
 def _sha_blob(contenido: bytes) -> str:
     """El `sha` que GitHub devuelve en la API de contenidos es el blob sha de git."""
@@ -894,6 +1203,104 @@ _archivos: dict[tuple[str, str], dict[str, bytes]] = {}
 _colaboradores: dict[tuple[str, str], set[str]] = {}
 _invitaciones: dict[tuple[str, str], dict[str, InvitacionGithub]] = {}
 _repos_con_lectura_equipo: set[tuple[str, str, str]] = set()
+# Etapas F4-F5: historia del doble como un grafo de commits con ramas. Al crear
+# un repositorio nace con su commit inicial en `main`; `agregar_commit_doble`
+# simula al estudiante y `reescribir_historia_doble` un `push --force`.
+_commits: dict[tuple[str, str], dict[str, CommitGithub]] = {}
+_ramas: dict[tuple[str, str], dict[str, str]] = {}
+_tags: dict[tuple[str, str], dict[str, str]] = {}
+_archivados: set[tuple[str, str]] = set()
+
+
+def agregar_commit_doble(
+    org_login: str,
+    repo: str,
+    *,
+    fecha: datetime,
+    mensaje: str,
+    autor_email: str | None = None,
+    autor_github_user_id: int | None = None,
+    autor_nombre: str | None = None,
+    rama: str = "main",
+    padres: tuple[str, ...] | None = None,
+) -> str:
+    """Solo para el doble: un commit en `rama` con fecha de committer `fecha`.
+    Sus padres son la cabeza actual de la rama, salvo que se indiquen (merge).
+    Devuelve el SHA."""
+    todos = _commits.setdefault((org_login, repo), {})
+    ramas = _ramas.setdefault((org_login, repo), {})
+    sha = hashlib.sha1(f"{org_login}/{repo}/{len(todos)}/{mensaje}".encode()).hexdigest()
+    if padres is None:
+        padres = (ramas[rama],) if rama in ramas else ()
+    todos[sha] = CommitGithub(
+        sha=sha,
+        parent_shas=padres,
+        autor_nombre=autor_nombre,
+        autor_email=autor_email,
+        autor_github_user_id=autor_github_user_id,
+        autor_es_bot=False,
+        committer_github_user_id=autor_github_user_id,
+        fecha_autor=fecha,
+        fecha_committer=fecha,
+        mensaje=mensaje,
+        via_web=False,
+    )
+    ramas[rama] = sha
+    return sha
+
+
+def reescribir_historia_doble(org_login: str, repo: str, *, quitar: int, rama: str = "main") -> str:
+    """Solo para el doble: `push --force` que descarta los ultimos `quitar`
+    commits de la rama. Los descartados siguen existiendo en el grafo (como en
+    GitHub hasta su recoleccion), solo dejan de ser alcanzables. Devuelve la
+    cabeza nueva."""
+    todos = _commits[(org_login, repo)]
+    cabeza = _ramas[(org_login, repo)][rama]
+    for _ in range(quitar):
+        cabeza = (todos[cabeza].parent_shas or ())[0]
+    _ramas[(org_login, repo)][rama] = cabeza
+    return cabeza
+
+
+def _ancestros(todos: dict[str, CommitGithub], sha: str | None) -> set[str]:
+    visto: set[str] = set()
+    pila = [sha] if sha else []
+    while pila:
+        actual = pila.pop()
+        if actual in visto or actual not in todos:
+            continue
+        visto.add(actual)
+        pila.extend(todos[actual].parent_shas or ())
+    return visto
+
+
+def _cierre(c: CommitGithub) -> CommitCierre:
+    return CommitCierre(
+        sha=c.sha,
+        tree_sha=hashlib.sha1(c.sha.encode()).hexdigest(),
+        fecha_committer=c.fecha_committer,
+        fecha_autor=c.fecha_autor,
+        mensaje=c.mensaje,
+    )
+
+
+def retrodatar_repo_doble(org_login: str, repo: str, fecha: datetime) -> None:
+    """Solo para el doble: el commit inicial pasa a tener fecha `fecha`, como
+    un repositorio creado dias antes de un cierre."""
+    todos = _commits.get((org_login, repo), {})
+    for sha, c in list(todos.items()):
+        if not c.parent_shas:
+            todos[sha] = replace(c, fecha_committer=fecha, fecha_autor=fecha)
+
+
+def tags_doble(org_login: str, repo: str) -> dict[str, str]:
+    """Solo para el doble: las etiquetas del repositorio, mutables en pruebas."""
+    return _tags.setdefault((org_login, repo), {})
+
+
+def repo_archivado_doble(org_login: str, repo: str) -> bool:
+    """Solo para el doble: si el repositorio esta archivado en «GitHub»."""
+    return (org_login, repo) in _archivados
 
 
 def aceptar_invitacion_doble(org_login: str, repo: str, login: str) -> None:
@@ -1058,6 +1465,7 @@ class ClienteGitHubDoble:
         if gitignore_template is not None:
             archivos[".gitignore"] = f"# {gitignore_template}\n".encode()
         _archivos[(org_login, nombre)] = archivos
+        self._sembrar_commit_inicial(org_login, nombre)
         return info
 
     def _nuevo_repo(self, org_login: str, nombre: str, descripcion: str) -> RepoGithubInfo:
@@ -1075,6 +1483,28 @@ class ClienteGitHubDoble:
         _repos[(org_login, nombre)] = info
         return info
 
+    def _sembrar_commit_inicial(self, org_login: str, nombre: str) -> None:
+        """El commit inicial del doble es el mismo SHA que `obtener_primer_commit`."""
+        sha = self.obtener_primer_commit(org_login, nombre, "")
+        if sha is not None:
+            ahora = datetime.now(UTC)
+            _commits[(org_login, nombre)] = {
+                sha: CommitGithub(
+                    sha=sha,
+                    parent_shas=(),
+                    autor_nombre="proyecto2-icc4201[bot]",
+                    autor_email="bot@users.noreply.github.com",
+                    autor_github_user_id=None,
+                    autor_es_bot=True,
+                    committer_github_user_id=None,
+                    fecha_autor=ahora,
+                    fecha_committer=ahora,
+                    mensaje="Initial commit",
+                    via_web=False,
+                )
+            }
+            _ramas[(org_login, nombre)] = {"main": sha}
+
     def generar_desde_plantilla(
         self,
         plantilla_owner: str,
@@ -1091,6 +1521,7 @@ class ClienteGitHubDoble:
             raise RechazoProveedorGithub(404, "Not Found")
         info = self._nuevo_repo(org_login, nombre, descripcion)
         _archivos[(org_login, nombre)] = dict(_archivos.get((plantilla_owner, plantilla_repo), {}))
+        self._sembrar_commit_inicial(org_login, nombre)
         return info
 
     def obtener_primer_commit(
@@ -1144,13 +1575,23 @@ class ClienteGitHubDoble:
         _repos[(org_login, repo)] = info
         return info
 
+    def cambiar_archivado(
+        self, org_login: str, repo: str, archivado: bool, token_instalacion: str
+    ) -> None:
+        if (org_login, repo) not in _repos:
+            raise RechazoProveedorGithub(404, "Not Found")
+        if archivado:
+            _archivados.add((org_login, repo))
+        else:
+            _archivados.discard((org_login, repo))
+
     def reemplazar_topics(
         self, org_login: str, repo: str, topics: list[str], token_instalacion: str
     ) -> None:
         _repos[(org_login, repo)] = replace(_repos[(org_login, repo)], topics=tuple(topics))
 
     def obtener_archivo(
-        self, org_login: str, repo: str, ruta: str, token_instalacion: str
+        self, org_login: str, repo: str, ruta: str, token_instalacion: str, ref: str | None = None
     ) -> ArchivoGithub | None:
         contenido = _archivos.get((org_login, repo), {}).get(ruta)
         if contenido is None:
@@ -1193,6 +1634,112 @@ class ClienteGitHubDoble:
         token_instalacion: str,
     ) -> None:
         _archivos.get((org_login, repo), {}).pop(ruta, None)
+
+    def listar_commits_hasta(
+        self, org_login: str, repo: str, *, rama: str, corte: datetime, token_instalacion: str
+    ) -> list[CommitCierre]:
+        if (org_login, repo) not in _repos:
+            raise RechazoProveedorGithub(404, "Not Found")
+        todos = _commits.get((org_login, repo), {})
+        cabeza = _ramas.get((org_login, repo), {}).get(rama)
+        hasta = corte + timedelta(seconds=1)
+        return sorted(
+            (
+                _cierre(todos[s])
+                for s in _ancestros(todos, cabeza)
+                if todos[s].fecha_committer <= hasta
+            ),
+            key=lambda c: c.fecha_committer,
+            reverse=True,
+        )
+
+    def obtener_commit(
+        self, org_login: str, repo: str, sha: str, token_instalacion: str
+    ) -> CommitCierre | None:
+        c = _commits.get((org_login, repo), {}).get(sha)
+        return _cierre(c) if c is not None else None
+
+    def listar_ramas(
+        self, org_login: str, repo: str, token_instalacion: str
+    ) -> list[tuple[str, str]]:
+        if (org_login, repo) not in _repos:
+            raise RechazoProveedorGithub(404, "Not Found")
+        return sorted(_ramas.get((org_login, repo), {}).items())
+
+    def listar_commits_rama(
+        self,
+        org_login: str,
+        repo: str,
+        ref: str,
+        token_instalacion: str,
+        *,
+        etag: str | None = None,
+        conocidos: frozenset[str] = frozenset(),
+        max_paginas: int = 30,
+    ) -> ListadoCommits:
+        if (org_login, repo) not in _repos:
+            raise RechazoProveedorGithub(404, "Not Found")
+        todos = _commits.get((org_login, repo), {})
+        cabeza = _ramas.get((org_login, repo), {}).get(ref)
+        etag_actual = f'"{cabeza}"'
+        if etag is not None and etag == etag_actual:
+            return ListadoCommits(commits=[], etag=etag, no_modificado=True, truncado=False)
+        # Como la API: de la cabeza hacia atras; se para en el primer SHA conocido.
+        salida: list[CommitGithub] = []
+        for sha in sorted(
+            _ancestros(todos, cabeza), key=lambda s: todos[s].fecha_committer, reverse=True
+        ):
+            if sha in conocidos:
+                break
+            salida.append(todos[sha])
+            if len(salida) >= max_paginas * 100:
+                return ListadoCommits(
+                    commits=salida, etag=etag_actual, no_modificado=False, truncado=True
+                )
+        return ListadoCommits(commits=salida, etag=etag_actual, no_modificado=False, truncado=False)
+
+    def comparar(
+        self,
+        org_login: str,
+        repo: str,
+        base: str,
+        cabeza: str,
+        token_instalacion: str,
+        *,
+        max_paginas: int = 30,
+    ) -> Comparacion:
+        todos = _commits.get((org_login, repo), {})
+        if base not in todos or cabeza not in todos:
+            raise RechazoProveedorGithub(404, "Not Found")
+        de_base = _ancestros(todos, base)
+        de_cabeza = _ancestros(todos, cabeza)
+        if base == cabeza:
+            estado = "identical"
+        elif base in de_cabeza:
+            estado = "ahead"
+        elif cabeza in de_base:
+            estado = "behind"
+        else:
+            estado = "diverged"
+        commits = sorted((todos[s] for s in de_cabeza - de_base), key=lambda c: c.fecha_committer)
+        return Comparacion(estado=estado, commits=commits, truncado=False)
+
+    def obtener_ref_tag(
+        self, org_login: str, repo: str, nombre: str, token_instalacion: str
+    ) -> str | None:
+        return _tags.get((org_login, repo), {}).get(nombre)
+
+    def crear_ref_tag(
+        self, org_login: str, repo: str, nombre: str, sha: str, token_instalacion: str
+    ) -> None:
+        if (org_login, repo) not in _repos:
+            raise RechazoProveedorGithub(404, "Not Found")
+        if (org_login, repo) in _archivados:
+            raise RechazoProveedorGithub(403, "Repository was archived so is read-only.")
+        tags = _tags.setdefault((org_login, repo), {})
+        if nombre in tags:
+            raise RechazoProveedorGithub(422, "Reference already exists")
+        tags[nombre] = sha
 
 
 def crear_cliente_github(*, modo: str, app_id: str, private_key_pem_base64: str) -> ClienteGitHub:

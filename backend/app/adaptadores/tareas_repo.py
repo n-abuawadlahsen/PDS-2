@@ -16,6 +16,7 @@ import json
 import uuid
 from collections.abc import Hashable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -26,12 +27,22 @@ from app.adaptadores import (
     programacion_repo,
     sincronizacion_repo,
     trabajos_repo,
+    versiones_repo,
 )
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.cliente_canvas import ClienteCanvas, FalloProveedorCanvas
+from app.adaptadores.modelos_aprovisionamiento import FechaEfectiva, ReglaFecha
 from app.adaptadores.modelos_curso import Curso
-from app.adaptadores.modelos_padron import Estudiante, Grupo, Matricula, PertenenciaGrupo, Seccion
+from app.adaptadores.modelos_infraestructura import Sincronizacion
+from app.adaptadores.modelos_padron import (
+    ConjuntoGrupos,
+    Estudiante,
+    Grupo,
+    Matricula,
+    PertenenciaGrupo,
+    Seccion,
+)
 from app.adaptadores.modelos_tarea import (
     AssignmentCanvas,
     Entrega,
@@ -41,6 +52,8 @@ from app.adaptadores.modelos_tarea import (
 )
 from app.dominio.alcance import bandera_activa, motivo_capa_3
 from app.dominio.estados import (
+    AlcanceReglaFecha,
+    EstadoFechaEfectiva,
     EstadoRepositorioBase,
     EstadoTarea,
     EstadoValidacionEntrega,
@@ -49,6 +62,7 @@ from app.dominio.estados import (
     TipoEntrega,
     WorkflowStatePertenenciaGrupo,
 )
+from app.dominio.fechas import cadencia_sync_fechas, discrepancias_aceleracion
 from app.dominio.nombres_repositorio import (
     SujetoNombre,
     es_slug_valido,
@@ -60,14 +74,18 @@ from app.dominio.padron import confirma_ausencia
 from app.dominio.tareas import (
     PLANTILLAS_GITIGNORE,
     EntregaActivacion,
+    EntregaFechas,
     EntregaOrden,
     EstudianteVisibilidad,
     MotivoRechazoTarea,
     RechazoTarea,
+    advertencias_de_entregas,
     motivo_no_activable,
     ordenar_al_vincular,
     renumerar_al_desvincular,
     resolver_visibilidad,
+    validar_conjunto_para_vincular,
+    validar_excluir,
     validar_modalidad_para_vincular,
     validar_vincular_otra_entrega,
 )
@@ -138,7 +156,16 @@ def sincronizar_tareas(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
     bd.flush()
 
     estudiantes = _estudiantes_para_visibilidad(bd, curso.id)
-    contadores = {"assignments": len(resultado.items), "entregas": 0, "eliminadas": 0}
+    # S9.4.4 (Q-2.4-39): si el padron o los grupos de este ciclo fallaron, no
+    # se calcula ninguna fecha sobre sus datos; la huella no se toca y el ciclo
+    # siguiente lo reintenta.
+    pospuestas = padron_fallido(bd, curso.id)
+    contadores: dict[str, Any] = {
+        "assignments": len(resultado.items),
+        "entregas": 0,
+        "eliminadas": 0,
+        "fechas_pospuestas": pospuestas,
+    }
     entregas = (
         bd.query(Entrega)
         .filter(
@@ -173,10 +200,16 @@ def sincronizar_tareas(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
             overrides=overrides,
             estudiantes=estudiantes,
         )
-        if overrides is not None:
+        if overrides is not None and not pospuestas:
+            _contrastar_aceleracion(
+                bd, curso_id=curso.id, entrega=entrega, crudo=vista, overrides=overrides
+            )
             fechas_repo.sincronizar_fechas_entrega(
                 bd, curso_id=curso.id, entrega=entrega, crudo=vista, overrides=overrides
             )
+
+    for tarea_id in {e.tarea_id for e in entregas}:
+        _actualizar_advertencias(bd, tarea_id)
 
     estado = (
         ResultadoSincronizacion.TRUNCADA if resultado.truncado else ResultadoSincronizacion.OK
@@ -192,8 +225,143 @@ def sincronizar_tareas(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
     sincronizacion_repo.registrar_ciclo(
         bd, curso_id=curso.id, recurso=_RECURSO_TAREAS, resultado=estado, contadores=contadores
     )
+    _ajustar_cadencia(bd, curso.id)
     # S9.4.4: orden fijo del ciclo, tareas y fechas antes que la materializacion.
     encolar_materializacion(bd, curso_id=curso.id)
+
+
+_RESULTADOS_QUE_POSPONEN = (
+    ResultadoSincronizacion.FALLIDA.value,
+    ResultadoSincronizacion.TRUNCADA.value,
+)
+
+
+def padron_fallido(bd: Session, curso_id: uuid.UUID) -> bool:
+    """CA-9.4-03: el ultimo ciclo de `sync_roster` o de `sync_grupos` termino
+    `FALLIDA` o `TRUNCADA`."""
+    for recurso in ("roster", "grupos"):
+        ultimo = (
+            bd.query(Sincronizacion.resultado)
+            .filter(Sincronizacion.curso_id == curso_id, Sincronizacion.recurso == recurso)
+            .order_by(Sincronizacion.creado_en.desc())
+            .first()
+        )
+        if ultimo is not None and ultimo[0] in _RESULTADOS_QUE_POSPONEN:
+            return True
+    return False
+
+
+def _contrastar_aceleracion(
+    bd: Session,
+    *,
+    curso_id: uuid.UUID,
+    entrega: Entrega,
+    crudo: AssignmentCanvasCrudo,
+    overrides: list[OverrideCanvasCrudo],
+) -> None:
+    """S9.3.1 (A-054): la aceleracion es indicio y la autoridad fija el
+    valor. Si discrepan, se abre `DISCREPANCIA_FECHAS` y manda la autoridad."""
+    crudos = crudo.payload.get("overrides")
+    aceleracion = (
+        {
+            int(o["id"]): _fecha_iso(o.get("due_at"))
+            for o in crudos
+            if isinstance(o, dict) and o.get("id") is not None
+        }
+        if isinstance(crudos, list)
+        else None
+    )
+    distintos = discrepancias_aceleracion(
+        aceleracion=aceleracion,
+        autoridad={o.canvas_override_id: o.due_at for o in overrides},
+    )
+    if distintos:
+        incidencia_repo.abrir_o_actualizar(
+            bd,
+            tipo="DISCREPANCIA_FECHAS",
+            severidad="ADVERTENCIA",
+            sujeto_tipo="ENTREGA",
+            curso_id=curso_id,
+            sujeto_id=entrega.id,
+            detalle={"motivo": "ACELERACION_VS_AUTORIDAD", "canvas_override_ids": distintos},
+        )
+    else:
+        incidencia_repo.cerrar(
+            bd, tipo="DISCREPANCIA_FECHAS", curso_id=curso_id, sujeto_id=entrega.id
+        )
+
+
+def _fecha_iso(valor: object) -> datetime | None:
+    if not valor:
+        return None
+    return datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+
+
+def _ajustar_cadencia(bd: Session, curso_id: uuid.UUID) -> None:
+    """S9.4.4 (A-114): 1 minuto dentro de las 2 horas previas a una fecha
+    efectiva de cierre del curso; 5 minutos el resto del tiempo."""
+    ahora = ahora_utc()
+    proximos = [
+        due
+        for (due,) in bd.query(FechaEfectiva.due_at_utc)
+        .join(Entrega, Entrega.id == FechaEfectiva.entrega_id)
+        .filter(
+            Entrega.curso_id == curso_id,
+            FechaEfectiva.estado == EstadoFechaEfectiva.VIGENTE.value,
+            FechaEfectiva.due_at_utc > ahora,
+            FechaEfectiva.due_at_utc <= ahora + timedelta(hours=2),
+        )
+        if due is not None
+    ]
+    programacion_repo.ajustar_cadencia(
+        bd,
+        tipo="sync_tareas_y_fechas",
+        curso_id=curso_id,
+        cadencia=cadencia_sync_fechas(ahora=ahora, proximos_cierres=proximos),
+    )
+
+
+def _actualizar_advertencias(bd: Session, tarea_id: uuid.UUID) -> None:
+    """S9.11 `entrega.advertencias`, recalculadas en cada ciclo sobre la
+    fecha base y el `lock_at`/`unlock_at` de la regla `BASE`."""
+    entregas = entregas_de_tarea(bd, tarea_id)
+    base = {
+        r.entrega_id: r
+        for r in bd.query(ReglaFecha).filter(
+            ReglaFecha.entrega_id.in_([e.id for e in entregas]),
+            ReglaFecha.alcance == AlcanceReglaFecha.BASE.value,
+        )
+    }
+    calculadas = advertencias_de_entregas(
+        [
+            EntregaFechas(
+                id=e.id,
+                orden=e.orden,
+                tipo=TipoEntrega(e.tipo),
+                due_at=e.due_at_base,
+                lock_at=base[e.id].lock_at if e.id in base else None,
+                unlock_at=base[e.id].unlock_at if e.id in base else None,
+            )
+            for e in entregas
+            if e.estado_validacion != EstadoValidacionEntrega.EXCLUIDA.value
+        ]
+    )
+    for e in entregas:
+        nuevas = [a.value for a in calculadas.get(e.id, [])]
+        if list(e.advertencias or []) != nuevas:
+            e.advertencias = nuevas
+    bd.flush()
+
+
+def encolar_sincronizacion_tareas(bd: Session, *, curso_id: uuid.UUID, motivo: str) -> None:
+    """Encola `sync_tareas_y_fechas` sin llamar a Canvas en la peticion (A-089)."""
+    trabajos_repo.encolar(
+        bd,
+        tipo="sync_tareas_y_fechas",
+        clave_idempotencia=f"sync_tareas:{curso_id}:{motivo}",
+        max_intentos=4,
+        curso_id=curso_id,
+    )
 
 
 def encolar_materializacion(bd: Session, *, curso_id: uuid.UUID) -> None:
@@ -537,6 +705,25 @@ def _assignment_elegible(
     return fila
 
 
+def conjunto_grupos_de(
+    bd: Session, *, curso_id: uuid.UUID, canvas_group_category_id: int | None
+) -> uuid.UUID | None:
+    """El `conjunto_grupos` de una tarea grupal sale del `group_category_id`
+    del assignment (A-047). `None` si `sync_grupos` aun no lo espejo: la
+    materializacion lo vuelve a buscar en cada ciclo."""
+    if canvas_group_category_id is None:
+        return None
+    fila = (
+        bd.query(ConjuntoGrupos)
+        .filter(
+            ConjuntoGrupos.curso_id == curso_id,
+            ConjuntoGrupos.canvas_group_category_id == canvas_group_category_id,
+        )
+        .one_or_none()
+    )
+    return fila.id if fila is not None else None
+
+
 def _nueva_entrega(
     *, tarea: Tarea, fila: AssignmentCanvas, orden: int, tipo: TipoEntrega, slugs: set[str]
 ) -> Entrega:
@@ -559,7 +746,13 @@ def _nueva_entrega(
         only_visible_to_overrides=fila.only_visible_to_overrides,
         due_at_base=fila.due_at,
         all_day=bool(payload.get("all_day", False)),
-        estado_validacion=EstadoValidacionEntrega.VIGENTE.value,
+        # S9.6.7 (A-203): vinculada con la fecha base ya vencida, nada se
+        # captura hasta que alguien lo confirma.
+        estado_validacion=(
+            EstadoValidacionEntrega.VINCULADA_TRAS_EL_CIERRE.value
+            if fila.due_at is not None and fila.due_at <= ahora_utc()
+            else EstadoValidacionEntrega.VIGENTE.value
+        ),
         validaciones=[],
         advertencias=[],
         ciclos_ausente=0,
@@ -615,6 +808,13 @@ def crear_tarea(
         nombre=nombre_final,
         slug=slug_final,
         modalidad=modalidad.value,
+        conjunto_grupos_id=(
+            conjunto_grupos_de(
+                bd, curso_id=curso.id, canvas_group_category_id=fila.group_category_id_canvas
+            )
+            if modalidad == ModalidadTarea.GRUPAL
+            else None
+        ),
         gitignore_template=gitignore_template,
         estado=EstadoTarea.BORRADOR.value,
         creada_por=actor_usuario_id,
@@ -677,6 +877,15 @@ def vincular_entrega(
         es_grupal_canvas=fila.es_grupal,
         perfil_alcance=perfil_alcance,
     )
+    if tarea.modalidad == ModalidadTarea.GRUPAL.value:
+        validar_conjunto_para_vincular(
+            categorias_existentes={
+                e.group_category_id_canvas
+                for e in existentes
+                if e.group_category_id_canvas is not None
+            },
+            categoria_nueva=fila.group_category_id_canvas,
+        )
 
     por_canvas = {e.canvas_assignment_id: e for e in existentes}
     if final_canvas_assignment_id == canvas_assignment_id:
@@ -716,7 +925,38 @@ def vincular_entrega(
             "orden": nueva.orden,
         },
     )
+    # Fechas, visibilidad y sujetos de la entrega nueva llegan en el proximo
+    # ciclo; se encola ya para no esperar la cadencia de 5 minutos.
+    encolar_sincronizacion_tareas(bd, curso_id=curso.id, motivo=f"vincular:{nueva.id}")
     return nueva
+
+
+def excluir_entrega(
+    bd: Session, *, curso: Curso, tarea: Tarea, entrega: Entrega, actor_usuario_id: uuid.UUID
+) -> None:
+    """A-080 regla 1: con versiones capturadas solo cabe excluir. La entrega
+    conserva su `orden` y todo lo registrado; deja de sincronizarse, de dar
+    visibilidad y de capturarse."""
+    validar_excluir(
+        tipo=TipoEntrega(entrega.tipo),
+        ya_excluida=entrega.estado_validacion == EstadoValidacionEntrega.EXCLUIDA.value,
+    )
+    antes = {"estado_validacion": entrega.estado_validacion}
+    entrega.estado_validacion = EstadoValidacionEntrega.EXCLUIDA.value
+    tarea.actualizada_en = ahora_utc()
+    bd.flush()
+    registrar_bitacora(
+        bd,
+        accion="ENTREGA_EXCLUIDA",
+        entidad="entrega",
+        entidad_id=str(entrega.id),
+        actor_usuario_id=actor_usuario_id,
+        curso_id=curso.id,
+        antes=antes,
+        despues={"estado_validacion": entrega.estado_validacion},
+    )
+    _actualizar_advertencias(bd, tarea.id)
+    encolar_materializacion(bd, curso_id=curso.id)
 
 
 def desvincular_entrega(
@@ -729,8 +969,10 @@ def desvincular_entrega(
     restantes = renumerar_al_desvincular(
         [EntregaOrden(id=e.id, orden=e.orden, tipo=TipoEntrega(e.tipo)) for e in existentes],
         quitar_id=entrega.id,
-        # TODO(bloque-1): consultar `version_entrega` cuando exista.
-        tiene_versiones_capturadas=False,
+        # CA-8.2-03: con alguna version registrada solo cabe excluir.
+        tiene_versiones_capturadas=any(
+            versiones_repo.entrega_tiene_versiones(bd, e.id) for e in existentes
+        ),
     )
     if not restantes and tarea.estado != EstadoTarea.BORRADOR.value:
         raise RechazoTarea(

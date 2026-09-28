@@ -1,11 +1,14 @@
 import { useState } from "react";
 import {
   obtenerFechasEntregas,
+  obtenerHistorialFechas,
   obtenerRepositoriosTarea,
   reintentarRepositorio,
   sustituirRepositorio,
   verificarAccesosRepositorios,
+  type FechasEntrega,
   type FilaRepositorio,
+  type HistorialFechasSujeto,
 } from "../lib/api";
 import { useCurso } from "../components/Layout";
 import {
@@ -252,10 +255,10 @@ export function BloqueRepositorios({
             <table>
               <thead>
                 <tr>
-                  <th scope="col">Estudiante</th>
+                  <th scope="col">Estudiante o grupo</th>
                   <th scope="col">Repositorio</th>
                   <th scope="col">Estado y motivo</th>
-                  <th scope="col">Acceso estudiante</th>
+                  <th scope="col">Acceso de los estudiantes</th>
                   <th scope="col">Acceso docente</th>
                   <th scope="col">Acciones</th>
                 </tr>
@@ -267,8 +270,15 @@ export function BloqueRepositorios({
                     <tr key={f.repositorio_id}>
                       <td>
                         <strong>{f.sujeto}</strong>
-                        {f.cuenta_github && (
+                        {f.sujeto_tipo === "ESTUDIANTE" && f.cuenta_github && (
                           <p className="help">@{f.cuenta_github}</p>
+                        )}
+                        {f.sujeto_tipo === "GRUPO" && (
+                          <p className="help">
+                            {f.integrantes.length === 1
+                              ? "1 integrante"
+                              : `${f.integrantes.length} integrantes`}
+                          </p>
                         )}
                         {!f.sujeto_activo && (
                           <p className="help">
@@ -318,17 +328,36 @@ export function BloqueRepositorios({
                         )}
                       </td>
                       <td>
-                        {f.acceso_estado
-                          ? textoEstadoAcceso(f.acceso_estado)
-                          : "Sin acceso informado"}
-                        {f.cuenta_github && f.acceso_estado && (
+                        {f.sujeto_tipo === "GRUPO" && (
+                          <ul className="compact-list">
+                            {f.integrantes.length === 0 && <li>Sin integrantes aceptados</li>}
+                            {f.integrantes.map((i) => (
+                              <li key={i.estudiante_id}>
+                                {i.nombre}
+                                {i.cuenta_github && (
+                                  <span className="help"> @{i.cuenta_github}</span>
+                                )}
+                                {": "}
+                                {i.acceso_estado
+                                  ? textoEstadoAcceso(i.acceso_estado)
+                                  : "sin acceso todavía"}
+                                {i.acceso_error && <p className="help">{i.acceso_error}</p>}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {f.sujeto_tipo !== "GRUPO" &&
+                          (f.acceso_estado
+                            ? textoEstadoAcceso(f.acceso_estado)
+                            : "Sin acceso informado")}
+                        {f.sujeto_tipo !== "GRUPO" && f.cuenta_github && f.acceso_estado && (
                           <p className="help">
                             {f.acceso_verificado_en
                               ? `Comprobado en GitHub: ${fechaLegible(f.acceso_verificado_en, curso.zona_horaria)}`
                               : "Sin fecha de comprobación registrada"}
                           </p>
                         )}
-                        {f.acceso_error && (
+                        {f.sujeto_tipo !== "GRUPO" && f.acceso_error && (
                           <p className="help">{f.acceso_error}</p>
                         )}
                       </td>
@@ -395,23 +424,124 @@ export function LineaFechas({
   return (
     <>
       {c.datos.map((f) => (
-        <div className="panel" key={f.entrega_id}>
-          <strong>
-            {textoTipoEntrega(f.tipo)} · Entrega {f.orden}
-          </strong>
-          <p>Cierre: {f.cierre_base}</p>
-          {f.excepciones.map((e, i) => (
-            <p key={i}>
-              {e.etiqueta}: {e.fecha}
-            </p>
-          ))}
-          {f.sujetos_sin_fecha > 0 && (
-            <p className="help">
-              {f.sujetos_sin_fecha} estudiantes sin fecha de cierre informada.
-            </p>
-          )}
-        </div>
+        <FechasDeUnaEntrega key={f.entrega_id} cursoId={cursoId} fechas={f} />
       ))}
+    </>
+  );
+}
+
+/** S9.5 (F3): «Cierre: ... · Sección 2: ... · N excepciones», con las
+ * excepciones desplegables (sujeto, fecha, origen y override copiable), la
+ * insignia «fecha ambigua» con sus candidatas (CA-9.5-03) y el historial. */
+function FechasDeUnaEntrega({ cursoId, fechas: f }: { cursoId: string; fechas: FechasEntrega }) {
+  const { curso } = useCurso();
+  const [historial, setHistorial] = useState<HistorialFechasSujeto[] | null>(null);
+  const secciones = f.excepciones.filter((e) => e.origen === "SECCION");
+  const otras = f.excepciones.filter((e) => e.origen !== "SECCION");
+  return (
+    <div className="panel">
+      <strong>
+        {textoTipoEntrega(f.tipo)} · Entrega {f.orden}
+      </strong>
+      <p>Cierre: {f.cierre_base}</p>
+      {secciones.map((e) => (
+        <p key={e.canvas_override_id ?? e.etiqueta}>
+          {e.etiqueta}: {e.fecha}
+        </p>
+      ))}
+      {f.sujetos_sin_fecha > 0 && (
+        <p className="help">{f.sujetos_sin_fecha} estudiantes sin fecha de cierre informada.</p>
+      )}
+      {otras.length > 0 && (
+        <details>
+          <summary>{otras.length === 1 ? "1 excepción" : `${otras.length} excepciones`}</summary>
+          <ul>
+            {otras.map((e) => (
+              <li key={e.canvas_override_id ?? e.etiqueta}>
+                {(e.sujetos ?? []).join(", ") || "nadie del curso"} — {e.fecha} · {e.etiqueta}
+                {e.canvas_override_id !== null && <Override id={e.canvas_override_id} />}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {(f.ambiguas ?? []).map((a) => (
+        <details key={a.sujeto_id}>
+          <summary>
+            <span className="badge warning">fecha ambigua</span> {a.sujeto}: {a.fecha}
+          </summary>
+          <ul>
+            {a.candidatas.map((c, i) => (
+              <li key={i}>
+                {c.etiqueta}: {c.fecha}
+                {c.canvas_override_id !== null && <Override id={c.canvas_override_id} />}
+              </li>
+            ))}
+          </ul>
+          <p className="help">Se usa la más tardía: capturar antes de tiempo destruye trabajo legítimo.</p>
+        </details>
+      ))}
+      <div className="actions">
+        <button
+          onClick={async () =>
+            setHistorial(historial ? null : await obtenerHistorialFechas(cursoId, f.entrega_id))
+          }
+        >
+          {historial ? "Ocultar historial de fechas" : "Ver historial de fechas"}
+        </button>
+      </div>
+      {historial && (
+        <Tabla etiqueta="Historial de fechas de cierre">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Estudiante o grupo</th>
+                <th scope="col">Fecha de cierre</th>
+                <th scope="col">Origen</th>
+                <th scope="col">Vigencia</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historial.flatMap((h) =>
+                h.fechas.map((x, i) => (
+                  <tr key={`${h.sujeto_id}-${i}`} style={{ opacity: x.estado === "VIGENTE" ? 1 : 0.6 }}>
+                    <td>{i === 0 ? h.sujeto : ""}</td>
+                    <td>
+                      {x.fecha}
+                      {x.ambigua && <span className="help"> (ambigua)</span>}
+                    </td>
+                    <td>
+                      {x.etiqueta}
+                      {x.override_titulo && <span className="help"> «{x.override_titulo}»</span>}
+                      {x.override_retirado && <span className="help"> (ya no existe en Canvas)</span>}
+                    </td>
+                    <td>
+                      {x.estado === "VIGENTE"
+                        ? `vigente desde ${fechaLegible(x.calculada_en, curso.zona_horaria)}`
+                        : `reemplazada el ${fechaLegible(x.vigente_hasta, curso.zona_horaria)}`}
+                    </td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        </Tabla>
+      )}
+    </div>
+  );
+}
+
+function Override({ id }: { id: number }) {
+  return (
+    <>
+      {" "}
+      <code>{id}</code>{" "}
+      <button
+        title="Copiar el identificador del override de Canvas"
+        onClick={() => navigator.clipboard?.writeText(String(id))}
+      >
+        copiar
+      </button>
     </>
   );
 }

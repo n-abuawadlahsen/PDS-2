@@ -713,6 +713,7 @@ export interface EntregaTarea {
   publicada: boolean;
   due_at_base: string | null;
   estado_validacion: string;
+  advertencias: string[];
   sincronizado_en: string;
 }
 
@@ -836,6 +837,35 @@ export async function crearTarea(
     }),
   );
 }
+/** R2.3.2: vincular otra tarea de Canvas; hay que decir siempre cual es la final (A-080). */
+export async function vincularEntrega(
+  cursoId: string,
+  tareaId: string,
+  canvasAssignmentId: number,
+  finalCanvasAssignmentId: number,
+): Promise<Resultado<TareaDetalle>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/entregas`, {
+      method: "POST",
+      body: JSON.stringify({
+        canvas_assignment_id: canvasAssignmentId,
+        final_canvas_assignment_id: finalCanvasAssignmentId,
+      }),
+    }),
+  );
+}
+
+/** Con versiones registradas no se desvincula: se excluye, sin borrar nada. */
+export async function excluirEntrega(
+  cursoId: string,
+  tareaId: string,
+  entregaId: string,
+): Promise<Resultado<TareaDetalle>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/entregas/${entregaId}/excluir`, { method: "POST" }),
+  );
+}
+
 
 export async function obtenerTarea(
   cursoId: string,
@@ -960,10 +990,22 @@ export interface ResumenRepositorios {
   minutos_restantes: number;
 }
 
+/** Integrante `accepted` de un sujeto grupal con el estado de su acceso (F1). */
+export interface IntegranteRepositorio {
+  estudiante_id: string;
+  nombre: string;
+  cuenta_github: string | null;
+  acceso_estado: string | null;
+  acceso_error: string | null;
+  invitacion_url: string | null;
+}
+
 export interface FilaRepositorio {
   repositorio_id: string;
   estudiante_id: string | null;
   sujeto: string;
+  sujeto_tipo: "ESTUDIANTE" | "GRUPO";
+  integrantes: IntegranteRepositorio[];
   sujeto_activo: boolean;
   motivo_desactivacion: string | null;
   nombre: string;
@@ -1010,16 +1052,509 @@ export async function verificarAccesosRepositorios(
   );
 }
 
+export interface ExcepcionFecha {
+  origen: string;
+  etiqueta: string;
+  fecha: string;
+  canvas_override_id: number | null;
+  titulo: string | null;
+  sujetos: string[];
+}
+
+export interface CandidataFecha {
+  origen: string;
+  etiqueta: string;
+  fecha: string;
+  canvas_override_id: number | null;
+}
+
 export interface FechasEntrega {
   entrega_id: string;
   nombre: string;
   tipo: string;
   orden: number;
+  estado_validacion: string;
   cierre_base: string;
   fechas_distintas: number;
-  excepciones: { origen: string; etiqueta: string; fecha: string }[];
+  excepciones: ExcepcionFecha[];
+  ambiguas: { sujeto_id: string; sujeto: string; fecha: string; candidatas: CandidataFecha[] }[];
   sujetos_con_fecha: number;
   sujetos_sin_fecha: number;
+}
+
+export interface HistorialFechasSujeto {
+  sujeto_id: string;
+  sujeto: string;
+  fechas: {
+    fecha: string;
+    origen: string;
+    etiqueta: string;
+    canvas_override_id: number | null;
+    override_titulo: string | null;
+    override_retirado: boolean;
+    ambigua: boolean;
+    estado: string;
+    calculada_en: string;
+    vigente_hasta: string | null;
+  }[];
+}
+
+/** S9.4.1: el encadenamiento de fechas superseded por sujeto es el historial. */
+export async function obtenerHistorialFechas(cursoId: string, entregaId: string): Promise<HistorialFechasSujeto[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/historial-fechas`);
+  if (!respuesta.ok) throw new Error(`GET historial-fechas -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+// --- Etapa F4: versiones de entrega (SPEC 09 S9.6-S9.9) ---
+
+export interface VersionEntrega {
+  id: string;
+  intento: number;
+  vigente: boolean;
+  estado: string;
+  motivo: string | null;
+  commit_sha: string | null;
+  commit_mensaje: string | null;
+  rama: string | null;
+  fecha_corte: string;
+  capturada_en: string;
+  captura_tardia_minutos: number | null;
+  tag_nombre: string | null;
+  tag_estado: string;
+  tag_motivo: string | null;
+  tag_error: string | null;
+  advertencias: string[];
+  verificacion: Record<string, unknown>;
+  origen_captura: string;
+  motivo_manual: string | null;
+  creada_por: string | null;
+  integrantes: { nombre: string; github_login: string | null }[];
+  sujeto_etiqueta: string;
+  repositorio_full_name: string | null;
+  fecha_origen: string | null;
+  canvas_override_id: number | null;
+  comparacion_base: string | null;
+  enlaces: { arbol: string | null; comparacion: string | null; zip: string | null };
+}
+
+export interface FilaCaptura {
+  sujeto_id: string;
+  sujeto: string;
+  fecha: string;
+  estado_captura: string;
+  version: VersionEntrega | null;
+}
+
+export interface ProgresoCaptura {
+  entrega_id: string;
+  estado_validacion: string;
+  vencidas: number;
+  registradas: number;
+  por_estado: Record<string, number>;
+  capturas_tardias: number;
+  filas: FilaCaptura[];
+}
+
+export interface FichaVersion {
+  sujeto: string;
+  vigente: VersionEntrega | null;
+  anteriores: VersionEntrega[];
+  acceso_docente: string | null;
+}
+
+/** Los enlaces a GitHub pasan por la redireccion auditada del servidor (S9.9.4). */
+export function urlApi(ruta: string): string {
+  return `${API_BASE_URL}${ruta}`;
+}
+
+export async function obtenerProgresoCaptura(cursoId: string, entregaId: string): Promise<ProgresoCaptura> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/progreso-captura`);
+  if (!respuesta.ok) throw new Error(`GET progreso-captura -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerFichaVersion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+): Promise<FichaVersion> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/sujetos/${sujetoId}/version`);
+  if (!respuesta.ok) throw new Error(`GET version -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export type AccionVersion =
+  | { tipo: "capturar-ahora"; motivo_manual: string }
+  | { tipo: "recapturar"; motivo_manual: string; fecha_corte: string }
+  | { tipo: "fijar-sha"; motivo_manual: string; sha: string };
+
+/** S9.8.8: las tres acciones manuales; siempre con motivo escrito. */
+export async function accionVersion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  accion: AccionVersion,
+): Promise<Resultado<VersionEntrega>> {
+  const { tipo, ...cuerpo } = accion;
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/sujetos/${sujetoId}/version/${tipo}`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export async function registrarVersiones(cursoId: string, entregaId: string): Promise<Resultado<{ encoladas: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/registrar-versiones`, { method: "POST" }),
+  );
+}
+
+// --- Etapa F6: tablero y seguimiento (SPEC 10 S10.7-S10.8, S10.10.6) ---
+
+export interface IntegranteTablero {
+  estudiante_id: string;
+  nombre: string;
+  commits: number;
+  dias_activos: number;
+  adiciones: number | null;
+  eliminaciones: number | null;
+  causa: string | null;
+  retirado: boolean;
+  en_grupo_desde: string | null;
+  salio_del_grupo: string | null;
+}
+
+export interface FilaTablero {
+  repositorio_id: string;
+  nombre: string;
+  sujeto: string;
+  sujeto_tipo: "ESTUDIANTE" | "GRUPO";
+  seccion: string | null;
+  estado: string;
+  grupo_estado: string;
+  motivo: string | null;
+  no_aplica: boolean;
+  actividad: string;
+  dias_observados: number;
+  umbral_dias: number;
+  commits_periodo: number;
+  commits_sin_atribuir: number;
+  dias_desde_ultimo_commit: number | null;
+  sparkline: number[];
+  alertas: string[];
+  integrantes: IntegranteTablero[];
+  indice_desequilibrio: number | null;
+  reparto_concentrado: boolean;
+}
+
+export interface Tablero {
+  tarea: { id: string; nombre: string; modalidad: string; estado: string };
+  procedencia: {
+    ultima_ingesta: string | null;
+    ultima_reconciliacion: string | null;
+    datos_posiblemente_desactualizados: boolean;
+    calculado_en: string | null;
+    llamadas_externas: number;
+    render_ms: number;
+  };
+  periodos: { clave: string; etiqueta: string }[];
+  periodo: string;
+  entregas: {
+    entrega_id: string;
+    orden: number;
+    nombre: string;
+    tipo: string;
+    estado: string;
+    fechas_distintas: number;
+    sujetos: number;
+    versiones_registradas: number;
+  }[];
+  repositorios: ResumenRepositorios;
+  tarjetas: {
+    repositorios_creados: number;
+    sin_actividad: number;
+    sin_dato_suficiente: number;
+    sin_datos_todavia: number;
+    sin_participacion: Record<string, number>;
+    invitaciones_sin_aceptar: number;
+    bloqueantes: number;
+  };
+  serie: { dia: string; commits: number }[];
+  cierres: string[];
+  histograma_previo_al_cierre: { dia: string; commits: number }[];
+  progreso_frente_al_cierre: number | null;
+  posicion_frente_al_curso: {
+    commits: [number, number, number] | null;
+    dias_activos: [number, number, number] | null;
+    mediana_por_seccion: Record<string, number>;
+    sujetos: number;
+    excluidos: number;
+  } | null;
+  filas: FilaTablero[];
+  total_filas: number;
+  pagina: number;
+  definicion_commit_contable: string;
+  aviso_alcance: string;
+}
+
+export async function obtenerTablero(
+  cursoId: string,
+  tareaId: string,
+  filtros: { periodo?: string; seccion?: string; grupoEstado?: string; soloAlertas?: boolean },
+): Promise<Tablero> {
+  const q = new URLSearchParams();
+  if (filtros.periodo) q.set("periodo", filtros.periodo);
+  if (filtros.seccion) q.set("seccion", filtros.seccion);
+  if (filtros.grupoEstado) q.set("grupo_estado", filtros.grupoEstado);
+  if (filtros.soloAlertas) q.set("solo_alertas", "true");
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/tablero?${q.toString()}`);
+  if (!respuesta.ok) throw new Error(`GET tablero -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function actualizarTablero(
+  cursoId: string,
+  tareaId: string,
+): Promise<{ encolada: boolean; en_curso: boolean; disponible_en: string }> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/tablero/actualizar`, {
+    method: "POST",
+  });
+  return respuesta.json();
+}
+
+export async function silenciarIncidencia(cursoId: string, incidenciaId: string): Promise<boolean> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/incidencias/${incidenciaId}/silenciar`, {
+    method: "POST",
+  });
+  return respuesta.ok;
+}
+
+export interface FilaSeguimiento {
+  tarea_id: string;
+  nombre: string;
+  modalidad: string;
+  repositorios: ResumenRepositorios;
+  sin_actividad: number;
+  sin_participacion: number;
+  invitaciones_sin_aceptar: number;
+}
+
+export async function obtenerSeguimiento(cursoId: string): Promise<FilaSeguimiento[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/seguimiento`);
+  if (!respuesta.ok) throw new Error(`GET seguimiento -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+// --- Etapas F5 y F7: timeline e identidades de Git (SPEC 10 S10.3.7, S10.9) ---
+
+export interface CommitTimeline {
+  sha: string;
+  sha_corto: string;
+  fecha: string;
+  mensaje: string | null;
+  autor: string | null;
+  regla_atribucion: string;
+  senal_debil: boolean;
+  etiqueta_exclusion: string | null;
+  rama: string | null;
+  destacado: string | null;
+  hito: string | null;
+  posterior_al_cierre_de: number | null;
+  url: string | null;
+}
+
+export interface Timeline {
+  repositorio: { id: string; nombre: string; estado: string; rama_por_defecto: string | null };
+  sujeto: string;
+  periodos: { clave: string; etiqueta: string }[];
+  periodo: string;
+  dias: { dia: string; colapsado: boolean; hasta: string | null; n_dias: number; commits: CommitTimeline[] }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ciclo_de_vida: { fecha: string; tipo: string; detalle: Record<string, any> }[];
+  marcas_entrega: {
+    orden: number;
+    entrega: string;
+    fecha: string | null;
+    aplica: boolean;
+    versiones: { intento: number; vigente: boolean; estado: string; motivo: string | null; commit_sha: string | null }[];
+  }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  composicion: Record<string, any>[];
+  franja: {
+    periodo: string;
+    entrega: string;
+    integrantes: {
+      estudiante_id: string;
+      nombre: string;
+      commits: number;
+      dias_activos: number;
+      causa: string | null;
+    }[];
+    sin_atribuir: number;
+  }[];
+  enlaces: { motivo: string | null };
+  identidades_sin_resolver: number;
+  sin_commits_contables: boolean;
+  causa_vacia: string | null;
+}
+
+export async function obtenerTimeline(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  filtros: { periodo?: string; integrante?: string },
+): Promise<Timeline> {
+  const q = new URLSearchParams();
+  if (filtros.periodo) q.set("periodo", filtros.periodo);
+  if (filtros.integrante) q.set("integrante", filtros.integrante);
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/timeline?${q}`);
+  if (!respuesta.ok) throw new Error(`GET timeline -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function marcarHito(cursoId: string, tareaId: string, repoId: string, sha: string, nota: string) {
+  return apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/commits/${sha}/hito`, {
+    method: "POST",
+    body: JSON.stringify({ nota }),
+  });
+}
+
+export async function desmarcarHito(cursoId: string, tareaId: string, repoId: string, sha: string) {
+  return apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/commits/${sha}/hito`, {
+    method: "DELETE",
+  });
+}
+
+export interface IdentidadGit {
+  id: string;
+  email: string | null;
+  nombre_visto: string | null;
+  estado: string;
+  estudiante: string | null;
+  commits_contables: number;
+}
+
+export interface CandidatoPropagacion {
+  repositorio_id: string;
+  repositorio: string;
+  identidad_id: string;
+  nombre_visto: string | null;
+  commits: number;
+  marcada: boolean;
+}
+
+function baseIdentidades(cursoId: string, tareaId: string, repoId: string) {
+  return `/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/identidades`;
+}
+
+export async function listarIdentidades(cursoId: string, tareaId: string, repoId: string): Promise<IdentidadGit[]> {
+  const respuesta = await apiFetch(baseIdentidades(cursoId, tareaId, repoId));
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export async function obtenerPropagacion(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  identidadId: string,
+): Promise<CandidatoPropagacion[]> {
+  const respuesta = await apiFetch(`${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/propagacion`);
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export async function resolverIdentidad(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  identidadId: string,
+  cuerpo: { estudiante_id?: string; no_es_estudiante?: boolean; propagar_a: string[]; confirmacion?: string },
+): Promise<Resultado<IdentidadGit>> {
+  return resultado(
+    await apiFetch(`${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/resolver`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export async function revelarIdentidad(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  identidadId: string,
+): Promise<string | null> {
+  const respuesta = await apiFetch(`${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/revelar`, {
+    method: "POST",
+  });
+  if (!respuesta.ok) return null;
+  return (await respuesta.json()).email;
+}
+
+// --- Etapa F8: cierre de la tarea (A-168, A-197) ---
+
+export interface GuardaArchivado {
+  numero: number;
+  titulo: string;
+  cumple: boolean;
+  motivo: string | null;
+  confirmacion: "SIN_CAPTURA" | "SIN_AVISO" | null;
+  detalle: string[];
+}
+
+export interface EstadoArchivado {
+  tarea_estado: string;
+  archivables: number;
+  archivados: number;
+  fuera_de_alcance_o_inaccesibles: number;
+  guardas: GuardaArchivado[];
+  permitido: boolean;
+  aviso: {
+    destinatarios: number;
+    encolados: number;
+    enviados: number;
+    bloqueados: number;
+    ultimo_envio: string | null;
+    canal_bloqueado: boolean;
+  };
+  en_curso: number;
+  puede_desarchivar: boolean;
+}
+
+export async function obtenerArchivado(cursoId: string, tareaId: string): Promise<EstadoArchivado> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivado`);
+  if (!respuesta.ok) throw new Error(`GET archivado -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function enviarAvisoArchivado(
+  cursoId: string,
+  tareaId: string,
+): Promise<Resultado<{ encolados: number }>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivar/aviso`, { method: "POST" }));
+}
+
+export async function archivarTarea(
+  cursoId: string,
+  tareaId: string,
+  confirmaciones: { confirmacion_sin_captura: string | null; confirmacion_sin_aviso: string | null },
+): Promise<Resultado<{ repositorios: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivar`, {
+      method: "POST",
+      body: JSON.stringify(confirmaciones),
+    }),
+  );
+}
+
+export async function desarchivarTarea(
+  cursoId: string,
+  tareaId: string,
+): Promise<Resultado<{ repositorios: number }>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/desarchivar`, { method: "POST" }));
 }
 
 export async function obtenerRepositoriosTarea(
@@ -1090,4 +1625,554 @@ export async function previsualizarArchivoBase(
       `/api/cursos/${cursoId}/tareas/${tareaId}/repositorio-base/archivos/${rutaCodificada(ruta)}`,
     ),
   );
+}
+
+// --- Etapa F9: informe docente diario y suscripcion (SPEC 11 S11.3-S11.5) ---
+
+export interface InformesCurso {
+  se_genera_desde: string | null;
+  informes: { fecha: string; estado: string; motivo: string | null; origen: string }[];
+}
+
+export interface InformeDia {
+  fecha: string;
+  estado: string;
+  motivo: string | null;
+  html: string | null;
+  texto: string | null;
+  asunto: string | null;
+}
+
+export interface VistaPreviaInforme {
+  hay_tareas_activas: boolean;
+  mensaje: string | null;
+  html: string | null;
+  texto: string | null;
+}
+
+export interface SuscripcionInforme {
+  curso_id: string;
+  curso_nombre: string;
+  curso_codigo: string;
+  activa: boolean;
+  origen_baja: string | null;
+  se_genera_desde: string | null;
+}
+
+export async function obtenerInformes(cursoId: string): Promise<InformesCurso> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/informes`);
+  if (!respuesta.ok) throw new Error(`GET informes -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerInformeDia(cursoId: string, fecha: string): Promise<InformeDia | null> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/informes/${fecha}`);
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}
+
+export async function obtenerVistaPreviaInforme(cursoId: string): Promise<VistaPreviaInforme> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/vista-previa`);
+  if (!respuesta.ok) throw new Error(`GET vista previa -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function enviarmeInforme(cursoId: string): Promise<Resultado<{ encolados: number }>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/enviarme`, { method: "POST" }));
+}
+
+export async function enviarInformeASuscritos(cursoId: string): Promise<Resultado<{ encolados: number }>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/enviar`, { method: "POST" }));
+}
+
+export async function obtenerMisNotificaciones(cursoId: string): Promise<SuscripcionInforme> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/mis-notificaciones`);
+  if (!respuesta.ok) throw new Error(`GET mis-notificaciones -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function cambiarMisNotificaciones(cursoId: string, activa: boolean): Promise<SuscripcionInforme> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/mis-notificaciones`, {
+    method: "PUT",
+    body: JSON.stringify({ activa }),
+  });
+  if (!respuesta.ok) throw new Error(`PUT mis-notificaciones -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerNotificacionesPerfil(): Promise<SuscripcionInforme[]> {
+  const respuesta = await apiFetch("/api/perfil/notificaciones");
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export async function cambiarTodasLasNotificaciones(activa: boolean): Promise<SuscripcionInforme[]> {
+  const respuesta = await apiFetch("/api/perfil/notificaciones", {
+    method: "PUT",
+    body: JSON.stringify({ activa }),
+  });
+  if (!respuesta.ok) throw new Error(`PUT notificaciones -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function regenerarEnlacesDeBaja(): Promise<boolean> {
+  const respuesta = await apiFetch("/api/perfil/enlaces-de-baja/regenerar", { method: "POST" });
+  return respuesta.ok;
+}
+
+export interface EstadoBaja {
+  curso_nombre: string;
+  curso_codigo: string;
+  activa: boolean;
+  otros_cursos_suscritos: number;
+}
+
+export async function obtenerBaja(token: string): Promise<EstadoBaja | null> {
+  const respuesta = await fetch(`${API_BASE_URL}/api/baja/${encodeURIComponent(token)}`, {
+    credentials: "include",
+  });
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}
+
+export async function aplicarBaja(token: string, accion: "baja" | "alta"): Promise<EstadoBaja | null> {
+  const respuesta = await fetch(`${API_BASE_URL}/api/baja/${encodeURIComponent(token)}?accion=${accion}`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}
+
+// --- Etapa F10: comunicaciones ampliadas (SPEC 11 S11.6-S11.8, S11.10) ---
+
+export interface MensajeBandeja {
+  id: string;
+  canal: string;
+  evento: string;
+  estado: string;
+  etiqueta_estado: string;
+  motivo: string | null;
+  destinatario: string;
+  asunto: string | null;
+  cuerpo: string | null;
+  origen: string;
+  generacion: number;
+  reemplaza_a_id: string | null;
+  tarea_id: string | null;
+  creado_en: string;
+  enviado_en: string | null;
+  programado_para: string | null;
+  enlace_canvas: string | null;
+  motivo_sin_enlace: string | null;
+  ultimo_error: string | null;
+}
+
+export interface Bandeja {
+  comunicaciones_salientes: string;
+  suspension_motivo: string | null;
+  canal_activo: string | null;
+  mensajes: MensajeBandeja[];
+}
+
+export async function obtenerBandeja(cursoId: string, filtros: Record<string, string>): Promise<Bandeja> {
+  const q = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v));
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/comunicaciones?${q}`);
+  if (!respuesta.ok) throw new Error(`GET comunicaciones -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function accionSobreMensaje(
+  cursoId: string,
+  mensajeId: string,
+  accion: "reintentar" | "reenviar" | "cancelar" | "retractar",
+): Promise<Resultado<MensajeBandeja>> {
+  return resultado(await apiFetch(`/api/cursos/${cursoId}/comunicaciones/${mensajeId}/${accion}`, { method: "POST" }));
+}
+
+export async function enviarMensajeManual(
+  cursoId: string,
+  cuerpo: {
+    estudiante_ids: string[];
+    grupo_id: string | null;
+    asunto: string;
+    cuerpo: string;
+    confirmar_no_activos?: boolean;
+  },
+): Promise<Resultado<{ encolados: number; aviso: string }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones/mensajes`, { method: "POST", body: JSON.stringify(cuerpo) }),
+  );
+}
+
+export async function publicarAnuncio(
+  cursoId: string,
+  cuerpo: { titulo: string; cuerpo_html: string; seccion_ids: string[]; confirmacion_destinatarios?: number },
+): Promise<Resultado<{ destinatarios: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones/anuncios`, { method: "POST", body: JSON.stringify(cuerpo) }),
+  );
+}
+
+export async function cambiarSuspension(
+  cursoId: string,
+  suspendidas: boolean,
+  motivo: string | null,
+): Promise<Resultado<{ comunicaciones_salientes: string }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones`, {
+      method: "PATCH",
+      body: JSON.stringify({ suspendidas, motivo }),
+    }),
+  );
+}
+
+export interface ReglaComunicacion {
+  evento: string;
+  titulo: string;
+  activa: boolean;
+  por_defecto: boolean;
+  advertencia_al_apagar: string | null;
+  destinatarios_hoy: number | null;
+  vista_previa_asunto: string;
+  vista_previa_cuerpo: string;
+  vista_previa_con_ejemplo: boolean;
+}
+
+export async function obtenerReglasTarea(cursoId: string, tareaId: string): Promise<ReglaComunicacion[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/comunicaciones`);
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export async function cambiarReglaTarea(
+  cursoId: string,
+  tareaId: string,
+  evento: string,
+  activa: boolean,
+): Promise<Resultado<Record<string, number | boolean | string>>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/comunicaciones/${evento}`, {
+      method: "PUT",
+      body: JSON.stringify({ activa }),
+    }),
+  );
+}
+
+export async function obtenerReglaMapeo(cursoId: string): Promise<ReglaComunicacion | null> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/comunicaciones-curso/recordatorio-mapeo`);
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}
+
+export async function cambiarReglaMapeo(cursoId: string, activa: boolean): Promise<Resultado<Record<string, unknown>>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones-curso/recordatorio-mapeo`, {
+      method: "PUT",
+      body: JSON.stringify({ activa }),
+    }),
+  );
+}
+
+export async function suprimirComunicaciones(
+  cursoId: string,
+  estudianteId: string,
+  alcance: "TODAS_AUTOMATICAS" | "SOLO_RECORDATORIOS",
+  motivo: string,
+): Promise<Resultado<{ alcance: string }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/estudiantes/${estudianteId}/supresion`, {
+      method: "POST",
+      body: JSON.stringify({ alcance, motivo }),
+    }),
+  );
+}
+
+export async function levantarSupresion(cursoId: string, estudianteId: string): Promise<Resultado<{ levantada: boolean }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/estudiantes/${estudianteId}/supresion`, { method: "DELETE" }),
+  );
+}
+
+// --- Etapa F11: correccion (SPEC 12 S12.5-S12.8, S12.11) ---
+
+export interface AsignacionPropia {
+  entrega_id: string;
+  entrega: string;
+  tarea_id: string;
+  sujeto_id: string;
+  sujeto: string;
+  estado: string;
+  etiqueta: string;
+  sin_commits: boolean;
+  reclamo_abierto: boolean;
+  version_desactualizada: boolean;
+  nueva: boolean;
+  actualizado_en: string;
+}
+
+export interface BandejaCorreccion {
+  mis_asignaciones: AsignacionPropia[];
+  contador: { asignadas: number; corregidas: number; publicadas: number };
+  nuevas: number;
+  sin_corrector: number;
+  puede_repartir: boolean;
+  puede_publicar: boolean;
+  es_profesor: boolean;
+  tareas: { id: string; nombre: string; entregas: { id: string; nombre: string; orden: number }[] }[];
+}
+
+export interface CeldaCorreccion {
+  estado: string;
+  etiqueta: string;
+  corrector: string | null;
+  publicable: boolean;
+  motivo_no_publicable: string | null;
+  banderas: string[];
+  contraste: string;
+}
+
+export interface MatrizCorreccion {
+  entregas: { id: string; nombre: string; orden: number }[];
+  sujetos: { sujeto_id: string; sujeto: string; activo: boolean; seccion: string | null; celdas: Record<string, CeldaCorreccion> }[];
+  por_corrector: Record<string, Record<string, number>>;
+  por_entrega: Record<string, Record<string, number>>;
+  por_seccion: Record<string, Record<string, number>>;
+  contador: { corregidas: number; con_nota_en_canvas: number; total: number; comprobado_en: string | null };
+}
+
+export interface CriterioRubrica {
+  id: string;
+  description: string;
+  points: number;
+  ratings?: { id: string; description: string; points: number }[];
+  learning_outcome_id?: string;
+  criterion_use_range?: boolean;
+  ignore_for_scoring?: boolean;
+}
+
+export interface PantallaCorreccion {
+  entrega: {
+    id: string;
+    nombre: string;
+    tarea_id: string;
+    tarea: string;
+    grading_type: string;
+    puntos_posibles: number | null;
+    fecha_efectiva: string | null;
+    origen_fecha: string | null;
+  };
+  sujeto: { id: string; nombre: string; integrantes: string[]; activo: boolean };
+  estado: string;
+  etiqueta: string;
+  corrector: string | null;
+  es_propietario: boolean;
+  puede_publicar: boolean;
+  titular: string;
+  publicable: boolean;
+  motivo_no_publicable: string | null;
+  banderas: { version_desactualizada: boolean; reclamo_abierto: boolean; sin_commits: boolean; reconocimiento_sin_codigo: boolean };
+  version: {
+    id: string;
+    estado: string;
+    sha: string | null;
+    sha_corto: string | null;
+    tag: string | null;
+    repositorio: string | null;
+    fecha_corte: string;
+  } | null;
+  repositorio_estado: string | null;
+  acceso_docente: string | null;
+  motivo_sin_enlace: string | null;
+  borrador: {
+    nota: string | null;
+    rubrica: Record<string, { points?: number; rating_id?: string; comments?: string }> | null;
+    comentario: string | null;
+    version: number;
+  } | null;
+  rubrica: {
+    criterios: CriterioRubrica[];
+    ajustes: Record<string, unknown>;
+    usar_para_calificar: boolean;
+    suma_sugerida: number | null;
+    cambio_sin_revisar: boolean;
+  };
+  notas_internas: { clase: string; texto: string | null; desenlace: string | null; creada_en: string }[];
+  historial: { entrega: string; estado: string; nota_publicada: string | null }[];
+  canvas: { estudiante: string; score: number | null; calificada_en: string | null }[];
+  navegacion: { posicion: number; total: number; anterior: string | null; siguiente: string | null; siguiente_sin_corregir: string | null };
+}
+
+export async function obtenerBandejaCorreccion(cursoId: string): Promise<BandejaCorreccion> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion`);
+  if (!respuesta.ok) throw new Error(`GET correccion -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerMatrizCorreccion(cursoId: string, tareaId: string): Promise<MatrizCorreccion> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/correccion/estado`);
+  if (!respuesta.ok) throw new Error(`GET correccion/estado -> ${respuesta.status}`);
+  return respuesta.json();
+}
+
+export async function obtenerPantallaCorreccion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+): Promise<PantallaCorreccion | null> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}`);
+  if (!respuesta.ok) return null;
+  return respuesta.json();
+}
+
+function rutaCorreccion(cursoId: string, entregaId: string, sujetoId: string) {
+  return `/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}`;
+}
+
+export async function guardarBorradorCorreccion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  cuerpo: { nota: string | null; rubrica: Record<string, unknown> | null; comentario: string | null; version: number | null },
+): Promise<Resultado<{ estado: string; version: number }>> {
+  return resultado(
+    await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/borrador`, {
+      method: "PUT",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export async function marcarCorreccionLista(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+): Promise<Resultado<{ estado: string; nota: string }>> {
+  return resultado(await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/lista`, { method: "POST" }));
+}
+
+export async function agregarNotaInterna(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  ruta: "notas" | "reclamos" | "reclamos/cerrar",
+  cuerpo: { texto: string; desenlace?: string },
+): Promise<Resultado<Record<string, unknown>>> {
+  return resultado(
+    await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/${ruta}`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export interface CorrectorCurso {
+  membresia_id: string;
+  nombre: string;
+  rol: string;
+  peso: number;
+  sin_github: boolean;
+}
+
+export async function obtenerCorrectores(cursoId: string): Promise<CorrectorCurso[]> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/correctores`);
+  if (!respuesta.ok) return [];
+  return respuesta.json();
+}
+
+export interface PropuestaReparto {
+  filas: { sujeto_id: string; sujeto: string; actual: string | null; propuesto: string | null; estado: string; sobrescribe: boolean }[];
+  totales: Record<string, number>;
+  requiere_decision: string[];
+}
+
+export async function previsualizarReparto(
+  cursoId: string,
+  entregaId: string,
+  cuerpo: { criterio: string; reasignar: boolean; manual?: Record<string, string | null> },
+): Promise<Resultado<PropuestaReparto>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/reparto/previsualizar`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+export async function aplicarReparto(
+  cursoId: string,
+  entregaId: string,
+  cuerpo: { criterio: string; reasignar: boolean; manual?: Record<string, string | null> },
+): Promise<Resultado<{ cambios: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/reparto/aplicar`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
+  );
+}
+
+// --- Etapa F12: publicacion de notas (SPEC 12 S12.10, S12.14) ---
+
+export interface ResultadoPublicacion {
+  ok: boolean;
+  status: number;
+  datos: { estado: string; error?: string } | null;
+  detalle: {
+    codigo?: string;
+    motivo?: string;
+    conflictos?: { estudiante: string; nota_canvas: number | null; calificada_en: string | null }[];
+    nota_propia?: string | null;
+  } | null;
+}
+
+export async function publicarCorreccion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  cuerpo: {
+    resolucion?: "PUBLICAR_MIA";
+    version_revisada?: boolean;
+    confirmacion_reclamo?: string;
+    reconocimiento_sin_codigo?: boolean;
+  },
+): Promise<ResultadoPublicacion> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}/publicar`, {
+    method: "POST",
+    body: JSON.stringify(cuerpo),
+  });
+  let json: unknown = null;
+  try {
+    json = await respuesta.json();
+  } catch {
+    json = null;
+  }
+  if (respuesta.ok) return { ok: true, status: respuesta.status, datos: json as { estado: string }, detalle: null };
+  const detalle = (json as { detail?: unknown } | null)?.detail;
+  return {
+    ok: false,
+    status: respuesta.status,
+    datos: null,
+    detalle: typeof detalle === "object" && detalle ? (detalle as ResultadoPublicacion["detalle"]) : { motivo: String(detalle ?? "") },
+  };
+}
+
+export async function accionPublicacion(
+  cursoId: string,
+  entregaId: string,
+  sujetoId: string,
+  accion: "reintentar" | "reabrir" | "adoptar-canvas" | "rubrica-revisada",
+  motivo = "",
+): Promise<Resultado<{ estado?: string; nota?: string }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}/${accion}`, {
+      method: "POST",
+      body: JSON.stringify({ motivo }),
+    }),
+  );
+}
+
+export async function comprobarContraCanvas(cursoId: string, entregaId: string): Promise<boolean> {
+  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/comprobar`, { method: "POST" });
+  return respuesta.ok;
 }

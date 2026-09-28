@@ -6,9 +6,13 @@ import {
   crearRepositorioBase,
   desvincularEntrega,
   escribirArchivoBase,
+  excluirEntrega,
+  obtenerAssignmentsCanvas,
   obtenerTarea,
   previsualizarArchivoBase,
   renombrarArchivoBase,
+  vincularEntrega,
+  type AssignmentCanvasOpcion,
   type PrevisualizacionArchivo,
   type Resultado,
   type TareaDetalle,
@@ -16,6 +20,7 @@ import {
 import {
   fechaLegible,
   tamanoLegible,
+  textoAdvertenciaEntrega,
   textoEstadoBase,
   textoEstadoEntrega,
   textoEstadoTarea,
@@ -36,6 +41,8 @@ import {
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { BloqueRepositorios, LineaFechas } from "./RepositoriosTarea";
+import { ComunicacionesTarea } from "./ComunicacionesTarea";
+import { TableroTarea } from "./TableroTarea";
 function leerComoBase64(archivo: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const lector = new FileReader();
@@ -70,6 +77,11 @@ function EditorTarea({ tareaId }: { tareaId: string }) {
   const rutaReemplazo = useRef("");
   const op = useOperacion();
   const confirmar = useConfirmar();
+  // R2.3.2 (F2): vincular otra entrega. La final se pregunta siempre (A-080):
+  // se propone la nueva y la anterior pasa a parcial, pero nunca se decide sola.
+  const [opciones, setOpciones] = useState<AssignmentCanvasOpcion[] | null>(null);
+  const [nuevaId, setNuevaId] = useState<number | null>(null);
+  const [finalId, setFinalId] = useState<number | null>(null);
   const tarea = consulta.datos;
   async function cambiar(accion: () => Promise<Resultado<TareaDetalle>>) {
     const r = await accion();
@@ -91,6 +103,8 @@ function EditorTarea({ tareaId }: { tareaId: string }) {
     ["entrega", "Entrega y fechas"],
     ["base", "Repositorio base"],
     ["repositorios", "Repositorios de estudiantes"],
+    ["actividad", "Actividad"],
+    ["comunicaciones", "Comunicaciones"],
   ];
   const pestanaValida = pestanas.some(([p]) => p === pestana)
     ? pestana
@@ -230,9 +244,16 @@ function EditorTarea({ tareaId }: { tareaId: string }) {
                       {textoTipoEntrega(e.tipo)} · {e.orden}
                     </td>
                     <td>{fechaLegible(e.due_at_base, curso.zona_horaria)}</td>
-                    <td>{textoEstadoEntrega(e.estado_validacion)}</td>
                     <td>
-                      {administra && (
+                      {textoEstadoEntrega(e.estado_validacion)}
+                      {(e.advertencias ?? []).map((a) => (
+                        <p key={a} className="help">
+                          {textoAdvertenciaEntrega(a)}
+                        </p>
+                      ))}
+                    </td>
+                    <td>
+                      {administra && e.estado_validacion !== "EXCLUIDA" && (
                         <button
                           className="danger"
                           disabled={op.ocupado}
@@ -256,7 +277,30 @@ function EditorTarea({ tareaId }: { tareaId: string }) {
                         >
                           Desvincular
                         </button>
-                      )}
+                      )}{" "}
+                      {administra &&
+                        e.tipo === "PARCIAL" &&
+                        e.estado_validacion !== "EXCLUIDA" && (
+                          <button
+                            disabled={op.ocupado}
+                            title="Deja de capturarse; lo ya registrado se conserva."
+                            onClick={async () => {
+                              if (
+                                await confirmar({
+                                  titulo: "Excluir entrega",
+                                  descripcion: `«${e.nombre}» deja de sincronizarse y de registrar versiones; lo ya registrado se conserva.`,
+                                  accion: "Excluir",
+                                })
+                              )
+                                void op.ejecutar(
+                                  () => cambiar(() => excluirEntrega(cursoId, tareaId, e.id)),
+                                  "Entrega excluida.",
+                                );
+                            }}
+                          >
+                            Excluir
+                          </button>
+                        )}
                     </td>
                   </tr>
                 ))}
@@ -265,13 +309,107 @@ function EditorTarea({ tareaId }: { tareaId: string }) {
           </Tabla>
         )}
         <LineaFechas cursoId={cursoId} tareaId={tareaId} />
-        <div className="actions">
-          <button disabled>Vincular otra entrega</button>
-        </div>
-        <p className="help">
-          {tarea.vincular_otra_entrega.motivo ??
-            "Esta versión permite una sola entrega por tarea."}
+        <p>
+          <Link to={`/cursos/${cursoId}/tareas/${tareaId}/entregas`}>
+            Entregas y versiones: excepciones de fecha, versiones registradas y
+            acceso al código
+          </Link>
         </p>
+        {!administra || !tarea.vincular_otra_entrega.habilitada ? (
+          <>
+            <div className="actions">
+              <button disabled>Vincular otra entrega</button>
+            </div>
+            {tarea.vincular_otra_entrega.motivo && (
+              <p className="help">{tarea.vincular_otra_entrega.motivo}</p>
+            )}
+          </>
+        ) : opciones === null ? (
+          <div className="actions">
+            <button
+              disabled={op.ocupado}
+              onClick={async () =>
+                setOpciones((await obtenerAssignmentsCanvas(cursoId)).assignments)
+              }
+            >
+              Vincular otra entrega
+            </button>
+          </div>
+        ) : (
+          <fieldset>
+            <legend>Vincular otra entrega</legend>
+            <label>
+              Tarea de Canvas{" "}
+              <select
+                value={nuevaId ?? ""}
+                onChange={(ev) => {
+                  const id = ev.target.value ? Number(ev.target.value) : null;
+                  setNuevaId(id);
+                  setFinalId(id);
+                }}
+              >
+                <option value="">Elige una tarea de Canvas</option>
+                {opciones.map((a) => (
+                  <option
+                    key={a.canvas_assignment_id}
+                    value={a.canvas_assignment_id}
+                    disabled={!a.seleccionable}
+                  >
+                    {a.nombre}
+                    {a.motivo ? ` — ${a.motivo}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {nuevaId !== null && (
+              <div>
+                <p>¿Cuál es la entrega final? Las demás quedan como parciales.</p>
+                {[
+                  ...tarea.entregas
+                    .filter((e) => e.estado_validacion !== "EXCLUIDA")
+                    .map((e) => ({ id: e.canvas_assignment_id, nombre: e.nombre })),
+                  {
+                    id: nuevaId,
+                    nombre:
+                      opciones.find((a) => a.canvas_assignment_id === nuevaId)?.nombre ?? "",
+                  },
+                ].map((o) => (
+                  <label key={o.id} style={{ display: "block" }}>
+                    <input
+                      type="radio"
+                      name="entrega-final"
+                      checked={finalId === o.id}
+                      onChange={() => setFinalId(o.id)}
+                    />{" "}
+                    {o.nombre}
+                    {o.id === nuevaId && (
+                      <span className="help"> (la que estás vinculando)</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="actions">
+              <button
+                className="primary"
+                disabled={op.ocupado || nuevaId === null || finalId === null}
+                onClick={async () => {
+                  if (nuevaId === null || finalId === null) return;
+                  await op.ejecutar(
+                    () => cambiar(() => vincularEntrega(cursoId, tareaId, nuevaId, finalId)),
+                    "Entrega vinculada. Sus fechas llegan con la próxima sincronización.",
+                  );
+                  setOpciones(null);
+                  setNuevaId(null);
+                  setFinalId(null);
+                }}
+              >
+                Vincular
+              </button>
+              <button onClick={() => setOpciones(null)}>Cancelar</button>
+            </div>
+          </fieldset>
+        )}
       </section>
       <section hidden={pestanaValida !== "base"} className="panel">
         <h2>Repositorio base opcional</h2>
@@ -638,6 +776,20 @@ function EditorTarea({ tareaId }: { tareaId: string }) {
             <p>La creación automática comienza después de activarla.</p>
             <Link to="?vista=resumen">Revisar y activar la tarea</Link>
           </Vacio>
+        )}
+      </section>
+      <section hidden={pestanaValida !== "actividad"} className="panel">
+        {pestanaValida !== "actividad" ? null : tarea.estado !== "BORRADOR" ? (
+          <TableroTarea cursoId={cursoId} tareaId={tareaId} />
+        ) : (
+          <Vacio>La actividad se mide cuando la tarea está activa.</Vacio>
+        )}
+      </section>
+      <section hidden={pestanaValida !== "comunicaciones"} className="panel">
+        {pestanaValida !== "comunicaciones" ? null : tarea.estado !== "BORRADOR" ? (
+          <ComunicacionesTarea cursoId={cursoId} tareaId={tareaId} />
+        ) : (
+          <Vacio>Los avisos a estudiantes empiezan cuando la tarea está activa.</Vacio>
         )}
       </section>
     </>

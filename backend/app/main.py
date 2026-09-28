@@ -12,19 +12,29 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.dependencias import configurar_fabrica_sesiones
 from app.api.rutas import (
+    archivado,
     auth,
     capacidades,
+    comunicaciones,
+    correccion,
     cursos,
     estado,
+    fechas,
+    identidades,
+    informes,
     interno,
     pendientes,
     perfil,
     personas,
     repositorios,
     salud,
+    tablero,
     tareas,
+    timeline,
     verificacion,
+    versiones,
     vinculacion,
+    webhooks,
 )
 from app.infraestructura.config import obtener_configuracion
 from app.infraestructura.db import crear_fabrica_sesiones
@@ -59,6 +69,16 @@ def crear_app() -> FastAPI:
     app.include_router(pendientes.router)
     app.include_router(tareas.router)
     app.include_router(repositorios.router)
+    app.include_router(fechas.router)
+    app.include_router(versiones.router)
+    app.include_router(webhooks.router)
+    app.include_router(identidades.router)
+    app.include_router(tablero.router)
+    app.include_router(timeline.router)
+    app.include_router(archivado.router)
+    app.include_router(informes.router)
+    app.include_router(comunicaciones.router)
+    app.include_router(correccion.router)
 
     return app
 

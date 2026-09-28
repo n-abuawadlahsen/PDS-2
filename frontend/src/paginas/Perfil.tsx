@@ -14,6 +14,7 @@ import {
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
+import { NotificacionesPerfil } from "./NotificacionesPerfil";
 interface FilaSesion {
   id: number;
   agente: string | null;
@@ -246,6 +247,7 @@ export function PerfilPagina() {
             Cerrar las demás sesiones
           </button>
         </section>
+        <NotificacionesPerfil />
         <section className="panel danger-zone">
           <h2>Cerrar mi cuenta</h2>
           <p>

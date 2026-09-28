@@ -162,7 +162,13 @@ def requiere(
             raise HTTPException(status_code=403, detail="ya no formas parte de este curso")
 
         if rol_minimo is not None and membresia.rol != rol_minimo.value:
-            raise HTTPException(status_code=403, detail={"codigo": "PERMISO_INSUFICIENTE"})
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "codigo": "PERMISO_INSUFICIENTE",
+                    "motivo": "Esta acción está reservada al rol de profesor del curso.",
+                },
+            )
 
         efectivos = permisos_efectivos(
             rol=membresia.rol,

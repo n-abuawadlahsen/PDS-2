@@ -165,3 +165,91 @@ export function tamanoLegible(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+// --- Etapa final (F2-F6): textos de entregas, versiones y actividad ---
+
+const ADVERTENCIA_ENTREGA: Record<string, string> = {
+  LOCK_ANTES_DE_DUE: "Canvas deja de aceptar entregas antes de la fecha de cierre",
+  UNLOCK_DESPUES_DE_DUE: "Canvas la abre después de su fecha de cierre",
+  FINAL_ANTES_QUE_PARCIAL: "La entrega final cierra antes que una parcial",
+  DOS_ENTREGAS_MISMA_FECHA: "Otra entrega de esta tarea cierra a la misma hora",
+};
+
+// S9.6.3: etiqueta fija por estado; nunca «sin entrega» para SIN_REPOSITORIO.
+const ESTADO_CAPTURA: Record<string, string> = {
+  CAPTURADA: "Versión registrada",
+  CAPTURADA_SIN_TAG: "Versión registrada (sin etiqueta en GitHub)",
+  SIN_COMMITS: "Sin commits al cierre",
+  REVISAR: "Versión registrada, requiere revisión",
+  SIN_REPOSITORIO: "Sin repositorio al cierre",
+  ERROR: "Requiere tu acción",
+  PENDIENTE_DE_CIERRE: "Aún no cierra",
+  REGISTRANDO: "Registrando versión",
+  SIN_FECHA: "Sin fecha de cierre",
+  NO_APLICA: "Esta entrega no aplica a este sujeto",
+};
+
+const MOTIVO_VERSION: Record<string, string> = {
+  SIN_REPOSITORIO_AL_CIERRE: "Su repositorio no estaba listo en la fecha de cierre",
+  SUJETO_MATERIALIZADO_TRAS_EL_CIERRE: "Alta posterior a la fecha",
+  FECHA_ADELANTADA: "Reemplazada: la fecha de cierre se adelantó",
+  FECHA_EXTENDIDA: "Reemplazada: la fecha de cierre se extendió",
+  CAPTURA_TARDIA_POR_ALCANCE:
+    "Versión resuelta después del cierre, con el historial recuperado desde GitHub; la fecha de corte es la original",
+};
+
+const ESTADO_ETIQUETA: Record<string, string> = {
+  PENDIENTE: "Etiqueta pendiente",
+  CREADO: "Etiqueta creada",
+  CONFLICTO: "La etiqueta apunta a otro commit",
+  FALLIDO: "No se pudo crear la etiqueta",
+  NO_APLICA: "Sin etiqueta",
+};
+
+const ADVERTENCIA_VERSION: Record<string, string> = {
+  SIN_CAMBIOS_RESPECTO_A_LA_ANTERIOR: "Sin cambios respecto a la entrega anterior",
+  SUJETO_RETIRADO: "El sujeto ya no estaba activo al cierre",
+  FECHAS_POSIBLEMENTE_DESACTUALIZADAS: "La fecha llevaba más de 6 horas sin refrescarse desde Canvas",
+  CAPTURA_DIFERIDA_POR_GITHUB: "Capturada más tarde porque GitHub no estaba disponible",
+  USA_GIT_LFS:
+    "Este repositorio usa Git LFS: si descargas el .zip, los archivos grandes llegarán como punteros de texto. Clona el repositorio si necesitas su contenido",
+  TIENE_SUBMODULOS: "Este repositorio declara submódulos: su código vive en otros repositorios",
+  SHA_PUEDE_SER_INALCANZABLE:
+    "El commit ya no es accesible en GitHub; probablemente hubo un push --force. La versión registrada se conserva",
+};
+
+const ORIGEN_CAPTURA: Record<string, string> = {
+  AUTOMATICA: "automática",
+  MANUAL_AHORA: "manual: capturada ahora",
+  MANUAL_FECHA: "manual: otra fecha de corte",
+  MANUAL_SHA: "manual: commit fijado",
+};
+
+// SPEC 10 S10.6.1: el estado agregado de una entrega, nueve valores.
+const ESTADO_ENTREGA_AGREGADO: Record<string, string> = {
+  EXCLUIDA: "Excluida por el equipo docente",
+  ELIMINADA_EN_CANVAS: "Eliminada en Canvas",
+  NO_PUBLICADA: "No publicada en Canvas",
+  VINCULADA_TRAS_EL_CIERRE: "Versiones no registradas: la fecha ya había pasado al vincular",
+  SIN_FECHA: "Sin fecha de cierre",
+  ABIERTA: "Abierta",
+  EN_CIERRE: "Cerrando",
+  CERRADA_CAPTURANDO: "Cerrada, registrando versiones",
+  CERRADA_REGISTRADA: "Cerrada, versiones registradas",
+};
+
+// SPEC 10 S10.5.3: las tres causas, cada una con su acción.
+const CAUSA_PARTICIPACION: Record<string, string> = {
+  SIN_ACCESO: "no ha aceptado su invitación: reenvíala o avisa por Canvas",
+  SIN_ATRIBUIR: "hay commits sin atribuir: puede haber usado otro correo de Git",
+  SIN_COMMITS: "sin commits: contacta al estudiante",
+};
+
+export const textoEstadoEntregaAgregado = (v: string | null | undefined) => traducir(ESTADO_ENTREGA_AGREGADO, v);
+export const textoCausaParticipacion = (v: string | null | undefined) => traducir(CAUSA_PARTICIPACION, v);
+export const textoEstadoCaptura = (v: string | null | undefined) => traducir(ESTADO_CAPTURA, v);
+export const textoMotivoVersion = (v: string | null | undefined) => traducir(MOTIVO_VERSION, v);
+export const textoEstadoEtiqueta = (v: string | null | undefined) => traducir(ESTADO_ETIQUETA, v);
+export const textoAdvertenciaVersion = (v: string | null | undefined) => traducir(ADVERTENCIA_VERSION, v);
+export const textoOrigenCaptura = (v: string | null | undefined) => traducir(ORIGEN_CAPTURA, v);
+export const textoAdvertenciaEntrega = (v: string | null | undefined) => traducir(ADVERTENCIA_ENTREGA, v);

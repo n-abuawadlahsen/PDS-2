@@ -20,6 +20,15 @@ import { Tarea } from "./paginas/Tarea";
 import { Tareas } from "./paginas/Tareas";
 import { Vinculacion } from "./paginas/Vinculacion";
 import { InicioCurso } from "./paginas/InicioCurso";
+import { Baja } from "./paginas/Baja";
+import { Comunicaciones } from "./paginas/Comunicaciones";
+import { Correccion } from "./paginas/Correccion";
+import { CorreccionSujeto } from "./paginas/CorreccionSujeto";
+import { EntregasTarea } from "./paginas/EntregasTarea";
+import { Informes } from "./paginas/Informes";
+import { MisNotificaciones } from "./paginas/MisNotificaciones";
+import { RepositorioTimeline } from "./paginas/RepositorioTimeline";
+import { Seguimiento } from "./paginas/Seguimiento";
 
 export function App() {
   return (
@@ -38,6 +47,7 @@ export function App() {
               path="/invitaciones/:token"
               element={<InvitacionPublica />}
             />
+            <Route path="/baja/:token" element={<Baja />} />
             <Route
               path="*"
               element={
@@ -65,6 +75,21 @@ export function App() {
               <Route path="pendientes" element={<Pendientes />} />
               <Route path="tareas" element={<Tareas />} />
               <Route path="tareas/:tareaId" element={<Tarea />} />
+              <Route path="tareas/:tareaId/entregas" element={<EntregasTarea />} />
+              <Route
+                path="tareas/:tareaId/repos/:repoId"
+                element={<RepositorioTimeline />}
+              />
+              <Route path="seguimiento" element={<Seguimiento />} />
+              <Route path="informes" element={<Informes />} />
+              <Route path="informes/:fecha" element={<Informes />} />
+              <Route path="mis-notificaciones" element={<MisNotificaciones />} />
+              <Route path="comunicaciones" element={<Comunicaciones />} />
+              <Route path="correccion" element={<Correccion />} />
+              <Route
+                path="correccion/:entregaId/:sujetoId"
+                element={<CorreccionSujeto />}
+              />
             </Route>
           </Route>
         </Routes>

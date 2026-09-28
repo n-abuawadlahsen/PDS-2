@@ -29,6 +29,8 @@ class _EjecutorSql(Protocol):
 
 _ESPACIO_CANVAS = 1
 _ESPACIO_GITHUB = 2
+_ESPACIO_REPOSITORIO = 3
+_ESPACIO_REPARTO = 4
 
 
 def bloquear_equipo(sesion: Session) -> None:
@@ -94,3 +96,23 @@ def cerrojo_global(sesion: _EjecutorSql, clave_texto: str) -> Iterator[None]:
         yield
     finally:
         sesion.execute(text("SELECT pg_advisory_unlock(hashtext(:clave))"), {"clave": clave_texto})
+
+
+def cerrojo_repositorio(sesion: Session, clave_repositorio: str) -> None:
+    """`pg_advisory_xact_lock(3, hashtext(repositorio))` (S10.2.4 regla 4): la
+    ingesta de un repositorio se serializa y el cerrojo se libera solo con la
+    transaccion; nunca un cerrojo de sesion en la ruta de ingesta."""
+    sesion.execute(
+        text("SELECT pg_advisory_xact_lock(:espacio, hashtext(:clave))"),
+        {"espacio": _ESPACIO_REPOSITORIO, "clave": clave_repositorio},
+    )
+
+
+def cerrojo_reparto(sesion: Session, entrega_id: uuid.UUID) -> None:
+    """`pg_advisory_xact_lock(4, hashtext(entrega))` (S12.5.6): dos repartos
+    automaticos de la misma entrega nunca corren a la vez; el segundo ve el
+    resultado del primero. Se libera con la transaccion."""
+    sesion.execute(
+        text("SELECT pg_advisory_xact_lock(:espacio, hashtext(:clave))"),
+        {"espacio": _ESPACIO_REPARTO, "clave": str(entrega_id)},
+    )

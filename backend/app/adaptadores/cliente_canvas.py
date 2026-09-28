@@ -13,6 +13,7 @@ una instancia de Canvas de verdad.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -97,6 +98,109 @@ def _escribir_config_registro_doble(
         "grading_type": config.grading_type,
     }
     _ARCHIVO_ESTADO_REGISTRO_DOBLE.write_text(json.dumps(datos))
+
+
+@dataclass(frozen=True)
+class AnuncioCreado:
+    topic_id: int
+    html_url: str | None
+
+
+RUBRICA_DOBLE: list[dict[str, Any]] = [
+    {
+        "id": "c1",
+        "description": "Correctitud",
+        "points": 60,
+        "ratings": [
+            {"id": "r11", "description": "Completa", "points": 60},
+            {"id": "r12", "description": "Parcial", "points": 30},
+            {"id": "r13", "description": "No funciona", "points": 0},
+        ],
+    },
+    {
+        "id": "c2",
+        "description": "Estilo",
+        "points": 40,
+        "ratings": [
+            {"id": "r21", "description": "Claro", "points": 40},
+            {"id": "r22", "description": "Mejorable", "points": 20},
+        ],
+    },
+]
+
+
+@dataclass(frozen=True)
+class RespuestaCanvas:
+    codigo_http: int
+    cuerpo: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class CalificacionCanvas:
+    canvas_user_id: int
+    workflow_state: str | None
+    score: float | None
+    entered_score: float | None
+    grade: str | None
+    graded_at: datetime | None
+    grader_id: int | None
+    excused: bool | None
+    late: bool | None
+    seconds_late: int | None
+    points_deducted: float | None
+    submitted_at: datetime | None
+    posted_at: datetime | None
+
+
+def _calificacion_desde_json(d: dict[str, Any]) -> CalificacionCanvas:
+    def num(v: Any) -> float | None:
+        return None if v is None else float(v)
+
+    return CalificacionCanvas(
+        canvas_user_id=int(d["user_id"]),
+        workflow_state=d.get("workflow_state"),
+        score=num(d.get("score")),
+        entered_score=num(d.get("entered_score")),
+        grade=d.get("grade"),
+        graded_at=_fecha_canvas(d.get("graded_at")),
+        grader_id=d.get("grader_id"),
+        excused=d.get("excused"),
+        late=d.get("late"),
+        seconds_late=d.get("seconds_late"),
+        points_deducted=num(d.get("points_deducted")),
+        submitted_at=_fecha_canvas(d.get("submitted_at")),
+        posted_at=_fecha_canvas(d.get("posted_at")),
+    )
+
+
+# Solo para pruebas: notas que el doble «guarda» y lo que se le «publico».
+calificaciones_doble: dict[tuple[int, int], dict[str, Any]] = {}
+publicaciones_doble: list[dict[str, Any]] = []
+no_calificables_doble: set[int] = set()
+periodo_cerrado_doble = False
+descuento_doble = 0.0
+
+
+def calificar_en_canvas_doble(
+    canvas_assignment_id: int, canvas_user_id: int, score: float, graded_at: datetime
+) -> None:
+    """Solo para pruebas: alguien califico en SpeedGrader."""
+    calificaciones_doble[(canvas_assignment_id, canvas_user_id)] = {
+        "user_id": canvas_user_id,
+        "score": score,
+        "entered_score": score,
+        "grade": str(score),
+        "graded_at": graded_at.isoformat(),
+        "grader_id": 9999,
+        "workflow_state": "graded",
+    }
+
+
+# Solo para pruebas: lo que el doble «publico» y «envio».
+conversaciones_doble: list[dict[str, Any]] = []
+anuncios_doble: list[dict[str, Any]] = []
+anuncios_borrados_doble: list[int] = []
+rechazar_secciones_doble = False
 
 
 class FalloProveedorCanvas(Exception):
@@ -206,8 +310,52 @@ class ClienteCanvas(Protocol):
     def enviar_conversacion(
         self, token: str, *, destinatarios_canvas_user_ids: list[int], asunto: str, cuerpo: str
     ) -> bool:
-        """SPEC 04 S4.7.2/SPEC 05 S5.5.1: `POST /conversations`, usado por la
-        via 4 (reintento asistido, S7.4.5)."""
+        """SPEC 04 S4.7.2/SPEC 05 S5.5.1: `POST /conversations`, una llamada
+        por destinatario con `group_conversation=false` y sin `bulk_message`
+        (S11.7.2, CA-11.7-01). `True` si todas terminaron en 2xx."""
+        ...
+
+    def crear_anuncio(
+        self,
+        token: str,
+        canvas_course_id: int,
+        *,
+        titulo: str,
+        mensaje_html: str,
+        secciones: list[int] | None,
+    ) -> AnuncioCreado | None:
+        """`POST .../discussion_topics` con `is_announcement=true`, cerrado a
+        comentarios. Nunca `published=false` (CA-11.8-01). `None` si Canvas lo
+        rechazo con 4xx."""
+        ...
+
+    def borrar_anuncio(self, token: str, canvas_course_id: int, topic_id: int) -> bool:
+        """`DELETE .../discussion_topics/{id}`: retractar un anuncio publicado."""
+        ...
+
+    def publicar_nota(
+        self,
+        token: str,
+        canvas_course_id: int,
+        canvas_assignment_id: int,
+        canvas_user_id: int,
+        payload: dict[str, Any],
+    ) -> RespuestaCanvas:
+        """Escritura sincrona #5 (A-169): `PUT .../submissions/{user_id}` con
+        nota, comentario y rubrica en una sola peticion. Nunca `as_user_id`."""
+        ...
+
+    def leer_calificaciones(
+        self, token: str, canvas_course_id: int, canvas_assignment_id: int
+    ) -> list[CalificacionCanvas]:
+        """`GET .../students/submissions` de una tarea, paginado. Nunca
+        `submission_summary` (A-206)."""
+        ...
+
+    def estudiantes_calificables(
+        self, token: str, canvas_course_id: int, canvas_assignment_id: int
+    ) -> set[int]:
+        """`GET .../assignments/{id}/gradeable_students`."""
         ...
 
     def obtener_assignments_paginado(
@@ -442,7 +590,11 @@ class ClienteCanvasReal:
             return []
         respuesta.raise_for_status()
         return [
-            PeriodoCalificacionCanvas(is_closed=bool(p.get("is_closed", False)))
+            PeriodoCalificacionCanvas(
+                is_closed=bool(p.get("is_closed", False)),
+                start_date=_fecha_canvas(p.get("start_date")),
+                end_date=_fecha_canvas(p.get("end_date")),
+            )
             for p in respuesta.json().get("grading_periods", [])
         ]
 
@@ -801,22 +953,118 @@ class ClienteCanvasReal:
     def enviar_conversacion(
         self, token: str, *, destinatarios_canvas_user_ids: list[int], asunto: str, cuerpo: str
     ) -> bool:
+        todas = True
+        for destinatario in destinatarios_canvas_user_ids:
+            respuesta = self._escribir(
+                "POST",
+                "/api/v1/conversations",
+                "/api/v1/conversations",
+                token=token,
+                json={
+                    "recipients": [str(destinatario)],
+                    "subject": asunto,
+                    "body": cuerpo,
+                    "group_conversation": False,
+                },
+            )
+            if respuesta.status_code >= 500:
+                raise FalloProveedorCanvas(f"Canvas respondio {respuesta.status_code}")
+            todas = todas and respuesta.status_code in (200, 201)
+        return todas
+
+    def crear_anuncio(
+        self,
+        token: str,
+        canvas_course_id: int,
+        *,
+        titulo: str,
+        mensaje_html: str,
+        secciones: list[int] | None,
+    ) -> AnuncioCreado | None:
+        payload: dict[str, Any] = {
+            "title": titulo,
+            "message": mensaje_html,
+            "is_announcement": True,
+            "locked": True,
+        }
+        if secciones:
+            payload["specific_sections"] = ",".join(str(x) for x in secciones)
         respuesta = self._escribir(
             "POST",
-            "/api/v1/conversations",
-            "/api/v1/conversations",
+            "/api/v1/courses/{course_id}/discussion_topics",
+            f"/api/v1/courses/{canvas_course_id}/discussion_topics",
             token=token,
-            json={
-                "recipients": [str(u) for u in destinatarios_canvas_user_ids],
-                "subject": asunto,
-                "body": cuerpo,
-                "group_conversation": True,
-                "bulk_message": True,
-            },
+            json=payload,
         )
         if respuesta.status_code >= 500:
             raise FalloProveedorCanvas(f"Canvas respondio {respuesta.status_code}")
-        return respuesta.status_code in (200, 201)
+        if respuesta.status_code not in (200, 201):
+            return None
+        datos = respuesta.json()
+        return AnuncioCreado(topic_id=int(datos["id"]), html_url=datos.get("html_url"))
+
+    def borrar_anuncio(self, token: str, canvas_course_id: int, topic_id: int) -> bool:
+        respuesta = self._escribir(
+            "DELETE",
+            "/api/v1/courses/{course_id}/discussion_topics/{topic_id}",
+            f"/api/v1/courses/{canvas_course_id}/discussion_topics/{topic_id}",
+            token=token,
+        )
+        if respuesta.status_code >= 500:
+            raise FalloProveedorCanvas(f"Canvas respondio {respuesta.status_code}")
+        return respuesta.status_code in (200, 204)
+
+    def publicar_nota(
+        self,
+        token: str,
+        canvas_course_id: int,
+        canvas_assignment_id: int,
+        canvas_user_id: int,
+        payload: dict[str, Any],
+    ) -> RespuestaCanvas:
+        plantilla = "/api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}"
+        respuesta = self._escribir(
+            "PUT",
+            plantilla,
+            f"/api/v1/courses/{canvas_course_id}/assignments/{canvas_assignment_id}"
+            f"/submissions/{canvas_user_id}",
+            token=token,
+            json=payload,
+        )
+        if respuesta.status_code >= 500:
+            raise FalloProveedorCanvas(f"Canvas respondio {respuesta.status_code}")
+        try:
+            cuerpo = respuesta.json()
+        except ValueError:
+            cuerpo = {"texto": respuesta.text[:2000]}
+        return RespuestaCanvas(codigo_http=respuesta.status_code, cuerpo=cuerpo)
+
+    def leer_calificaciones(
+        self, token: str, canvas_course_id: int, canvas_assignment_id: int
+    ) -> list[CalificacionCanvas]:
+        items, _, _ = self._paginas(
+            "/api/v1/courses/{course_id}/students/submissions",
+            f"/api/v1/courses/{canvas_course_id}/students/submissions",
+            token=token,
+            params={
+                "student_ids[]": "all",
+                "assignment_ids[]": canvas_assignment_id,
+                "per_page": 100,
+            },
+        )
+        return [_calificacion_desde_json(d) for d in items]
+
+    def estudiantes_calificables(
+        self, token: str, canvas_course_id: int, canvas_assignment_id: int
+    ) -> set[int]:
+        items, _, _ = self._paginas(
+            "/api/v1/courses/{course_id}/assignments/{assignment_id}/gradeable_students",
+            f"/api/v1/courses/{canvas_course_id}/assignments/{canvas_assignment_id}"
+            "/gradeable_students",
+            token=token,
+            params={"per_page": 100},
+        )
+        return {int(d["id"]) for d in items if "id" in d}
 
     def obtener_assignments_paginado(
         self, token: str, canvas_course_id: int
@@ -825,7 +1073,12 @@ class ClienteCanvasReal:
             "/api/v1/courses/{course_id}/assignments",
             f"/api/v1/courses/{canvas_course_id}/assignments",
             token=token,
-            params={"include[]": "assignment_visibility", "per_page": 100},
+            # S9.3.1: fuente de aceleracion; los overrides de autoridad siguen
+            # saliendo del endpoint 14 (`obtener_overrides_assignment`).
+            params={
+                "include[]": ["all_dates", "overrides", "assignment_visibility"],
+                "per_page": 100,
+            },
         )
         return ResultadoPaginado(
             items=[_assignment_desde_json(d) for d in items],
@@ -936,6 +1189,14 @@ class ClienteCanvasDoble:
     def obtener_periodos_calificacion(
         self, token: str, canvas_course_id: int
     ) -> list[PeriodoCalificacionCanvas]:
+        if periodo_cerrado_doble:
+            return [
+                PeriodoCalificacionCanvas(
+                    is_closed=True,
+                    start_date=datetime(2026, 1, 1, tzinfo=UTC),
+                    end_date=datetime(2027, 1, 1, tzinfo=UTC),
+                )
+            ]
         return []
 
     def obtener_roster(self, token: str, canvas_course_id: int) -> RosterCanvas:
@@ -1112,7 +1373,104 @@ class ClienteCanvasDoble:
     def enviar_conversacion(
         self, token: str, *, destinatarios_canvas_user_ids: list[int], asunto: str, cuerpo: str
     ) -> bool:
+        for destinatario in destinatarios_canvas_user_ids:
+            conversaciones_doble.append(
+                {
+                    "recipients": [str(destinatario)],
+                    "subject": asunto,
+                    "body": cuerpo,
+                    "group_conversation": False,
+                }
+            )
         return token == "valido"
+
+    def crear_anuncio(
+        self,
+        token: str,
+        canvas_course_id: int,
+        *,
+        titulo: str,
+        mensaje_html: str,
+        secciones: list[int] | None,
+    ) -> AnuncioCreado | None:
+        if token != "valido":
+            return None
+        if secciones and rechazar_secciones_doble:
+            return None
+        topic_id = 70_000 + len(anuncios_doble)
+        anuncios_doble.append(
+            {
+                "id": topic_id,
+                "title": titulo,
+                "message": mensaje_html,
+                "specific_sections": secciones,
+                "locked": True,
+            }
+        )
+        return AnuncioCreado(
+            topic_id=topic_id,
+            html_url=f"https://canvas.doble/courses/{canvas_course_id}/discussion_topics/{topic_id}",
+        )
+
+    def borrar_anuncio(self, token: str, canvas_course_id: int, topic_id: int) -> bool:
+        anuncios_borrados_doble.append(topic_id)
+        return token == "valido"
+
+    def publicar_nota(
+        self,
+        token: str,
+        canvas_course_id: int,
+        canvas_assignment_id: int,
+        canvas_user_id: int,
+        payload: dict[str, Any],
+    ) -> RespuestaCanvas:
+        publicaciones_doble.append(
+            {"assignment_id": canvas_assignment_id, "user_id": canvas_user_id, **payload}
+        )
+        if token != "valido":
+            return RespuestaCanvas(
+                codigo_http=401, cuerpo={"errors": [{"message": "Invalid access token."}]}
+            )
+        nota = str((payload.get("submission") or {}).get("posted_grade", ""))
+        try:
+            score: float | None = float(nota.rstrip("%"))
+        except ValueError:
+            score = 1.0 if nota == "pass" else 0.0 if nota == "fail" else None
+        destinatarios = [canvas_user_id]
+        if (payload.get("comment") or {}).get("group_comment"):
+            destinatarios = next(
+                (list(m) for _, _, m in self._GRUPOS_PADRON if canvas_user_id in m),
+                [canvas_user_id],
+            )
+        ahora = datetime.now(UTC)
+        for uid in destinatarios:
+            calificaciones_doble[(canvas_assignment_id, uid)] = {
+                "user_id": uid,
+                "score": None if score is None else score - descuento_doble,
+                "entered_score": score,
+                "grade": nota,
+                "graded_at": ahora.isoformat(),
+                "grader_id": self._CANVAS_USER_ID,
+                "points_deducted": descuento_doble or None,
+                "workflow_state": "graded",
+            }
+        return RespuestaCanvas(
+            codigo_http=200, cuerpo=calificaciones_doble[(canvas_assignment_id, canvas_user_id)]
+        )
+
+    def leer_calificaciones(
+        self, token: str, canvas_course_id: int, canvas_assignment_id: int
+    ) -> list[CalificacionCanvas]:
+        return [
+            _calificacion_desde_json(d)
+            for (aid, _), d in calificaciones_doble.items()
+            if aid == canvas_assignment_id
+        ]
+
+    def estudiantes_calificables(
+        self, token: str, canvas_course_id: int, canvas_assignment_id: int
+    ) -> set[int]:
+        return {2001, 2002, 2003, 2004, 2005} - no_calificables_doble
 
     def ejecutar_prueba_anuncio(
         self, token: str, canvas_course_id: int, *, section_id: int | None
@@ -1140,7 +1498,22 @@ class ClienteCanvasDoble:
             only_visible_to_overrides: bool = False,
             assignment_visibility: list[int] | None = None,
         ) -> AssignmentCanvasCrudo:
-            payload = {"id": canvas_assignment_id, "name": nombre, "published": True}
+            payload: dict[str, Any] = {
+                "id": canvas_assignment_id,
+                "name": nombre,
+                "published": True,
+                "grade_group_students_individually": False,
+            }
+            if canvas_assignment_id == 9101:
+                # F11: rubrica de ejemplo, embebida en el assignment como en Canvas.
+                payload["rubric"] = RUBRICA_DOBLE
+                payload["rubric_settings"] = {
+                    "points_possible": 100,
+                    "free_form_criterion_comments": False,
+                    "hide_points": False,
+                    "hide_score_total": False,
+                }
+                payload["use_rubric_for_grading"] = False
             return AssignmentCanvasCrudo(
                 canvas_assignment_id=canvas_assignment_id,
                 nombre=nombre,

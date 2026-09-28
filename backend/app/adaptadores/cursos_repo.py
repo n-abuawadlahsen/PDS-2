@@ -11,6 +11,7 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.adaptadores import suscripciones_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.modelos_curso import Curso, InvitacionEquipo, MembresiaCurso
 from app.adaptadores.modelos_identidad import Usuario
@@ -67,6 +68,7 @@ def crear_curso(
     )
     bd.add(membresia)
     bd.flush()
+    suscripciones_repo.al_entrar(bd, curso_id=curso.id, usuario_id=creador.id)
     return curso
 
 
@@ -172,6 +174,13 @@ def retirar_membresia(
     membresia.permisos = []
     membresia.version += 1
     bd.flush()
+    suscripciones_repo.al_retirarse(
+        bd, curso_id=membresia.curso_id, usuario_id=membresia.usuario_id
+    )
+    # S12.5.5 (F11): lo no publicado vuelve a SIN_CORRECTOR con su borrador.
+    from app.adaptadores import correccion_repo
+
+    correccion_repo.al_retirar_miembro(bd, membresia, actor_usuario_id=actor.id)
 
 
 def reincorporar_membresia(
@@ -190,6 +199,7 @@ def reincorporar_membresia(
     )
     membresia.version += 1
     bd.flush()
+    suscripciones_repo.al_entrar(bd, curso_id=membresia.curso_id, usuario_id=membresia.usuario_id)
 
 
 @dataclass(frozen=True)
@@ -341,4 +351,6 @@ def aceptar_invitacion(
     from app.adaptadores.acceso_docente_repo import encolar_sincronizacion
 
     encolar_sincronizacion(bd, membresia)
+    # CA-11.4-02: la suscripcion nace en la misma transaccion que la membresia.
+    suscripciones_repo.al_entrar(bd, curso_id=invitacion.curso_id, usuario_id=usuario.id)
     return membresia
