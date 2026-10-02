@@ -31,8 +31,7 @@ export function Acceso() {
         texto="Entrar con Google"
       />
       <p className="help">
-        Usa una cuenta personal de <strong>gmail.com</strong>. Las cuentas
-        institucionales gestionadas no están habilitadas.
+        Usa tu cuenta Google <strong>@miuandes.cl</strong> o una cuenta personal de <strong>gmail.com</strong>.
       </p>
       <hr />
       <p className="help">

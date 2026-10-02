@@ -12,15 +12,14 @@ export interface DescripcionMotivo {
 
 export const MOTIVOS_RECHAZO: Record<string, DescripcionMotivo> = {
   DOMINIO_NO_GMAIL: {
-    titulo: "Solo cuentas de gmail.com",
-    texto:
-      "Esta aplicación solo admite cuentas de gmail.com. Lo exige el requisito R2.1.2 del enunciado del proyecto.",
+    titulo: "Dominio de correo no admitido",
+    texto: "Usa una cuenta Google con correo @miuandes.cl o una cuenta personal de gmail.com.",
     accion: "Probar con otra cuenta",
   },
   HD_PRESENTE: {
     titulo: "Cuenta de dominio gestionado",
     texto:
-      "Esa cuenta de Google pertenece a un dominio gestionado. Necesitas una cuenta personal de gmail.com.",
+      "Esa cuenta de Google pertenece a un dominio gestionado que no está habilitado. Usa tu cuenta @miuandes.cl o una cuenta personal de gmail.com.",
     accion: "Probar con otra cuenta",
   },
   CORREO_NO_VERIFICADO: {

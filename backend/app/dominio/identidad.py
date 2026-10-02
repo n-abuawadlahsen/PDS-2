@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 _DOMINIOS_GOOGLE_PERSONAL = {"gmail.com", "googlemail.com"}
+_DOMINIO_INSTITUCIONAL = "miuandes.cl"
 
 
 class MotivoRechazoCorreo(StrEnum):
@@ -61,21 +62,24 @@ def normalizar_correo_google(email: str, *, email_verified: bool, hd: str | None
     if not email_verified:
         raise RechazoCorreo(MotivoRechazoCorreo.CORREO_NO_VERIFICADO)
 
-    # hd manda y se rechaza aunque la direccion termine en @gmail.com.
-    if hd:
-        raise RechazoCorreo(MotivoRechazoCorreo.HD_PRESENTE)
-
     correo_minusculas = email.strip().lower()
     if "@" not in correo_minusculas:
         raise RechazoCorreo(MotivoRechazoCorreo.DOMINIO_NO_GMAIL)
     local_part, _, dominio = correo_minusculas.partition("@")
 
-    if dominio not in _DOMINIOS_GOOGLE_PERSONAL:
+    if dominio in _DOMINIOS_GOOGLE_PERSONAL and hd:
+        raise RechazoCorreo(MotivoRechazoCorreo.HD_PRESENTE)
+    if dominio == _DOMINIO_INSTITUCIONAL and hd and hd.lower() != _DOMINIO_INSTITUCIONAL:
+        raise RechazoCorreo(MotivoRechazoCorreo.HD_PRESENTE)
+    if dominio not in _DOMINIOS_GOOGLE_PERSONAL and dominio != _DOMINIO_INSTITUCIONAL:
         raise RechazoCorreo(MotivoRechazoCorreo.DOMINIO_NO_GMAIL)
 
-    email_normalizado = f"{local_part}@gmail.com"
-    local_part_canonico = local_part.split("+", 1)[0].replace(".", "")
-    email_canonico = f"{local_part_canonico}@gmail.com"
+    email_normalizado = f"{local_part}@gmail.com" if dominio == "googlemail.com" else correo_minusculas
+    if dominio in _DOMINIOS_GOOGLE_PERSONAL:
+        local_part_canonico = local_part.split("+", 1)[0].replace(".", "")
+        email_canonico = f"{local_part_canonico}@gmail.com"
+    else:
+        email_canonico = email_normalizado
 
     return CorreoAdmitido(email=email_normalizado, email_canonico=email_canonico)
 

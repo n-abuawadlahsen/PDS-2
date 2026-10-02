@@ -23,9 +23,16 @@ def test_googlemail_se_normaliza_a_gmail():
     assert resultado.email == "ana@gmail.com"
 
 
-def test_institucional_con_hd_se_rechaza():
+@pytest.mark.parametrize("hd", [None, "miuandes.cl"])
+def test_cuenta_miuandes_se_admite(hd):
+    resultado = normalizar_correo_google("Ana@MIUANDES.cl", email_verified=True, hd=hd)
+    assert resultado.email == "ana@miuandes.cl"
+    assert resultado.email_canonico == "ana@miuandes.cl"
+
+
+def test_dominio_gestionado_distinto_se_rechaza():
     with pytest.raises(RechazoCorreo) as exc_info:
-        normalizar_correo_google("ana@uandes.cl", email_verified=True, hd="uandes.cl")
+        normalizar_correo_google("ana@miuandes.cl", email_verified=True, hd="otro.cl")
     assert exc_info.value.motivo == MotivoRechazoCorreo.HD_PRESENTE
 
 
