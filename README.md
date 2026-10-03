@@ -4,6 +4,10 @@ App web que coordina Canvas y GitHub para el equipo docente de un curso de progr
 
 ## Estado
 
+El frontend implementa los recorridos docentes de **P1–P8 y F1–F12** sobre los contratos disponibles, con diseño inspirado en Canvas, navegación adaptable y permisos por curso. La [guía de implementación](docs/frontend/IMPLEMENTACION.md) contiene los comandos de revisión, evidencias y límites concretos; la [matriz](docs/frontend/REQUISITOS.md) vincula los 59 requisitos con pantallas y contratos.
+
+Historial de la entrega parcial del backend:
+
 Backend de la entrega parcial (`PERFIL_ALCANCE=parcial`) implementado, de la **Etapa 0** a la **Etapa P8**:
 
 - Etapa 0: infraestructura (motor de trabajos, esquema inicial `0001`, cifrado, logs).
@@ -13,7 +17,7 @@ Backend de la entrega parcial (`PERFIL_ALCANCE=parcial`) implementado, de la **E
 - P7: tarea individual con una entrega y repositorio base.
 - P8: aprovisionamiento automático de repositorios, aviso por Canvas y lectura de fechas.
 
-Falta, entre otras cosas, el receptor de webhooks de GitHub y las rutas de ajustes, operación y alcance del curso.
+Los contratos posteriores de la entrega final se describen en `docs/frontend/` y en sus rutas de `backend/app/api/rutas/`.
 
 ## Estructura
 
@@ -63,14 +67,15 @@ Google OAuth real requiere credenciales OIDC en Google Cloud Console (tipo "Web 
 
 ```bash
 cd frontend
-npm install
-cp .env.example .env   # en local: VITE_API_BASE_URL=http://localhost:8000
+npm ci
+# .env.example define API_PROXY_TARGET=http://127.0.0.1:8000 y VITE_API_BASE_URL vacío
+# Conserva tu .env si ya existe.
 npm run dev
 ```
 
 ## Frontend y apariencia
 
-El frontend de la parcial usa una navegación compartida para cursos, un resumen de preparación y tres paletas seleccionables desde Perfil. La guía [`docs/FRONTEND-DISENO.md`](docs/FRONTEND-DISENO.md) explica la estructura, cómo editar todos los colores en `frontend/src/styles/themes.css`, cómo cambiar el tema predeterminado en `frontend/src/config/theme.ts` y qué límites de integración siguen presentes.
+El frontend usa Lato autoalojada, iconos Lucide, componentes shadcn/Radix y tokens semánticos. Tiene tarjetas de curso, navegación contextual, tablas, gráficos y corrección en dos columnas; conserva tres paletas claras desde Perfil. La guía vigente es [IMPLEMENTACION.md](docs/frontend/IMPLEMENTACION.md), con capturas inspeccionadas de escritorio y móvil.
 
 Las correcciones de invitaciones, cierre de cuenta, sincronización docente GitHub y login tras el arranque de Render están documentadas en [`docs/CORRECCIONES-PARCIAL.md`](docs/CORRECCIONES-PARCIAL.md). Incluyen la migración incremental `0002` y la configuración de correo real.
 
@@ -92,7 +97,13 @@ uv run alembic check
 
 ```bash
 cd frontend
+npm run format:check
+npm run lint
+npm run typecheck
 npm run build               # tsc + vite build
+npm run tools:browser       # instala Chromium para Playwright
+npm test                    # interfaz con fixtures de los contratos
+npm run test:backend        # opcional: Docker + API real, base aislada y proveedores dobles
 ```
 
 Las mismas comprobaciones corren en `.github/workflows/puertas.yml` en cada push/PR a `main`.

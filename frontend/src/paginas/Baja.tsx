@@ -1,58 +1,71 @@
-import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { aplicarBaja, obtenerBaja, type EstadoBaja } from "../lib/api";
+import { aplicarBaja, obtenerBaja } from "../lib/api";
+import { useConsulta, useOperacion } from "../hooks/useConsulta";
+import { Cabecera, Cargando, ErrorCarga, Mensajes } from "../components/ui";
 
-/** Confirmación de baja desde el enlace del correo (S11.4.4). Abrir la página
- * no cambia nada; solo el botón da de baja o vuelve a suscribir. */
 export function Baja() {
-  const { token } = useParams<{ token: string }>();
-  const [estado, setEstado] = useState<EstadoBaja | null | undefined>(undefined);
-  const [hecho, setHecho] = useState(false);
-
-  useEffect(() => {
-    if (token) obtenerBaja(token).then(setEstado);
-  }, [token]);
-
-  if (!token || estado === undefined) return <p>Cargando…</p>;
-  if (estado === null)
+  const { token = "" } = useParams();
+  const consulta = useConsulta(`baja:${token}`, () => obtenerBaja(token));
+  const op = useOperacion();
+  if (consulta.cargando) return <Cargando />;
+  if (consulta.error)
+    return <ErrorCarga error={consulta.error} reintentar={consulta.recargar} />;
+  const estado = consulta.datos;
+  if (!estado)
     return (
-      <main>
+      <section className="panel">
         <h1>Enlace no válido</h1>
         <p>
-          Este enlace ya no es válido. Puedes gestionar tus avisos desde tu <Link to="/perfil">perfil</Link>.
+          Este enlace ya no es válido. Gestiona tus avisos desde{" "}
+          <Link to="/perfil">tu perfil</Link>.
         </p>
-      </main>
+      </section>
     );
-
-  async function cambiar(accion: "baja" | "alta") {
-    if (!token) return;
-    const nuevo = await aplicarBaja(token, accion);
-    if (nuevo) {
-      setEstado(nuevo);
-      setHecho(true);
-    }
-  }
-
   return (
-    <main>
-      <h1>Informe docente diario de {estado.curso_codigo}</h1>
-      {estado.activa ? (
-        <>
-          <p>Estás suscrito al informe diario de {estado.curso_nombre}.</p>
-          <button onClick={() => cambiar("baja")}>Darme de baja de este curso</button>
-        </>
-      ) : (
-        <>
-          <p>
-            {hecho ? "Te has dado de baja" : "No estás suscrito"} del informe de {estado.curso_nombre}
-            {estado.otros_cursos_suscritos > 0 && `; sigues suscrito a otros ${estado.otros_cursos_suscritos} cursos`}.
-          </p>
-          <button onClick={() => cambiar("alta")}>Volver a suscribirme</button>
-        </>
-      )}
-      <p style={{ fontSize: "0.85rem", color: "var(--color-text-secondary)" }}>
-        Para todos tus cursos a la vez, entra a tu <Link to="/perfil">perfil</Link>.
+    <section className="panel">
+      <Cabecera
+        titulo={`Informe diario · ${estado.curso_codigo}`}
+        descripcion={estado.curso_nombre}
+      />
+      <p>
+        {estado.activa
+          ? "Estás suscrito al informe diario de este curso."
+          : "No estás suscrito al informe diario de este curso."}
       </p>
-    </main>
+      {!estado.activa && estado.otros_cursos_suscritos > 0 && (
+        <p>Sigues suscrito a otros {estado.otros_cursos_suscritos} cursos.</p>
+      )}
+      <Mensajes error={op.error} mensaje={op.mensaje} />
+      <button
+        disabled={op.ocupado}
+        onClick={() =>
+          op.ejecutar(async () => {
+            const nuevo = await aplicarBaja(
+              token,
+              estado.activa ? "baja" : "alta",
+            );
+            if (!nuevo)
+              throw new Error(
+                "No pudimos cambiar tu suscripción. El enlace puede haber caducado; puedes intentarlo desde tu perfil.",
+              );
+            consulta.actualizar(nuevo);
+            op.setMensaje(
+              nuevo.activa
+                ? "Te suscribiste nuevamente."
+                : "Te diste de baja de este curso.",
+            );
+          })
+        }
+      >
+        {op.ocupado
+          ? "Guardando…"
+          : estado.activa
+            ? "Darme de baja de este curso"
+            : "Volver a suscribirme"}
+      </button>
+      <p className="help">
+        Administra todos tus cursos desde <Link to="/perfil">tu perfil</Link>.
+      </p>
+    </section>
   );
 }

@@ -1,0 +1,25 @@
+/* No Preflight: se conserva el sistema visual y semántico de la aplicación. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "../";
+
+@theme inline {
+  --color-background: var(--app-background);
+  --color-foreground: var(--color-text);
+  --color-primary: var(--app-primary);
+  --color-primary-foreground: var(--color-on-primary);
+  --color-muted: var(--color-surface-muted);
+  --color-muted-foreground: var(--color-text-secondary);
+  --color-accent: var(--color-surface-hover);
+  --color-accent-foreground: var(--color-text);
+  --color-secondary: var(--color-surface-muted);
+  --color-secondary-foreground: var(--color-text);
+  --color-destructive: var(--color-error);
+  --color-destructive-foreground: var(--color-on-primary);
+  --color-border: var(--app-border);
+  --color-input: var(--color-input-border);
+  --color-ring: var(--color-focus-ring);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+}

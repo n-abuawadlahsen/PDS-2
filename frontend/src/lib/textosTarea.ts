@@ -150,11 +150,18 @@ export function fechaLegible(
   const fecha = new Date(iso);
   if (Number.isNaN(fecha.getTime())) return "Fecha no disponible";
   try {
-    return fecha.toLocaleString("es-CL", {
-      dateStyle: "medium",
-      timeStyle: "short",
+    const partes = new Intl.DateTimeFormat("es-CL", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
       timeZone: zonaHoraria,
-    });
+    }).formatToParts(fecha);
+    const parte = (tipo: Intl.DateTimeFormatPartTypes) =>
+      partes.find((p) => p.type === tipo)?.value;
+    return `${parte("day")}-${parte("month")}-${parte("year")} ${parte("hour")}:${parte("minute")} (${zonaHoraria})`;
   } catch {
     return `${fecha.toISOString()} (UTC)`;
   }
@@ -169,7 +176,8 @@ export function tamanoLegible(bytes: number): string {
 // --- Etapa final (F2-F6): textos de entregas, versiones y actividad ---
 
 const ADVERTENCIA_ENTREGA: Record<string, string> = {
-  LOCK_ANTES_DE_DUE: "Canvas deja de aceptar entregas antes de la fecha de cierre",
+  LOCK_ANTES_DE_DUE:
+    "Canvas deja de aceptar entregas antes de la fecha de cierre",
   UNLOCK_DESPUES_DE_DUE: "Canvas la abre después de su fecha de cierre",
   FINAL_ANTES_QUE_PARCIAL: "La entrega final cierra antes que una parcial",
   DOS_ENTREGAS_MISMA_FECHA: "Otra entrega de esta tarea cierra a la misma hora",
@@ -190,7 +198,8 @@ const ESTADO_CAPTURA: Record<string, string> = {
 };
 
 const MOTIVO_VERSION: Record<string, string> = {
-  SIN_REPOSITORIO_AL_CIERRE: "Su repositorio no estaba listo en la fecha de cierre",
+  SIN_REPOSITORIO_AL_CIERRE:
+    "Su repositorio no estaba listo en la fecha de cierre",
   SUJETO_MATERIALIZADO_TRAS_EL_CIERRE: "Alta posterior a la fecha",
   FECHA_ADELANTADA: "Reemplazada: la fecha de cierre se adelantó",
   FECHA_EXTENDIDA: "Reemplazada: la fecha de cierre se extendió",
@@ -207,13 +216,17 @@ const ESTADO_ETIQUETA: Record<string, string> = {
 };
 
 const ADVERTENCIA_VERSION: Record<string, string> = {
-  SIN_CAMBIOS_RESPECTO_A_LA_ANTERIOR: "Sin cambios respecto a la entrega anterior",
+  SIN_CAMBIOS_RESPECTO_A_LA_ANTERIOR:
+    "Sin cambios respecto a la entrega anterior",
   SUJETO_RETIRADO: "El sujeto ya no estaba activo al cierre",
-  FECHAS_POSIBLEMENTE_DESACTUALIZADAS: "La fecha llevaba más de 6 horas sin refrescarse desde Canvas",
-  CAPTURA_DIFERIDA_POR_GITHUB: "Capturada más tarde porque GitHub no estaba disponible",
+  FECHAS_POSIBLEMENTE_DESACTUALIZADAS:
+    "La fecha llevaba más de 6 horas sin refrescarse desde Canvas",
+  CAPTURA_DIFERIDA_POR_GITHUB:
+    "Capturada más tarde porque GitHub no estaba disponible",
   USA_GIT_LFS:
     "Este repositorio usa Git LFS: si descargas el .zip, los archivos grandes llegarán como punteros de texto. Clona el repositorio si necesitas su contenido",
-  TIENE_SUBMODULOS: "Este repositorio declara submódulos: su código vive en otros repositorios",
+  TIENE_SUBMODULOS:
+    "Este repositorio declara submódulos: su código vive en otros repositorios",
   SHA_PUEDE_SER_INALCANZABLE:
     "El commit ya no es accesible en GitHub; probablemente hubo un push --force. La versión registrada se conserva",
 };
@@ -230,7 +243,8 @@ const ESTADO_ENTREGA_AGREGADO: Record<string, string> = {
   EXCLUIDA: "Excluida por el equipo docente",
   ELIMINADA_EN_CANVAS: "Eliminada en Canvas",
   NO_PUBLICADA: "No publicada en Canvas",
-  VINCULADA_TRAS_EL_CIERRE: "Versiones no registradas: la fecha ya había pasado al vincular",
+  VINCULADA_TRAS_EL_CIERRE:
+    "Versiones no registradas: la fecha ya había pasado al vincular",
   SIN_FECHA: "Sin fecha de cierre",
   ABIERTA: "Abierta",
   EN_CIERRE: "Cerrando",
@@ -241,15 +255,30 @@ const ESTADO_ENTREGA_AGREGADO: Record<string, string> = {
 // SPEC 10 S10.5.3: las tres causas, cada una con su acción.
 const CAUSA_PARTICIPACION: Record<string, string> = {
   SIN_ACCESO: "no ha aceptado su invitación: reenvíala o avisa por Canvas",
-  SIN_ATRIBUIR: "hay commits sin atribuir: puede haber usado otro correo de Git",
+  SIN_ATRIBUIR:
+    "hay commits sin atribuir: puede haber usado otro correo de Git",
   SIN_COMMITS: "sin commits: contacta al estudiante",
 };
 
-export const textoEstadoEntregaAgregado = (v: string | null | undefined) => traducir(ESTADO_ENTREGA_AGREGADO, v);
-export const textoCausaParticipacion = (v: string | null | undefined) => traducir(CAUSA_PARTICIPACION, v);
-export const textoEstadoCaptura = (v: string | null | undefined) => traducir(ESTADO_CAPTURA, v);
-export const textoMotivoVersion = (v: string | null | undefined) => traducir(MOTIVO_VERSION, v);
-export const textoEstadoEtiqueta = (v: string | null | undefined) => traducir(ESTADO_ETIQUETA, v);
-export const textoAdvertenciaVersion = (v: string | null | undefined) => traducir(ADVERTENCIA_VERSION, v);
-export const textoOrigenCaptura = (v: string | null | undefined) => traducir(ORIGEN_CAPTURA, v);
-export const textoAdvertenciaEntrega = (v: string | null | undefined) => traducir(ADVERTENCIA_ENTREGA, v);
+export const textoEstadoEntregaAgregado = (v: string | null | undefined) =>
+  traducir(ESTADO_ENTREGA_AGREGADO, v);
+export const textoCausaParticipacion = (v: string | null | undefined) =>
+  traducir(CAUSA_PARTICIPACION, v);
+export const textoEstadoCaptura = (v: string | null | undefined) =>
+  traducir(ESTADO_CAPTURA, v);
+export const textoMotivoVersion = (v: string | null | undefined) =>
+  traducir(MOTIVO_VERSION, v);
+export const textoEstadoEtiqueta = (v: string | null | undefined) =>
+  traducir(ESTADO_ETIQUETA, v);
+export const textoAdvertenciaVersion = (v: string | null | undefined) =>
+  traducir(ADVERTENCIA_VERSION, v);
+export const textoOrigenCaptura = (v: string | null | undefined) =>
+  traducir(ORIGEN_CAPTURA, v);
+export const textoAdvertenciaEntrega = (v: string | null | undefined) =>
+  traducir(ADVERTENCIA_ENTREGA, v);
+
+/** Fecha de calendario ya calculada por el servidor en la zona del curso. */
+export function diaLegible(dia: string): string {
+  const partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dia);
+  return partes ? `${partes[3]}-${partes[2]}-${partes[1]}` : dia;
+}

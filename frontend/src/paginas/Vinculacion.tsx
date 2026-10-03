@@ -25,7 +25,7 @@ import {
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
-export function Vinculacion() {
+export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
   const { curso, puede, recargar } = useCurso();
   const administra = puede("curso.administrar");
   const [instancia, setInstancia] = useState("");
@@ -54,15 +54,58 @@ export function Vinculacion() {
   return (
     <>
       <Cabecera
-        titulo="Configuración del curso"
+        titulo={ajustes ? "Ajustes del curso" : "Configuración del curso"}
         descripcion="Conecta el curso académico de Canvas y la organización de GitHub donde se crearán los repositorios."
       />
       <nav className="tabs" aria-label="Configuración">
-        <Link aria-current="page" to={`/cursos/${curso.id}/vinculacion`}>
+        <Link
+          aria-current={!ajustes ? "page" : undefined}
+          to={`/cursos/${curso.id}/vinculacion`}
+        >
           Conexiones
         </Link>
         <Link to={`/cursos/${curso.id}/verificacion`}>Verificación</Link>
+        <Link
+          aria-current={ajustes ? "page" : undefined}
+          to={`/cursos/${curso.id}/ajustes`}
+        >
+          Ajustes
+        </Link>
       </nav>
+      {ajustes && (
+        <section className="panel">
+          <h2>Información del curso</h2>
+          <dl className="facts">
+            <div>
+              <dt>Nombre</dt>
+              <dd>{curso.nombre}</dd>
+            </div>
+            <div>
+              <dt>Código</dt>
+              <dd>{curso.codigo}</dd>
+            </div>
+            <div>
+              <dt>Período</dt>
+              <dd>{curso.periodo}</dd>
+            </div>
+            <div>
+              <dt>Zona horaria</dt>
+              <dd>{curso.zona_horaria}</dd>
+            </div>
+            <div>
+              <dt>Estado</dt>
+              <dd>
+                <Estado valor={curso.estado} />
+              </dd>
+            </div>
+          </dl>
+          <p className="help">
+            Los datos generales se fijaron al crear el curso. Aquí puedes
+            revisar sus conexiones, instalar GitHub y volver a ejecutar la
+            verificación.
+          </p>
+        </section>
+      )}
       {!administra && (
         <Aviso>
           Solo un profesor puede modificar las conexiones. Puedes consultar sus
@@ -151,15 +194,22 @@ export function Vinculacion() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   void op.ejecutar(async () => {
-                    const r = await listarCursosCanvasDisponibles(curso.id, {
-                      token,
-                      canvas_base_url: elegida,
-                    });
-                    if (!r.ok)
-                      throw new Error(
-                        r.error ?? "No pudimos consultar tus cursos de Canvas.",
-                      );
-                    setCursos(r.cursos);
+                    try {
+                      const r = await listarCursosCanvasDisponibles(curso.id, {
+                        token,
+                        canvas_base_url: elegida,
+                      });
+                      if (!r.ok)
+                        throw new Error(
+                          r.error ??
+                            "No pudimos consultar tus cursos de Canvas.",
+                        );
+                      setCursos(r.cursos);
+                    } catch (error) {
+                      setToken("");
+                      setCursos(null);
+                      throw error;
+                    }
                   });
                 }}
               >
@@ -258,15 +308,18 @@ export function Vinculacion() {
                               }
                               onClick={() =>
                                 void op.ejecutar(async () => {
-                                  await comprobar(
-                                    await vincularCanvas(curso.id, {
-                                      token,
-                                      canvas_base_url: elegida,
-                                      canvas_course_id: c.canvas_course_id,
-                                    }),
-                                  );
-                                  setToken("");
-                                  setCursos(null);
+                                  try {
+                                    await comprobar(
+                                      await vincularCanvas(curso.id, {
+                                        token,
+                                        canvas_base_url: elegida,
+                                        canvas_course_id: c.canvas_course_id,
+                                      }),
+                                    );
+                                  } finally {
+                                    setToken("");
+                                    setCursos(null);
+                                  }
                                   canvas.recargar();
                                   recargar();
                                 }, "Canvas está vinculado. Conecta GitHub y luego verifica las conexiones.")
@@ -414,4 +467,8 @@ export function Vinculacion() {
       </div>
     </>
   );
+}
+
+export function Ajustes() {
+  return <Vinculacion ajustes />;
 }

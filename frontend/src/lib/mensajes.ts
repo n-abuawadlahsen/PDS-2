@@ -13,7 +13,8 @@ export interface DescripcionMotivo {
 export const MOTIVOS_RECHAZO: Record<string, DescripcionMotivo> = {
   DOMINIO_NO_GMAIL: {
     titulo: "Dominio de correo no admitido",
-    texto: "Usa una cuenta Google con correo @miuandes.cl o una cuenta personal de gmail.com.",
+    texto:
+      "Usa una cuenta Google con correo @miuandes.cl o una cuenta personal de gmail.com.",
     accion: "Probar con otra cuenta",
   },
   HD_PRESENTE: {

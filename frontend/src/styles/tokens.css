@@ -1,5 +1,10 @@
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    "Lato",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   font-size: 16px;
   line-height: 1.5;
   --space-1: 0.25rem;
@@ -11,5 +16,5 @@
   --space-12: 3rem;
   --radius: 6px;
   --global-width: 88px;
-  --course-width: 208px;
+  --course-width: 220px;
 }

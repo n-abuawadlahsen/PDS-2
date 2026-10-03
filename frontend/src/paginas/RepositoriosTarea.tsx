@@ -330,18 +330,25 @@ export function BloqueRepositorios({
                       <td>
                         {f.sujeto_tipo === "GRUPO" && (
                           <ul className="compact-list">
-                            {f.integrantes.length === 0 && <li>Sin integrantes aceptados</li>}
+                            {f.integrantes.length === 0 && (
+                              <li>Sin integrantes aceptados</li>
+                            )}
                             {f.integrantes.map((i) => (
                               <li key={i.estudiante_id}>
                                 {i.nombre}
                                 {i.cuenta_github && (
-                                  <span className="help"> @{i.cuenta_github}</span>
+                                  <span className="help">
+                                    {" "}
+                                    @{i.cuenta_github}
+                                  </span>
                                 )}
                                 {": "}
                                 {i.acceso_estado
                                   ? textoEstadoAcceso(i.acceso_estado)
                                   : "sin acceso todavía"}
-                                {i.acceso_error && <p className="help">{i.acceso_error}</p>}
+                                {i.acceso_error && (
+                                  <p className="help">{i.acceso_error}</p>
+                                )}
                               </li>
                             ))}
                           </ul>
@@ -350,13 +357,15 @@ export function BloqueRepositorios({
                           (f.acceso_estado
                             ? textoEstadoAcceso(f.acceso_estado)
                             : "Sin acceso informado")}
-                        {f.sujeto_tipo !== "GRUPO" && f.cuenta_github && f.acceso_estado && (
-                          <p className="help">
-                            {f.acceso_verificado_en
-                              ? `Comprobado en GitHub: ${fechaLegible(f.acceso_verificado_en, curso.zona_horaria)}`
-                              : "Sin fecha de comprobación registrada"}
-                          </p>
-                        )}
+                        {f.sujeto_tipo !== "GRUPO" &&
+                          f.cuenta_github &&
+                          f.acceso_estado && (
+                            <p className="help">
+                              {f.acceso_verificado_en
+                                ? `Comprobado en GitHub: ${fechaLegible(f.acceso_verificado_en, curso.zona_horaria)}`
+                                : "Sin fecha de comprobación registrada"}
+                            </p>
+                          )}
                         {f.sujeto_tipo !== "GRUPO" && f.acceso_error && (
                           <p className="help">{f.acceso_error}</p>
                         )}
@@ -433,13 +442,23 @@ export function LineaFechas({
 /** S9.5 (F3): «Cierre: ... · Sección 2: ... · N excepciones», con las
  * excepciones desplegables (sujeto, fecha, origen y override copiable), la
  * insignia «fecha ambigua» con sus candidatas (CA-9.5-03) y el historial. */
-function FechasDeUnaEntrega({ cursoId, fechas: f }: { cursoId: string; fechas: FechasEntrega }) {
+function FechasDeUnaEntrega({
+  cursoId,
+  fechas: f,
+}: {
+  cursoId: string;
+  fechas: FechasEntrega;
+}) {
   const { curso } = useCurso();
-  const [historial, setHistorial] = useState<HistorialFechasSujeto[] | null>(null);
+  const [historial, setHistorial] = useState<HistorialFechasSujeto[] | null>(
+    null,
+  );
+  const op = useOperacion();
   const secciones = f.excepciones.filter((e) => e.origen === "SECCION");
   const otras = f.excepciones.filter((e) => e.origen !== "SECCION");
   return (
     <div className="panel">
+      <Mensajes {...op} />
       <strong>
         {textoTipoEntrega(f.tipo)} · Entrega {f.orden}
       </strong>
@@ -450,16 +469,23 @@ function FechasDeUnaEntrega({ cursoId, fechas: f }: { cursoId: string; fechas: F
         </p>
       ))}
       {f.sujetos_sin_fecha > 0 && (
-        <p className="help">{f.sujetos_sin_fecha} estudiantes sin fecha de cierre informada.</p>
+        <p className="help">
+          {f.sujetos_sin_fecha} estudiantes sin fecha de cierre informada.
+        </p>
       )}
       {otras.length > 0 && (
         <details>
-          <summary>{otras.length === 1 ? "1 excepción" : `${otras.length} excepciones`}</summary>
+          <summary>
+            {otras.length === 1 ? "1 excepción" : `${otras.length} excepciones`}
+          </summary>
           <ul>
             {otras.map((e) => (
               <li key={e.canvas_override_id ?? e.etiqueta}>
-                {(e.sujetos ?? []).join(", ") || "nadie del curso"} — {e.fecha} · {e.etiqueta}
-                {e.canvas_override_id !== null && <Override id={e.canvas_override_id} />}
+                {(e.sujetos ?? []).join(", ") || "nadie del curso"} — {e.fecha}{" "}
+                · {e.etiqueta}
+                {e.canvas_override_id !== null && (
+                  <Override id={e.canvas_override_id} />
+                )}
               </li>
             ))}
           </ul>
@@ -468,26 +494,41 @@ function FechasDeUnaEntrega({ cursoId, fechas: f }: { cursoId: string; fechas: F
       {(f.ambiguas ?? []).map((a) => (
         <details key={a.sujeto_id}>
           <summary>
-            <span className="badge warning">fecha ambigua</span> {a.sujeto}: {a.fecha}
+            <span className="badge warning">fecha ambigua</span> {a.sujeto}:{" "}
+            {a.fecha}
           </summary>
           <ul>
             {a.candidatas.map((c, i) => (
               <li key={i}>
                 {c.etiqueta}: {c.fecha}
-                {c.canvas_override_id !== null && <Override id={c.canvas_override_id} />}
+                {c.canvas_override_id !== null && (
+                  <Override id={c.canvas_override_id} />
+                )}
               </li>
             ))}
           </ul>
-          <p className="help">Se usa la más tardía: capturar antes de tiempo destruye trabajo legítimo.</p>
+          <p className="help">
+            Se usa la más tardía: capturar antes de tiempo destruye trabajo
+            legítimo.
+          </p>
         </details>
       ))}
       <div className="actions">
         <button
-          onClick={async () =>
-            setHistorial(historial ? null : await obtenerHistorialFechas(cursoId, f.entrega_id))
+          disabled={op.ocupado}
+          onClick={() =>
+            void op.ejecutar(async () =>
+              setHistorial(
+                historial
+                  ? null
+                  : await obtenerHistorialFechas(cursoId, f.entrega_id),
+              ),
+            )
           }
         >
-          {historial ? "Ocultar historial de fechas" : "Ver historial de fechas"}
+          {historial
+            ? "Ocultar historial de fechas"
+            : "Ver historial de fechas"}
         </button>
       </div>
       {historial && (
@@ -504,7 +545,10 @@ function FechasDeUnaEntrega({ cursoId, fechas: f }: { cursoId: string; fechas: F
             <tbody>
               {historial.flatMap((h) =>
                 h.fechas.map((x, i) => (
-                  <tr key={`${h.sujeto_id}-${i}`} style={{ opacity: x.estado === "VIGENTE" ? 1 : 0.6 }}>
+                  <tr
+                    key={`${h.sujeto_id}-${i}`}
+                    style={{ opacity: x.estado === "VIGENTE" ? 1 : 0.6 }}
+                  >
                     <td>{i === 0 ? h.sujeto : ""}</td>
                     <td>
                       {x.fecha}
@@ -512,8 +556,12 @@ function FechasDeUnaEntrega({ cursoId, fechas: f }: { cursoId: string; fechas: F
                     </td>
                     <td>
                       {x.etiqueta}
-                      {x.override_titulo && <span className="help"> «{x.override_titulo}»</span>}
-                      {x.override_retirado && <span className="help"> (ya no existe en Canvas)</span>}
+                      {x.override_titulo && (
+                        <span className="help"> «{x.override_titulo}»</span>
+                      )}
+                      {x.override_retirado && (
+                        <span className="help"> (ya no existe en Canvas)</span>
+                      )}
                     </td>
                     <td>
                       {x.estado === "VIGENTE"

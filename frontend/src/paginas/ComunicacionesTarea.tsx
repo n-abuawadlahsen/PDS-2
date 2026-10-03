@@ -1,69 +1,139 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { cambiarReglaTarea, obtenerReglasTarea, type ReglaComunicacion } from "../lib/api";
+import {
+  cambiarReglaTarea,
+  obtenerReglasTarea,
+  type ReglaComunicacion,
+} from "../lib/api";
+import { useCurso } from "../components/Layout";
+import {
+  Aviso,
+  Cargando,
+  ErrorCarga,
+  Mensajes,
+  Vacio,
+  useConfirmar,
+} from "../components/ui";
+import { useConsulta, useOperacion } from "../hooks/useConsulta";
 
-const ESTILO_MOTIVO = { fontSize: "0.85rem", color: "var(--color-text-secondary)" } as const;
-
-/** Pestaña «Comunicaciones» de la tarea (S11.6.3): los seis avisos de la
- * tarea, cada uno con su vista previa y a cuántas personas llegaría hoy. */
-export function ComunicacionesTarea({ cursoId, tareaId }: { cursoId: string; tareaId: string }) {
-  const [reglas, setReglas] = useState<ReglaComunicacion[]>([]);
+export function ComunicacionesTarea({
+  cursoId,
+  tareaId,
+}: {
+  cursoId: string;
+  tareaId: string;
+}) {
+  const consulta = useConsulta(`reglas:${cursoId}:${tareaId}`, () =>
+    obtenerReglasTarea(cursoId, tareaId),
+  );
+  const { puede, curso } = useCurso();
+  const op = useOperacion();
+  const confirmar = useConfirmar();
   const [vista, setVista] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function cargar() {
-    setReglas(await obtenerReglasTarea(cursoId, tareaId));
-  }
-  useEffect(() => {
-    cargar();
-  }, [cursoId, tareaId]);
-
   async function cambiar(r: ReglaComunicacion) {
-    if (r.activa && r.advertencia_al_apagar && !window.confirm(`${r.advertencia_al_apagar} ¿Apagar igual?`)) return;
-    setError(null);
-    const resultado = await cambiarReglaTarea(cursoId, tareaId, r.evento, !r.activa);
-    if (!resultado.ok) setError(resultado.error);
-    await cargar();
+    if (
+      r.activa &&
+      r.advertencia_al_apagar &&
+      !(await confirmar({
+        titulo: `Desactivar «${r.titulo}»`,
+        descripcion: r.advertencia_al_apagar,
+        accion: "Desactivar aviso",
+      }))
+    )
+      return;
+    await op.ejecutar(async () => {
+      const resultado = await cambiarReglaTarea(
+        cursoId,
+        tareaId,
+        r.evento,
+        !r.activa,
+      );
+      if (!resultado.ok)
+        throw new Error(resultado.error || "No se pudo actualizar la regla.");
+      consulta.recargar();
+    }, "Regla de comunicación actualizada.");
   }
-
-  if (reglas.length === 0) return null;
-  const apagadoRepo = reglas.some((r) => r.evento === "repositorio_disponible" && !r.activa);
   return (
-    <section>
-      <h2>Comunicaciones</h2>
-      {apagadoRepo && (
-        <p style={{ background: "var(--color-warning-background)", padding: "0.5rem" }}>Avisos de repositorio desactivados.</p>
-      )}
-      {error && <p style={{ background: "var(--color-error-background)", padding: "0.5rem" }}>{error}</p>}
-      <ul style={{ listStyle: "none", paddingLeft: 0 }}>
-        {reglas.map((r) => (
-          <li key={r.evento} style={{ marginBottom: "0.5rem" }}>
-            <label>
-              <input type="checkbox" checked={r.activa} onChange={() => cambiar(r)} /> {r.titulo}
-            </label>
-            {!r.por_defecto && <span style={ESTILO_MOTIVO}> (apagado por defecto)</span>}
-            {r.destinatarios_hoy !== null && (
-              <span style={ESTILO_MOTIVO}> · llegaría hoy a {r.destinatarios_hoy}</span>
-            )}{" "}
-            <button style={{ fontSize: "0.75rem" }} onClick={() => setVista(vista === r.evento ? null : r.evento)}>
-              {vista === r.evento ? "Ocultar texto" : "Ver texto"}
-            </button>
-            {vista === r.evento && (
-              <div style={{ border: "1px solid var(--color-border)", padding: "0.5rem", marginTop: "0.25rem" }}>
-                {r.vista_previa_con_ejemplo && <p style={ESTILO_MOTIVO}>Datos de ejemplo.</p>}
-                <p>
-                  <strong>{r.vista_previa_asunto}</strong>
-                </p>
-                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{r.vista_previa_cuerpo}</pre>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-      <p style={ESTILO_MOTIVO}>
-        Como máximo tres avisos automáticos por estudiante al día, entre las 08:00 y las 21:00.{" "}
-        <Link to={`/cursos/${cursoId}/comunicaciones?tarea_id=${tareaId}`}>Ver lo enviado en esta tarea</Link>
+    <section className="panel">
+      <h2>Comunicaciones automáticas</h2>
+      <p className="help">
+        Como máximo tres avisos automáticos por estudiante al día, entre las
+        08:00 y las 21:00 ({curso.zona_horaria}).
       </p>
+      {!puede("comunicacion.enviar") && (
+        <Aviso>
+          Tu permiso permite consultar estos avisos. El equipo con permiso para
+          enviar comunicaciones puede modificarlos.
+        </Aviso>
+      )}
+      <Mensajes error={op.error} mensaje={op.mensaje} />
+      {consulta.error && (
+        <ErrorCarga error={consulta.error} reintentar={consulta.recargar} />
+      )}
+      {!consulta.datos ? (
+        !consulta.error && <Cargando />
+      ) : consulta.datos.length === 0 ? (
+        <Vacio>
+          No hay reglas de comunicación disponibles para esta tarea.
+        </Vacio>
+      ) : (
+        <>
+          {consulta.datos.some(
+            (r) => r.evento === "repositorio_disponible" && !r.activa,
+          ) && (
+            <Aviso tipo="warning">
+              Los avisos de repositorio disponible están desactivados.
+            </Aviso>
+          )}
+          <ul className="resource-list">
+            {consulta.datos.map((r) => (
+              <li key={r.evento}>
+                <div className="actions">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={r.activa}
+                      disabled={!puede("comunicacion.enviar") || op.ocupado}
+                      onChange={() => cambiar(r)}
+                    />{" "}
+                    {r.titulo}
+                  </label>
+                  <button
+                    onClick={() =>
+                      setVista(vista === r.evento ? null : r.evento)
+                    }
+                    aria-expanded={vista === r.evento}
+                  >
+                    {vista === r.evento ? "Ocultar texto" : "Ver texto"}
+                  </button>
+                </div>
+                <p className="help">
+                  {r.destinatarios_hoy !== null
+                    ? `${r.destinatarios_hoy} destinatarios hoy.`
+                    : "El alcance se determina cuando ocurre el evento."}
+                  {!r.por_defecto && " Desactivado por defecto."}
+                </p>
+                {vista === r.evento && (
+                  <div className="panel">
+                    {r.vista_previa_con_ejemplo && (
+                      <Aviso>Esta previsualización usa datos de ejemplo.</Aviso>
+                    )}
+                    <strong>{r.vista_previa_asunto}</strong>
+                    <pre
+                      style={{ whiteSpace: "pre-wrap", fontFamily: "inherit" }}
+                    >
+                      {r.vista_previa_cuerpo}
+                    </pre>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <Link to={`/cursos/${cursoId}/comunicaciones?tarea_id=${tareaId}`}>
+        Ver el historial de esta tarea
+      </Link>
     </section>
   );
 }

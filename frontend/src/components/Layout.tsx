@@ -1,4 +1,5 @@
 import {
+  Suspense,
   createContext,
   useContext,
   useEffect,
@@ -12,7 +13,9 @@ import {
   Outlet,
   useLocation,
   useParams,
+  useNavigate,
 } from "react-router-dom";
+import { BookOpen, UserRound, Menu, ChevronDown } from "lucide-react";
 import {
   listarCursos,
   obtenerCapacidades,
@@ -31,6 +34,8 @@ type Sesion = {
   cursos: Curso[];
   capacidades: Capacidades | null;
   recargar: () => void;
+  agregarCurso: (curso: Curso) => void;
+  errorActualizacion: string | null;
 };
 const SesionContext = createContext<Sesion | null>(null);
 export function useSesion() {
@@ -52,31 +57,9 @@ export function useCurso() {
 }
 
 function Icono({ tipo }: { tipo: "cursos" | "cuenta" | "menu" }) {
-  return (
-    <svg
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      aria-hidden="true"
-    >
-      {tipo === "cursos" ? (
-        <>
-          <rect x="4" y="3" width="16" height="18" rx="2" />
-          <path d="M8 3v18M12 8h5M12 12h5" />
-        </>
-      ) : tipo === "cuenta" ? (
-        <>
-          <circle cx="12" cy="8" r="4" />
-          <path d="M4 21v-2a8 8 0 0 1 16 0v2" />
-        </>
-      ) : (
-        <path d="M4 6h16M4 12h16M4 18h16" />
-      )}
-    </svg>
-  );
+  const Icon =
+    tipo === "cursos" ? BookOpen : tipo === "cuenta" ? UserRound : Menu;
+  return <Icon size={24} strokeWidth={1.6} aria-hidden="true" />;
 }
 export function Publico({ children }: { children?: ReactNode }) {
   return (
@@ -96,6 +79,7 @@ export function Publico({ children }: { children?: ReactNode }) {
   );
 }
 export function LayoutAutenticado() {
+  const ubicacion = useLocation();
   const [vencida, setVencida] = useState(false);
   const consulta = useConsulta("sesion", async (signal) => {
     const perfil = await obtenerPerfil(signal);
@@ -121,9 +105,12 @@ export function LayoutAutenticado() {
           <h1>Vuelve a entrar</h1>
           <p>
             Necesitas una sesión activa para consultar tus cursos. Puedes entrar
-            nuevamente con tu cuenta personal de Gmail.
+            nuevamente con tu cuenta de Google autorizada.
           </p>
-          <Link className="button primary" to="/acceso">
+          <Link
+            className="button primary"
+            to={`/acceso?destino=${encodeURIComponent(ubicacion.pathname + ubicacion.search)}`}
+          >
             Entrar con Google
           </Link>
         </section>
@@ -141,7 +128,19 @@ export function LayoutAutenticado() {
     );
   return (
     <SesionContext.Provider
-      value={{ ...consulta.datos, recargar: consulta.recargar }}
+      value={{
+        ...consulta.datos,
+        recargar: consulta.recargar,
+        errorActualizacion: consulta.error,
+        agregarCurso: (nuevo) =>
+          consulta.actualizar({
+            ...consulta.datos!,
+            cursos: [
+              ...consulta.datos!.cursos.filter((item) => item.id !== nuevo.id),
+              nuevo,
+            ],
+          }),
+      }}
     >
       <Outlet />
     </SesionContext.Provider>
@@ -157,8 +156,17 @@ const SECCIONES = [
   ["correccion", "Corrección"],
   ["comunicaciones", "Comunicaciones"],
   ["informes", "Informe diario"],
+  ["mis-notificaciones", "Mis notificaciones"],
   ["equipo", "Equipo docente"],
+  ["ajustes", "Ajustes"],
 ] as const;
+const CAPACIDAD_SECCION: Record<string, string> = {
+  seguimiento: "tablero_actividad",
+  correccion: "correccion",
+  informes: "informe_diario",
+  "mis-notificaciones": "mis_notificaciones",
+  comunicaciones: "comunicaciones_automaticas",
+};
 function EnlacesCurso({
   curso,
   cerrar,
@@ -167,9 +175,17 @@ function EnlacesCurso({
   cerrar?: () => void;
 }) {
   const { pathname } = useLocation();
+  const { capacidades } = useSesion();
+  const contexto = useContext(CursoContext);
   return (
     <nav className="course-links" aria-label="Secciones del curso">
-      {SECCIONES.map(([ruta, nombre]) => (
+      {SECCIONES.filter(
+        ([ruta]) =>
+          (!CAPACIDAD_SECCION[ruta] ||
+            capacidades?.banderas.includes(CAPACIDAD_SECCION[ruta])) &&
+          (!["vinculacion", "ajustes"].includes(ruta) ||
+            contexto?.puede("curso.administrar")),
+      ).map(([ruta, nombre]) => (
         <NavLink
           key={ruta}
           onClick={cerrar}
@@ -194,7 +210,8 @@ export function Estructura({
   curso?: Curso;
   children?: ReactNode;
 }) {
-  const { perfil } = useSesion();
+  const { perfil, cursos, errorActualizacion, recargar } = useSesion();
+  const navegar = useNavigate();
   const { pathname } = useLocation();
   const menu = useRef<HTMLDialogElement>(null);
   const nombreSeccion = pathname.endsWith("/verificacion")
@@ -209,7 +226,11 @@ export function Estructura({
   function cerrarMenu() {
     menu.current?.close();
   }
-  useEffect(cerrarMenu, [pathname]);
+  useEffect(() => {
+    cerrarMenu();
+    window.scrollTo(0, 0);
+    document.getElementById("contenido")?.focus({ preventScroll: true });
+  }, [pathname]);
   return (
     <div className="app-shell">
       <a className="skip-link" href="#contenido">
@@ -248,7 +269,9 @@ export function Estructura({
                 </Link>
               </li>
             )}
-            <li aria-current="page">{nombreSeccion}</li>
+            {(curso || pathname !== "/cursos") && (
+              <li aria-current="page">{nombreSeccion}</li>
+            )}
           </ol>
         </nav>
         <Link className="identity" to="/perfil">
@@ -256,6 +279,7 @@ export function Estructura({
             {perfil.nombre.trim().slice(0, 1).toUpperCase()}
           </span>
           <span className="identity-name">{perfil.nombre}</span>
+          <ChevronDown size={14} aria-hidden="true" />
           <span className="sr-only"> · Mi perfil</span>
         </Link>
       </header>
@@ -265,16 +289,42 @@ export function Estructura({
             <div className="course-nav-title">
               <strong>{curso.nombre}</strong>
               <span className="muted">{curso.periodo}</span>
+              <label className="course-switcher">
+                <span className="sr-only">Cambiar de curso</span>
+                <select
+                  value={curso.id}
+                  onChange={(event) => navegar(`/cursos/${event.target.value}`)}
+                >
+                  {cursos.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.codigo} · {item.periodo}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <EnlacesCurso curso={curso} />
             <p className="course-nav-note">
-              Canvas es la fuente de estudiantes y fechas. GitHub aloja los
-              repositorios.
+              Fechas del curso
+              <br />
+              {curso.zona_horaria}
             </p>
           </aside>
         )}
         <main className="main-content" id="contenido" tabIndex={-1}>
-          {children ?? <Outlet />}
+          {errorActualizacion && (
+            <Aviso tipo="warning">
+              <strong>No pudimos actualizar tus cursos.</strong>
+              <p>
+                Se conserva la última información disponible.{" "}
+                {errorActualizacion}
+              </p>
+              <button onClick={recargar}>Actualizar mis cursos</button>
+            </Aviso>
+          )}
+          <Suspense fallback={<Cargando texto="Cargando pantalla…" />}>
+            {children ?? <Outlet />}
+          </Suspense>
         </main>
       </div>
       <dialog className="mobile-dialog" ref={menu} aria-label="Navegación">
@@ -296,6 +346,22 @@ export function Estructura({
           <>
             <hr />
             <h3>{curso.nombre}</h3>
+            <label>
+              Cambiar de curso
+              <select
+                value={curso.id}
+                onChange={(event) => {
+                  cerrarMenu();
+                  navegar(`/cursos/${event.target.value}`);
+                }}
+              >
+                {cursos.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.codigo} · {item.periodo}
+                  </option>
+                ))}
+              </select>
+            </label>
             <EnlacesCurso curso={curso} cerrar={cerrarMenu} />
           </>
         )}
@@ -392,4 +458,49 @@ export function SinPermiso({
 }
 export function EstadoCurso({ curso }: { curso: Curso }) {
   return <Estado valor={curso.estado} />;
+}
+
+/** La API es la fuente de alcance; una URL directa conserva las mismas guardas. */
+export function AccesoArea({
+  capacidad,
+  permiso,
+  children,
+}: {
+  capacidad?: string;
+  permiso?: string;
+  children: ReactNode;
+}) {
+  const { capacidades, recargar } = useSesion();
+  const { puede, curso } = useCurso();
+  if (permiso && !puede(permiso))
+    return (
+      <section className="panel">
+        <h1>Permiso insuficiente</h1>
+        <Aviso tipo="warning">
+          Esta configuración está reservada a los profesores del curso. Puedes
+          seguir consultando las tareas y personas disponibles.
+        </Aviso>
+        <Link to={`/cursos/${curso.id}`}>Volver al curso</Link>
+      </section>
+    );
+  if (capacidad && !capacidades)
+    return (
+      <section className="panel">
+        <h1>No pudimos comprobar la disponibilidad</h1>
+        <Aviso tipo="warning">
+          No se pudo consultar qué funciones están disponibles. Tus datos del
+          curso siguen conservados.
+        </Aviso>
+        <button onClick={recargar}>Intentar nuevamente</button>
+      </section>
+    );
+  if (capacidad && !capacidades?.banderas.includes(capacidad))
+    return (
+      <section className="panel">
+        <h1>Área no disponible</h1>
+        <p>Esta función todavía no está habilitada en esta instalación.</p>
+        <Link to={`/cursos/${curso.id}`}>Volver al curso</Link>
+      </section>
+    );
+  return <>{children}</>;
 }

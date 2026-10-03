@@ -93,7 +93,7 @@ export function Tareas() {
     <>
       <Cabecera
         titulo="Tareas"
-        descripcion="Configura tareas individuales desde Canvas y consulta la creación automática de sus repositorios."
+        descripcion="Organiza las entregas de Canvas y sigue el trabajo de estudiantes y grupos."
         acciones={
           puede("tarea.administrar") &&
           !crear && (
@@ -112,10 +112,10 @@ export function Tareas() {
       )}
       {crear && puede("tarea.administrar") && (
         <section className="panel">
-          <h2>Crear tarea individual</h2>
+          <h2>Crear tarea desde Canvas</h2>
           <p>
-            La tarea de Canvas seleccionada será la única entrega de esta tarea.
-            Se creará primero como borrador.
+            Selecciona la primera entrega. La modalidad se obtiene de Canvas y
+            podrás vincular más entregas antes de activar el borrador.
           </p>
           {canvas.error && (
             <ErrorCarga error={canvas.error} reintentar={canvas.recargar} />
@@ -176,6 +176,7 @@ export function Tareas() {
                   <label>
                     Tarea de Canvas
                     <select
+                      aria-label="Tarea de Canvas"
                       value={assignment}
                       required
                       onChange={(e) => {
@@ -220,8 +221,12 @@ export function Tareas() {
                   )}
                   {elegida && (
                     <p className="help">
-                      Cierre: {fechaLegible(elegida.due_at, curso.zona_horaria)}{" "}
-                      ·{" "}
+                      Modalidad:{" "}
+                      {elegida.es_grupal
+                        ? "Grupal · conjunto de grupos definido en Canvas"
+                        : "Individual"}
+                      . Cierre:{" "}
+                      {fechaLegible(elegida.due_at, curso.zona_horaria)} ·{" "}
                       {elegida.publicada
                         ? "Publicada en Canvas"
                         : "Sin publicar en Canvas"}

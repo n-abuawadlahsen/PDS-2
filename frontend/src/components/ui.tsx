@@ -2,11 +2,20 @@ import {
   createContext,
   useContext,
   useEffect,
-  useId,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "./primitives/dialog";
+import { Button } from "./primitives/button";
+import { Skeleton } from "./primitives/skeleton";
 import { mensajeError } from "../lib/errores";
 import {
   DEFAULT_THEME,
@@ -59,8 +68,15 @@ export function Cargando({
 }) {
   return (
     <div className="loading" role="status">
-      <span className="spinner" aria-hidden="true" />
-      {texto}
+      <span className="loading-label">
+        <span className="spinner" aria-hidden="true" />
+        {texto}
+      </span>
+      <div className="skeleton-lines" aria-hidden="true">
+        <Skeleton className="skeleton-line" />
+        <Skeleton className="skeleton-line" />
+        <Skeleton className="skeleton-line" />
+      </div>
     </div>
   );
 }
@@ -108,19 +124,36 @@ export function Tabla({
   etiqueta: string;
   fija?: boolean;
 }) {
+  const contenedor = useRef<HTMLDivElement>(null);
+  const [desborda, setDesborda] = useState(false);
+  useEffect(() => {
+    const elemento = contenedor.current;
+    if (!elemento) return;
+    const medir = () =>
+      setDesborda(elemento.scrollWidth > elemento.clientWidth + 1);
+    const observador = new ResizeObserver(medir);
+    observador.observe(elemento);
+    if (elemento.firstElementChild)
+      observador.observe(elemento.firstElementChild);
+    medir();
+    return () => observador.disconnect();
+  }, [children]);
   return (
     <>
       <div
         className={`table-wrap ${fija ? "sticky" : ""}`}
+        ref={contenedor}
         role="region"
         aria-label={etiqueta}
-        tabIndex={0}
+        tabIndex={desborda ? 0 : undefined}
       >
         {children}
       </div>
-      <p className="table-hint">
-        Si hay más columnas, desplaza la tabla horizontalmente.
-      </p>
+      {desborda && (
+        <p className="table-hint">
+          Si hay más columnas, desplaza la tabla horizontalmente.
+        </p>
+      )}
     </>
   );
 }
@@ -301,15 +334,8 @@ export function Confirmaciones({ children }: { children: ReactNode }) {
   const [datos, setDatos] = useState<Confirmacion | null>(null);
   const [texto, setTexto] = useState("");
   const resolver = useRef<(valor: boolean) => void>();
-  const dialogo = useRef<HTMLDialogElement>(null);
-  const id = useId();
-  useEffect(() => {
-    if (datos) {
-      dialogo.current?.showModal();
-    }
-  }, [datos]);
+  const focoAnterior = useRef<HTMLElement | null>(null);
   function cerrar(valor: boolean) {
-    dialogo.current?.close();
     resolver.current?.(valor);
     resolver.current = undefined;
     setDatos(null);
@@ -319,6 +345,10 @@ export function Confirmaciones({ children }: { children: ReactNode }) {
       value={(config) =>
         new Promise((resolve) => {
           resolver.current?.(false);
+          focoAnterior.current =
+            document.activeElement instanceof HTMLElement
+              ? document.activeElement
+              : null;
           resolver.current = resolve;
           setTexto("");
           setDatos(config);
@@ -326,40 +356,57 @@ export function Confirmaciones({ children }: { children: ReactNode }) {
       }
     >
       {children}
-      <dialog
-        ref={dialogo}
-        aria-labelledby={`${id}-titulo`}
-        aria-describedby={`${id}-descripcion`}
-        onCancel={(e) => {
-          e.preventDefault();
-          cerrar(false);
+      <Dialog
+        open={Boolean(datos)}
+        onOpenChange={(abierto) => {
+          if (!abierto) cerrar(false);
         }}
       >
-        <h2 id={`${id}-titulo`}>{datos?.titulo}</h2>
-        <p id={`${id}-descripcion`}>{datos?.descripcion}</p>
-        {datos?.escribir && (
-          <label>
-            Escribe «{datos.escribir}» para confirmar
-            <input
-              autoComplete="off"
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-            />
-          </label>
-        )}
-        <div className="actions end">
-          <button autoFocus onClick={() => cerrar(false)}>
-            Cancelar
-          </button>
-          <button
-            className={datos?.peligro ? "danger" : "primary"}
-            disabled={Boolean(datos?.escribir && texto !== datos.escribir)}
-            onClick={() => cerrar(true)}
-          >
-            {datos?.accion ?? "Confirmar"}
-          </button>
-        </div>
-      </dialog>
+        <DialogContent
+          showCloseButton={false}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            focoAnterior.current?.focus();
+          }}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            document
+              .querySelector<HTMLButtonElement>("[data-confirm-cancel]")
+              ?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{datos?.titulo}</DialogTitle>
+            <DialogDescription>{datos?.descripcion}</DialogDescription>
+          </DialogHeader>
+          {datos?.escribir && (
+            <label>
+              Escribe «{datos.escribir}» para confirmar
+              <input
+                autoComplete="off"
+                value={texto}
+                onChange={(event) => setTexto(event.target.value)}
+              />
+            </label>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              data-confirm-cancel
+              onClick={() => cerrar(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant={datos?.peligro ? "destructive" : "default"}
+              disabled={Boolean(datos?.escribir && texto !== datos.escribir)}
+              onClick={() => cerrar(true)}
+            >
+              {datos?.accion ?? "Confirmar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ContextoConfirmar.Provider>
   );
 }

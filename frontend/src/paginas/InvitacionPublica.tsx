@@ -66,6 +66,7 @@ export function InvitacionPublica() {
           ? "Administración completa del curso"
           : [
               "Consultar el curso",
+              "Corregir lo asignado",
               ...PERMISOS_CONCEDIBLES.filter((p) =>
                 i.permisos.includes(p.clave),
               ).map((p) => p.etiqueta),
@@ -115,6 +116,14 @@ export function InvitacionPublica() {
               >
                 Aceptar invitación
               </button>
+              <FormularioAcceso
+                action="/auth/google/inicio"
+                texto="Aceptar con otra cuenta de Google"
+                disabled={!consiento}
+              >
+                <input type="hidden" name="invitacion_token" value={token} />
+                <input type="hidden" name="destino" value="/cursos" />
+              </FormularioAcceso>
             </>
           ) : (
             <FormularioAcceso
@@ -127,8 +136,8 @@ export function InvitacionPublica() {
             </FormularioAcceso>
           )}
           <p className="help">
-            Entra con la cuenta personal Gmail a la que se envió esta
-            invitación.
+            Entra con la cuenta Google a la que se envió esta invitación: Gmail
+            personal o @miuandes.cl.
           </p>
         </>
       ) : (

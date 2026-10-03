@@ -22,6 +22,17 @@ export function GithubRetorno() {
       );
       return;
     }
+    if (
+      installationId &&
+      (!/^\d+$/.test(installationId) ||
+        !Number.isSafeInteger(Number(installationId)) ||
+        Number(installationId) <= 0)
+    ) {
+      setError(
+        "La instalación recibida no es válida. Vuelve al curso e inicia nuevamente la conexión con GitHub.",
+      );
+      return;
+    }
     // Conserva la misma promesa durante el doble efecto de StrictMode. Nunca canjea dos veces.
     canje.current ??= confirmarCallbackGithub({
       state,

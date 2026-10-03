@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { mensajeError } from "../lib/errores";
+import { ErrorApi, mensajeError } from "../lib/errores";
 
 /** Una consulta por ciclo; descarta respuestas obsoletas y conserva datos al refrescar. */
 export function useConsulta<T>(
@@ -21,7 +21,10 @@ export function useConsulta<T>(
     let vigente = true;
     const controlador = new AbortController();
     let temporizador: ReturnType<typeof setTimeout> | undefined;
+    let enCurso = false;
     async function cargar() {
+      if (enCurso || !vigente) return;
+      enCurso = true;
       setEstado((e) => ({
         clave,
         datos: e.clave === clave ? e.datos : null,
@@ -39,15 +42,24 @@ export function useConsulta<T>(
             cargando: false,
           }));
       } finally {
-        if (vigente && intervalo) temporizador = setTimeout(cargar, intervalo);
+        enCurso = false;
+        if (vigente && intervalo && !document.hidden)
+          temporizador = setTimeout(cargar, intervalo);
       }
     }
+    function visibilidad() {
+      if (!intervalo) return;
+      clearTimeout(temporizador);
+      if (!document.hidden) void cargar();
+    }
+    document.addEventListener("visibilitychange", visibilidad);
     // Deferir evita duplicar lecturas del primer montaje de StrictMode.
     temporizador = setTimeout(cargar, 0);
     return () => {
       vigente = false;
       controlador.abort();
       clearTimeout(temporizador);
+      document.removeEventListener("visibilitychange", visibilidad);
     };
   }, [clave, revision, intervalo]);
   const actualizar = useCallback(
@@ -64,6 +76,7 @@ export function useConsulta<T>(
 }
 
 export function useOperacion() {
+  const [campos, setCampos] = useState<Record<string, string>>({});
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<string | null>(null);
@@ -83,17 +96,21 @@ export function useOperacion() {
     bloqueo.current = true;
     setOcupado(true);
     setError(null);
+    setCampos({});
     setMensaje(null);
     try {
       const resultado = await accion();
       if (montado.current && exito) setMensaje(exito);
       return resultado;
     } catch (e) {
-      if (montado.current) setError(mensajeError(e));
+      if (montado.current) {
+        setError(mensajeError(e));
+        setCampos(e instanceof ErrorApi ? e.campos : {});
+      }
     } finally {
       bloqueo.current = false;
       if (montado.current) setOcupado(false);
     }
   }
-  return { ocupado, error, mensaje, ejecutar, setError, setMensaje };
+  return { ocupado, error, mensaje, campos, ejecutar, setError, setMensaje };
 }

@@ -18,6 +18,7 @@ function Recordatorio({ id }: { id: string }) {
   const { curso } = useCurso();
   const op = useOperacion();
   const [solicitado, setSolicitado] = useState(false);
+  const [espera, setEspera] = useState<string | null>(null);
   return (
     <div>
       <button
@@ -27,13 +28,24 @@ function Recordatorio({ id }: { id: string }) {
             const r = await enviarRecordatorio(curso.id, id);
             if (r.status === 429) {
               setSolicitado(true);
+              const reintento = r.headers.get("Retry-After");
+              setEspera(
+                reintento && /^\d+$/.test(reintento)
+                  ? `Vuelve a intentarlo en ${Math.ceil(Number(reintento) / 60)} minutos.`
+                  : "El servidor aplica una espera de 24 horas desde el último envío y no informa su hora exacta. Vuelve a revisar mañana.",
+              );
               throw new Error(
-                "Ya se solicitó un recordatorio para este estudiante hoy.",
+                "Se alcanzó el límite de recordatorios para este estudiante.",
               );
             }
             await comprobar(r);
             setSolicitado(true);
-          }, "Recordatorio solicitado por Canvas. La recepción depende del procesamiento del envío.")
+            op.setMensaje(
+              r.status === 202
+                ? "El recordatorio quedó en cola. Todavía no se ha confirmado su envío."
+                : "Canvas confirmó el envío del recordatorio.",
+            );
+          })
         }
       >
         {op.ocupado
@@ -43,6 +55,7 @@ function Recordatorio({ id }: { id: string }) {
             : "Enviar recordatorio"}
       </button>
       <Mensajes {...op} />
+      {espera && <p className="help">{espera}</p>}
     </div>
   );
 }
@@ -94,7 +107,9 @@ export function Pendientes() {
                       )}
                     </div>
                     {puede("mapeo.editar") && (
-                      <Link to={`/cursos/${curso.id}/personas`}>
+                      <Link
+                        to={`/cursos/${curso.id}/personas?estudiante=${encodeURIComponent(f.estudiante_id)}`}
+                      >
                         Revisar y asociar cuenta en Personas
                       </Link>
                     )}
@@ -132,7 +147,9 @@ export function Pendientes() {
                     {f.motivo_invalidacion && (
                       <p className="help">{etiqueta(f.motivo_invalidacion)}</p>
                     )}
-                    <Link to={`/cursos/${curso.id}/personas`}>
+                    <Link
+                      to={`/cursos/${curso.id}/personas?estudiante=${encodeURIComponent(f.estudiante_id)}`}
+                    >
                       Revisar en Personas
                     </Link>
                   </li>
@@ -143,8 +160,8 @@ export function Pendientes() {
           <section className="panel">
             <h2>Grupos incompletos · {d.bloque_3_grupos_incompletos.length}</h2>
             <p>
-              Información sincronizada desde Canvas. En esta versión las tareas
-              son individuales.
+              Revisa las pertenencias en Canvas y las cuentas pendientes de sus
+              integrantes. Los grupos se sincronizan desde Canvas.
             </p>
             {!d.bloque_3_grupos_incompletos.length ? (
               <Vacio>No hay pendientes de este tipo.</Vacio>

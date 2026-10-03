@@ -10,6 +10,8 @@ import {
 import {
   PERMISOS_AYUDANTE_POR_DEFECTO,
   PERMISOS_CONCEDIBLES,
+  PERMISOS_IMPLICITOS,
+  PERMISOS_NO_CONCEDIBLES,
 } from "../lib/permisos";
 import { comprobar } from "../lib/errores";
 import { useCurso } from "../components/Layout";
@@ -36,11 +38,6 @@ interface Invitacion {
   correo_motivo: string | null;
   reenvios_restantes: number;
 }
-const PERMISOS_PARCIAL = [
-  "tarea.administrar",
-  "mapeo.editar",
-  "comunicacion.enviar",
-];
 function Permisos({
   valores,
   cambiar,
@@ -55,9 +52,7 @@ function Permisos({
         Siempre puede consultar el curso. Administrar el curso y el equipo
         corresponde a profesores.
       </p>
-      {PERMISOS_CONCEDIBLES.filter((p) =>
-        PERMISOS_PARCIAL.includes(p.clave),
-      ).map((p) => (
+      {PERMISOS_CONCEDIBLES.map((p) => (
         <label className="check" key={p.clave}>
           <input
             type="checkbox"
@@ -77,8 +72,16 @@ function Permisos({
         </label>
       ))}
       <p className="help">
-        Otros permisos ya asignados se conservan al editar estos controles.
+        Siempre incluidos:{" "}
+        {PERMISOS_IMPLICITOS.map((p) => p.etiqueta).join(" y ")}.
       </p>
+      <ul className="help">
+        {PERMISOS_NO_CONCEDIBLES.map((p) => (
+          <li key={p.clave}>
+            {p.etiqueta}: exclusivo de profesores porque {p.motivo}.
+          </li>
+        ))}
+      </ul>
     </fieldset>
   );
 }
@@ -99,6 +102,35 @@ export function Equipo() {
     PERMISOS_AYUDANTE_POR_DEFECTO,
   );
   const [editando, setEditando] = useState<Miembro | null>(null);
+  const [verHistorial, setVerHistorial] = useState(false);
+  const historial = useConsulta(
+    `historial-equipo-${curso.id}-${verHistorial}`,
+    async (signal) => {
+      if (!verHistorial) return [];
+      const respuesta = await apiFetch(
+        `/api/cursos/${curso.id}/equipo/historial`,
+        { signal },
+      );
+      await comprobar(respuesta);
+      return respuesta.json() as Promise<
+        {
+          accion: string;
+          entidad_id: string | null;
+          actor_usuario_id: string | null;
+          creado_en: string;
+          antes: Record<string, unknown> | null;
+          despues: Record<string, unknown> | null;
+        }[]
+      >;
+    },
+  );
+  const ultimoProfesor = (m: Miembro) =>
+    m.rol === "PROFESOR" &&
+    m.estado === "ACTIVA" &&
+    c.datos?.filter(
+      (integrante) =>
+        integrante.rol === "PROFESOR" && integrante.estado === "ACTIVA",
+    ).length === 1;
   const invitaciones = useConsulta(
     `invitaciones-${curso.id}-${administra}`,
     async (signal) => {
@@ -120,6 +152,7 @@ export function Equipo() {
     await comprobar(r);
     c.recargar();
     invitaciones.recargar();
+    historial.recargar();
     recargar();
   }
   return (
@@ -207,20 +240,14 @@ export function Equipo() {
                         "Administración completa"
                       ) : (
                         <>
-                          {PERMISOS_CONCEDIBLES.filter(
-                            (p) =>
-                              m.permisos.includes(p.clave) &&
-                              PERMISOS_PARCIAL.includes(p.clave),
+                          {PERMISOS_CONCEDIBLES.filter((p) =>
+                            m.permisos.includes(p.clave),
                           )
                             .map((p) => p.etiqueta)
-                            .join(", ") || "Consulta del curso"}
-                          {m.permisos.some(
-                            (p) => !PERMISOS_PARCIAL.includes(p),
-                          ) && (
-                            <p className="help">
-                              Otros permisos asignados se conservan.
-                            </p>
-                          )}
+                            .join(", ") || "Sin permisos adicionales"}
+                          <p className="help">
+                            Ver el curso y corregir lo asignado.
+                          </p>
                         </>
                       )}
                     </td>
@@ -242,30 +269,50 @@ export function Equipo() {
                               </button>
                               <button
                                 className="danger"
-                                disabled={op.ocupado}
-                                onClick={async () => {
-                                  if (
-                                    await confirmar({
-                                      titulo: `Retirar a ${m.nombre}`,
-                                      descripcion: `Perderá el acceso al curso ${curso.nombre}. Se solicitará retirar su acceso docente a GitHub.`,
-                                      accion: "Retirar del curso",
-                                      peligro: true,
-                                    })
-                                  )
-                                    void op.ejecutar(async () => {
-                                      await comprobar(
-                                        await retirarMiembro(
-                                          curso.id,
-                                          m.membresia_id,
-                                        ),
-                                      );
-                                      c.recargar();
-                                      recargar();
-                                    }, "Integrante retirado del curso. La revocación de GitHub se procesará en segundo plano.");
-                                }}
+                                disabled={op.ocupado || ultimoProfesor(m)}
+                                onClick={() =>
+                                  void op.ejecutar(async () => {
+                                    const respuesta = await apiFetch(
+                                      `/api/cursos/${curso.id}/miembros/${m.membresia_id}/impacto-retiro`,
+                                    );
+                                    await comprobar(respuesta);
+                                    const impacto =
+                                      (await respuesta.json()) as {
+                                        sesiones_a_cerrar: number;
+                                        es_profesor: boolean;
+                                      };
+                                    if (
+                                      !(await confirmar({
+                                        titulo: `Retirar a ${m.nombre}`,
+                                        descripcion: `Perderá el acceso al curso ${curso.nombre}. Se cerrarán ${impacto.sesiones_a_cerrar} sesiones y se solicitará retirar su acceso docente a GitHub.${impacto.es_profesor ? " Sus credenciales de Canvas dejarán de estar disponibles para este curso; revisa que exista otra credencial válida." : ""}`,
+                                        accion: "Retirar del curso",
+                                        peligro: true,
+                                      }))
+                                    )
+                                      return;
+                                    await comprobar(
+                                      await retirarMiembro(
+                                        curso.id,
+                                        m.membresia_id,
+                                      ),
+                                    );
+                                    c.recargar();
+                                    historial.recargar();
+                                    recargar();
+                                    op.setMensaje(
+                                      "Integrante retirado del curso. La revocación de GitHub se procesará en segundo plano.",
+                                    );
+                                  })
+                                }
                               >
                                 Retirar
                               </button>
+                              {ultimoProfesor(m) && (
+                                <p className="help">
+                                  Incorpora a otro profesor activo antes de
+                                  retirar o cambiar el rol del último profesor.
+                                </p>
+                              )}
                             </>
                           ) : (
                             <button
@@ -355,7 +402,9 @@ export function Equipo() {
                   })
                 }
               >
-                <option value="AYUDANTE">Ayudante</option>
+                <option value="AYUDANTE" disabled={ultimoProfesor(editando)}>
+                  Ayudante
+                </option>
                 <option value="PROFESOR">Profesor</option>
               </select>
             </label>
@@ -405,7 +454,7 @@ export function Equipo() {
             }}
           >
             <label>
-              Correo personal Gmail
+              Correo de Google (Gmail o @miuandes.cl)
               <input
                 required
                 type="email"
@@ -558,6 +607,48 @@ export function Equipo() {
           )}
         </section>
       )}
+      <section className="panel">
+        <details
+          onToggle={(evento) => setVerHistorial(evento.currentTarget.open)}
+        >
+          <summary>Historial del equipo</summary>
+          {historial.error && (
+            <ErrorCarga
+              error={historial.error}
+              reintentar={historial.recargar}
+            />
+          )}
+          {historial.cargando ? (
+            <Cargando />
+          ) : !historial.datos?.length ? (
+            <p>No hay cambios registrados.</p>
+          ) : (
+            <ul className="list-clean">
+              {historial.datos.map((evento, indice) => (
+                <li key={`${evento.creado_en}-${indice}`}>
+                  <strong>{etiqueta(evento.accion)}</strong>
+                  <p className="help">
+                    {fechaLegible(evento.creado_en, curso.zona_horaria)} ·{" "}
+                    {c.datos?.find(
+                      (m) => m.usuario_id === evento.actor_usuario_id,
+                    )?.nombre ?? "Registro del curso"}
+                  </p>
+                  {evento.despues && (
+                    <p className="help">
+                      {Object.entries(evento.despues)
+                        .map(
+                          ([clave, valor]) =>
+                            `${etiqueta(clave)}: ${Array.isArray(valor) ? valor.map((permiso) => PERMISOS_CONCEDIBLES.find((p) => p.clave === permiso)?.etiqueta ?? etiqueta(String(permiso))).join(", ") : etiqueta(String(valor))}`,
+                        )
+                        .join(" · ")}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </details>
+      </section>
     </>
   );
 }

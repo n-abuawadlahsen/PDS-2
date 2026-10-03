@@ -28,7 +28,7 @@ p {
   margin-top: 0;
 }
 h1 {
-  font-size: clamp(1.6rem, 3vw, 2rem);
+  font-size: clamp(1.5rem, 3vw, 1.75rem);
   line-height: 1.2;
   letter-spacing: -0.025em;
   margin-bottom: 0.65rem;
@@ -88,6 +88,10 @@ button,
   cursor: pointer;
   text-decoration: none;
   text-align: center;
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
 }
 button:hover:not(:disabled),
 .button:hover {
@@ -220,7 +224,7 @@ legend {
   padding: 1.5rem;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: 8px;
   min-width: 0;
 }
 .panel-header {
@@ -463,10 +467,13 @@ td .help {
   gap: 1.5rem;
 }
 .course-card {
-  border-top: 4px solid var(--color-primary);
+  padding: 0;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
 }
 .course-card h2 {
-  margin-top: 1.25rem;
+  margin: 0.5rem 0 0.65rem;
+  font-size: 1.125rem;
 }
 .course-card h2 a {
   color: var(--color-text);
@@ -500,14 +507,22 @@ td .help {
   border-bottom: 1px solid var(--color-border);
   margin-bottom: 1.5rem;
 }
-.tabs a {
+.tabs a,
+.tabs button {
   padding: 0.75rem 0.25rem;
   white-space: nowrap;
   text-decoration: none;
   color: var(--color-text-secondary);
   border-bottom: 3px solid transparent;
 }
-.tabs a[aria-current="page"] {
+.tabs button {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+}
+.tabs a[aria-current="page"],
+.tabs button[aria-current="page"] {
   border-color: var(--color-primary);
   color: var(--color-text);
   font-weight: 600;

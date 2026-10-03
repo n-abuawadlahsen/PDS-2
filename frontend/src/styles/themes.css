@@ -4,12 +4,12 @@
   --color-surface: #ffffff;
   --color-surface-muted: #f0f2f4;
   --color-surface-hover: #e9edf0;
-  --color-text: #232c35;
-  --color-text-secondary: #56616d;
+  --color-text: #24313a;
+  --color-text-secondary: #596773;
   --color-text-disabled: #687380;
   --color-border: #d6dce1;
   --color-border-strong: #7d8994;
-  --color-sidebar: #27323c;
+  --color-sidebar: #2d3b45;
   --color-sidebar-text: #f5f7f8;
   --color-sidebar-hover: #354451;
   --color-sidebar-active: #ffffff;
@@ -36,10 +36,20 @@
   --color-neutral: var(--color-text-secondary);
   --color-neutral-background: var(--color-surface-muted);
   --color-neutral-border: var(--color-border-strong);
-  --color-link: var(--color-primary);
-  --color-link-hover: var(--color-primary-hover);
+  --color-link: #005b94;
+  --color-link-hover: #00446e;
   --color-focus-ring: var(--color-primary);
   --color-selection: var(--color-primary-subtle);
+  --app-background: var(--color-background);
+  --app-primary: var(--color-primary);
+  --app-border: var(--color-border);
+  --color-course-1: #315b83;
+  --color-course-2: #187866;
+  --color-course-3: #886c29;
+  --color-course-4: #77458c;
+  --color-course-5: #92544f;
+  --color-course-6: #4d6b77;
+  --shadow-card: 0 2px 4px #24313a0a, 0 1px 2px #24313a0d;
 }
 :root,
 :root[data-theme="institucional"] {

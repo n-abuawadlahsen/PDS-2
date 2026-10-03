@@ -4,6 +4,7 @@ export class ErrorApi extends Error {
   constructor(
     public status: number,
     message: string,
+    public campos: Record<string, string> = {},
   ) {
     super(message);
   }
@@ -48,10 +49,32 @@ export async function errorRespuesta(response: Response): Promise<ErrorApi> {
     429: "Se alcanzó el límite de solicitudes. Espera antes de intentar nuevamente.",
   };
   const message = fallback[response.status] ?? detalleLegible(body);
+  const campos: Record<string, string> = {};
+  if (
+    body &&
+    typeof body === "object" &&
+    "detail" in body &&
+    Array.isArray(body.detail)
+  ) {
+    for (const error of body.detail) {
+      if (error && Array.isArray(error.loc) && typeof error.msg === "string") {
+        const campo = error.loc.filter((p: unknown) => p !== "body").join(".");
+        campos[campo] =
+          error.type === "string_too_short"
+            ? "El valor es demasiado corto. Revisa la longitud indicada."
+            : error.type === "string_too_long"
+              ? "El valor supera la longitud permitida."
+              : error.type === "missing"
+                ? "Completa este campo."
+                : error.msg;
+      }
+    }
+  }
   return new ErrorApi(
     response.status,
     message ||
       `No se pudo completar la operación (${response.status}). Intenta nuevamente.`,
+    campos,
   );
 }
 export async function comprobar(response: Response): Promise<void> {

@@ -862,10 +862,12 @@ export async function excluirEntrega(
   entregaId: string,
 ): Promise<Resultado<TareaDetalle>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/entregas/${entregaId}/excluir`, { method: "POST" }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/entregas/${entregaId}/excluir`,
+      { method: "POST" },
+    ),
   );
 }
-
 
 export async function obtenerTarea(
   cursoId: string,
@@ -1077,7 +1079,12 @@ export interface FechasEntrega {
   cierre_base: string;
   fechas_distintas: number;
   excepciones: ExcepcionFecha[];
-  ambiguas: { sujeto_id: string; sujeto: string; fecha: string; candidatas: CandidataFecha[] }[];
+  ambiguas: {
+    sujeto_id: string;
+    sujeto: string;
+    fecha: string;
+    candidatas: CandidataFecha[];
+  }[];
   sujetos_con_fecha: number;
   sujetos_sin_fecha: number;
 }
@@ -1100,9 +1107,14 @@ export interface HistorialFechasSujeto {
 }
 
 /** S9.4.1: el encadenamiento de fechas superseded por sujeto es el historial. */
-export async function obtenerHistorialFechas(cursoId: string, entregaId: string): Promise<HistorialFechasSujeto[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/historial-fechas`);
-  if (!respuesta.ok) throw new Error(`GET historial-fechas -> ${respuesta.status}`);
+export async function obtenerHistorialFechas(
+  cursoId: string,
+  entregaId: string,
+): Promise<HistorialFechasSujeto[]> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/entregas/${entregaId}/historial-fechas`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1135,7 +1147,11 @@ export interface VersionEntrega {
   fecha_origen: string | null;
   canvas_override_id: number | null;
   comparacion_base: string | null;
-  enlaces: { arbol: string | null; comparacion: string | null; zip: string | null };
+  enlaces: {
+    arbol: string | null;
+    comparacion: string | null;
+    zip: string | null;
+  };
 }
 
 export interface FilaCaptura {
@@ -1168,9 +1184,14 @@ export function urlApi(ruta: string): string {
   return `${API_BASE_URL}${ruta}`;
 }
 
-export async function obtenerProgresoCaptura(cursoId: string, entregaId: string): Promise<ProgresoCaptura> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/progreso-captura`);
-  if (!respuesta.ok) throw new Error(`GET progreso-captura -> ${respuesta.status}`);
+export async function obtenerProgresoCaptura(
+  cursoId: string,
+  entregaId: string,
+): Promise<ProgresoCaptura> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/entregas/${entregaId}/progreso-captura`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1179,8 +1200,10 @@ export async function obtenerFichaVersion(
   entregaId: string,
   sujetoId: string,
 ): Promise<FichaVersion> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/sujetos/${sujetoId}/version`);
-  if (!respuesta.ok) throw new Error(`GET version -> ${respuesta.status}`);
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/entregas/${entregaId}/sujetos/${sujetoId}/version`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1198,16 +1221,25 @@ export async function accionVersion(
 ): Promise<Resultado<VersionEntrega>> {
   const { tipo, ...cuerpo } = accion;
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/sujetos/${sujetoId}/version/${tipo}`, {
-      method: "POST",
-      body: JSON.stringify(cuerpo),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/entregas/${entregaId}/sujetos/${sujetoId}/version/${tipo}`,
+      {
+        method: "POST",
+        body: JSON.stringify(cuerpo),
+      },
+    ),
   );
 }
 
-export async function registrarVersiones(cursoId: string, entregaId: string): Promise<Resultado<{ encoladas: number }>> {
+export async function registrarVersiones(
+  cursoId: string,
+  entregaId: string,
+): Promise<Resultado<{ encoladas: number }>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/entregas/${entregaId}/registrar-versiones`, { method: "POST" }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/entregas/${entregaId}/registrar-versiones`,
+      { method: "POST" },
+    ),
   );
 }
 
@@ -1302,15 +1334,22 @@ export interface Tablero {
 export async function obtenerTablero(
   cursoId: string,
   tareaId: string,
-  filtros: { periodo?: string; seccion?: string; grupoEstado?: string; soloAlertas?: boolean },
+  filtros: {
+    periodo?: string;
+    seccion?: string;
+    grupoEstado?: string;
+    soloAlertas?: boolean;
+  },
 ): Promise<Tablero> {
   const q = new URLSearchParams();
   if (filtros.periodo) q.set("periodo", filtros.periodo);
   if (filtros.seccion) q.set("seccion", filtros.seccion);
   if (filtros.grupoEstado) q.set("grupo_estado", filtros.grupoEstado);
   if (filtros.soloAlertas) q.set("solo_alertas", "true");
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/tablero?${q.toString()}`);
-  if (!respuesta.ok) throw new Error(`GET tablero -> ${respuesta.status}`);
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/tablero?${q.toString()}`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1318,16 +1357,25 @@ export async function actualizarTablero(
   cursoId: string,
   tareaId: string,
 ): Promise<{ encolada: boolean; en_curso: boolean; disponible_en: string }> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/tablero/actualizar`, {
-    method: "POST",
-  });
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/tablero/actualizar`,
+    {
+      method: "POST",
+    },
+  );
   return respuesta.json();
 }
 
-export async function silenciarIncidencia(cursoId: string, incidenciaId: string): Promise<boolean> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/incidencias/${incidenciaId}/silenciar`, {
-    method: "POST",
-  });
+export async function silenciarIncidencia(
+  cursoId: string,
+  incidenciaId: string,
+): Promise<boolean> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/incidencias/${incidenciaId}/silenciar`,
+    {
+      method: "POST",
+    },
+  );
   return respuesta.ok;
 }
 
@@ -1341,9 +1389,11 @@ export interface FilaSeguimiento {
   invitaciones_sin_aceptar: number;
 }
 
-export async function obtenerSeguimiento(cursoId: string): Promise<FilaSeguimiento[]> {
+export async function obtenerSeguimiento(
+  cursoId: string,
+): Promise<FilaSeguimiento[]> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/seguimiento`);
-  if (!respuesta.ok) throw new Error(`GET seguimiento -> ${respuesta.status}`);
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1366,19 +1416,39 @@ export interface CommitTimeline {
 }
 
 export interface Timeline {
-  repositorio: { id: string; nombre: string; estado: string; rama_por_defecto: string | null };
+  repositorio: {
+    id: string;
+    nombre: string;
+    estado: string;
+    rama_por_defecto: string | null;
+  };
   sujeto: string;
   periodos: { clave: string; etiqueta: string }[];
   periodo: string;
-  dias: { dia: string; colapsado: boolean; hasta: string | null; n_dias: number; commits: CommitTimeline[] }[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ciclo_de_vida: { fecha: string; tipo: string; detalle: Record<string, any> }[];
+  dias: {
+    dia: string;
+    colapsado: boolean;
+    hasta: string | null;
+    n_dias: number;
+    commits: CommitTimeline[];
+  }[];
+  ciclo_de_vida: {
+    fecha: string;
+    tipo: string;
+    detalle: Record<string, unknown>;
+  }[];
   marcas_entrega: {
     orden: number;
     entrega: string;
     fecha: string | null;
     aplica: boolean;
-    versiones: { intento: number; vigente: boolean; estado: string; motivo: string | null; commit_sha: string | null }[];
+    versiones: {
+      intento: number;
+      vigente: boolean;
+      estado: string;
+      motivo: string | null;
+      commit_sha: string | null;
+    }[];
   }[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   composicion: Record<string, any>[];
@@ -1409,22 +1479,41 @@ export async function obtenerTimeline(
   const q = new URLSearchParams();
   if (filtros.periodo) q.set("periodo", filtros.periodo);
   if (filtros.integrante) q.set("integrante", filtros.integrante);
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/timeline?${q}`);
-  if (!respuesta.ok) throw new Error(`GET timeline -> ${respuesta.status}`);
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/timeline?${q}`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function marcarHito(cursoId: string, tareaId: string, repoId: string, sha: string, nota: string) {
-  return apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/commits/${sha}/hito`, {
-    method: "POST",
-    body: JSON.stringify({ nota }),
-  });
+export async function marcarHito(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  sha: string,
+  nota: string,
+) {
+  return apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/commits/${sha}/hito`,
+    {
+      method: "POST",
+      body: JSON.stringify({ nota }),
+    },
+  );
 }
 
-export async function desmarcarHito(cursoId: string, tareaId: string, repoId: string, sha: string) {
-  return apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/commits/${sha}/hito`, {
-    method: "DELETE",
-  });
+export async function desmarcarHito(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+  sha: string,
+) {
+  return apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/commits/${sha}/hito`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export interface IdentidadGit {
@@ -1449,9 +1538,13 @@ function baseIdentidades(cursoId: string, tareaId: string, repoId: string) {
   return `/api/cursos/${cursoId}/tareas/${tareaId}/repos/${repoId}/identidades`;
 }
 
-export async function listarIdentidades(cursoId: string, tareaId: string, repoId: string): Promise<IdentidadGit[]> {
+export async function listarIdentidades(
+  cursoId: string,
+  tareaId: string,
+  repoId: string,
+): Promise<IdentidadGit[]> {
   const respuesta = await apiFetch(baseIdentidades(cursoId, tareaId, repoId));
-  if (!respuesta.ok) return [];
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1461,8 +1554,10 @@ export async function obtenerPropagacion(
   repoId: string,
   identidadId: string,
 ): Promise<CandidatoPropagacion[]> {
-  const respuesta = await apiFetch(`${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/propagacion`);
-  if (!respuesta.ok) return [];
+  const respuesta = await apiFetch(
+    `${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/propagacion`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1471,13 +1566,21 @@ export async function resolverIdentidad(
   tareaId: string,
   repoId: string,
   identidadId: string,
-  cuerpo: { estudiante_id?: string; no_es_estudiante?: boolean; propagar_a: string[]; confirmacion?: string },
+  cuerpo: {
+    estudiante_id?: string;
+    no_es_estudiante?: boolean;
+    propagar_a: string[];
+    confirmacion?: string;
+  },
 ): Promise<Resultado<IdentidadGit>> {
   return resultado(
-    await apiFetch(`${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/resolver`, {
-      method: "POST",
-      body: JSON.stringify(cuerpo),
-    }),
+    await apiFetch(
+      `${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/resolver`,
+      {
+        method: "POST",
+        body: JSON.stringify(cuerpo),
+      },
+    ),
   );
 }
 
@@ -1487,10 +1590,13 @@ export async function revelarIdentidad(
   repoId: string,
   identidadId: string,
 ): Promise<string | null> {
-  const respuesta = await apiFetch(`${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/revelar`, {
-    method: "POST",
-  });
-  if (!respuesta.ok) return null;
+  const respuesta = await apiFetch(
+    `${baseIdentidades(cursoId, tareaId, repoId)}/${identidadId}/revelar`,
+    {
+      method: "POST",
+    },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return (await respuesta.json()).email;
 }
 
@@ -1524,9 +1630,14 @@ export interface EstadoArchivado {
   puede_desarchivar: boolean;
 }
 
-export async function obtenerArchivado(cursoId: string, tareaId: string): Promise<EstadoArchivado> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivado`);
-  if (!respuesta.ok) throw new Error(`GET archivado -> ${respuesta.status}`);
+export async function obtenerArchivado(
+  cursoId: string,
+  tareaId: string,
+): Promise<EstadoArchivado> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/archivado`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1534,13 +1645,20 @@ export async function enviarAvisoArchivado(
   cursoId: string,
   tareaId: string,
 ): Promise<Resultado<{ encolados: number }>> {
-  return resultado(await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivar/aviso`, { method: "POST" }));
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivar/aviso`, {
+      method: "POST",
+    }),
+  );
 }
 
 export async function archivarTarea(
   cursoId: string,
   tareaId: string,
-  confirmaciones: { confirmacion_sin_captura: string | null; confirmacion_sin_aviso: string | null },
+  confirmaciones: {
+    confirmacion_sin_captura: string | null;
+    confirmacion_sin_aviso: string | null;
+  },
 ): Promise<Resultado<{ repositorios: number }>> {
   return resultado(
     await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/archivar`, {
@@ -1554,7 +1672,11 @@ export async function desarchivarTarea(
   cursoId: string,
   tareaId: string,
 ): Promise<Resultado<{ repositorios: number }>> {
-  return resultado(await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/desarchivar`, { method: "POST" }));
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/desarchivar`, {
+      method: "POST",
+    }),
+  );
 }
 
 export async function obtenerRepositoriosTarea(
@@ -1631,7 +1753,12 @@ export async function previsualizarArchivoBase(
 
 export interface InformesCurso {
   se_genera_desde: string | null;
-  informes: { fecha: string; estado: string; motivo: string | null; origen: string }[];
+  informes: {
+    fecha: string;
+    estado: string;
+    motivo: string | null;
+    origen: string;
+  }[];
 }
 
 export interface InformeDia {
@@ -1661,62 +1788,96 @@ export interface SuscripcionInforme {
 
 export async function obtenerInformes(cursoId: string): Promise<InformesCurso> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/informes`);
-  if (!respuesta.ok) throw new Error(`GET informes -> ${respuesta.status}`);
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function obtenerInformeDia(cursoId: string, fecha: string): Promise<InformeDia | null> {
+export async function obtenerInformeDia(
+  cursoId: string,
+  fecha: string,
+): Promise<InformeDia | null> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/informes/${fecha}`);
-  if (!respuesta.ok) return null;
+  if ([404, 410].includes(respuesta.status)) return null;
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function obtenerVistaPreviaInforme(cursoId: string): Promise<VistaPreviaInforme> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/vista-previa`);
-  if (!respuesta.ok) throw new Error(`GET vista previa -> ${respuesta.status}`);
+export async function obtenerVistaPreviaInforme(
+  cursoId: string,
+): Promise<VistaPreviaInforme> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/informe-de-hoy/vista-previa`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function enviarmeInforme(cursoId: string): Promise<Resultado<{ encolados: number }>> {
-  return resultado(await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/enviarme`, { method: "POST" }));
+export async function enviarmeInforme(
+  cursoId: string,
+): Promise<Resultado<{ encolados: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/enviarme`, {
+      method: "POST",
+    }),
+  );
 }
 
-export async function enviarInformeASuscritos(cursoId: string): Promise<Resultado<{ encolados: number }>> {
-  return resultado(await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/enviar`, { method: "POST" }));
+export async function enviarInformeASuscritos(
+  cursoId: string,
+): Promise<Resultado<{ encolados: number }>> {
+  return resultado(
+    await apiFetch(`/api/cursos/${cursoId}/informe-de-hoy/enviar`, {
+      method: "POST",
+    }),
+  );
 }
 
-export async function obtenerMisNotificaciones(cursoId: string): Promise<SuscripcionInforme> {
+export async function obtenerMisNotificaciones(
+  cursoId: string,
+): Promise<SuscripcionInforme> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/mis-notificaciones`);
-  if (!respuesta.ok) throw new Error(`GET mis-notificaciones -> ${respuesta.status}`);
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function cambiarMisNotificaciones(cursoId: string, activa: boolean): Promise<SuscripcionInforme> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/mis-notificaciones`, {
-    method: "PUT",
-    body: JSON.stringify({ activa }),
-  });
-  if (!respuesta.ok) throw new Error(`PUT mis-notificaciones -> ${respuesta.status}`);
+export async function cambiarMisNotificaciones(
+  cursoId: string,
+  activa: boolean,
+): Promise<SuscripcionInforme> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/mis-notificaciones`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ activa }),
+    },
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function obtenerNotificacionesPerfil(): Promise<SuscripcionInforme[]> {
+export async function obtenerNotificacionesPerfil(): Promise<
+  SuscripcionInforme[]
+> {
   const respuesta = await apiFetch("/api/perfil/notificaciones");
-  if (!respuesta.ok) return [];
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function cambiarTodasLasNotificaciones(activa: boolean): Promise<SuscripcionInforme[]> {
+export async function cambiarTodasLasNotificaciones(
+  activa: boolean,
+): Promise<SuscripcionInforme[]> {
   const respuesta = await apiFetch("/api/perfil/notificaciones", {
     method: "PUT",
     body: JSON.stringify({ activa }),
   });
-  if (!respuesta.ok) throw new Error(`PUT notificaciones -> ${respuesta.status}`);
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
 export async function regenerarEnlacesDeBaja(): Promise<boolean> {
-  const respuesta = await apiFetch("/api/perfil/enlaces-de-baja/regenerar", { method: "POST" });
+  const respuesta = await apiFetch("/api/perfil/enlaces-de-baja/regenerar", {
+    method: "POST",
+  });
   return respuesta.ok;
 }
 
@@ -1728,19 +1889,30 @@ export interface EstadoBaja {
 }
 
 export async function obtenerBaja(token: string): Promise<EstadoBaja | null> {
-  const respuesta = await fetch(`${API_BASE_URL}/api/baja/${encodeURIComponent(token)}`, {
-    credentials: "include",
-  });
-  if (!respuesta.ok) return null;
+  const respuesta = await fetch(
+    `${API_BASE_URL}/api/baja/${encodeURIComponent(token)}`,
+    {
+      credentials: "include",
+    },
+  );
+  if ([404, 410].includes(respuesta.status)) return null;
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function aplicarBaja(token: string, accion: "baja" | "alta"): Promise<EstadoBaja | null> {
-  const respuesta = await fetch(`${API_BASE_URL}/api/baja/${encodeURIComponent(token)}?accion=${accion}`, {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!respuesta.ok) return null;
+export async function aplicarBaja(
+  token: string,
+  accion: "baja" | "alta",
+): Promise<EstadoBaja | null> {
+  const respuesta = await fetch(
+    `${API_BASE_URL}/api/baja/${encodeURIComponent(token)}?accion=${accion}`,
+    {
+      method: "POST",
+      credentials: "include",
+    },
+  );
+  if ([404, 410].includes(respuesta.status)) return null;
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1775,10 +1947,15 @@ export interface Bandeja {
   mensajes: MensajeBandeja[];
 }
 
-export async function obtenerBandeja(cursoId: string, filtros: Record<string, string>): Promise<Bandeja> {
+export async function obtenerBandeja(
+  cursoId: string,
+  filtros: Record<string, string>,
+): Promise<Bandeja> {
   const q = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v));
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/comunicaciones?${q}`);
-  if (!respuesta.ok) throw new Error(`GET comunicaciones -> ${respuesta.status}`);
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/comunicaciones?${q}`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1787,7 +1964,12 @@ export async function accionSobreMensaje(
   mensajeId: string,
   accion: "reintentar" | "reenviar" | "cancelar" | "retractar",
 ): Promise<Resultado<MensajeBandeja>> {
-  return resultado(await apiFetch(`/api/cursos/${cursoId}/comunicaciones/${mensajeId}/${accion}`, { method: "POST" }));
+  return resultado(
+    await apiFetch(
+      `/api/cursos/${cursoId}/comunicaciones/${mensajeId}/${accion}`,
+      { method: "POST" },
+    ),
+  );
 }
 
 export async function enviarMensajeManual(
@@ -1801,16 +1983,27 @@ export async function enviarMensajeManual(
   },
 ): Promise<Resultado<{ encolados: number; aviso: string }>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/comunicaciones/mensajes`, { method: "POST", body: JSON.stringify(cuerpo) }),
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones/mensajes`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
   );
 }
 
 export async function publicarAnuncio(
   cursoId: string,
-  cuerpo: { titulo: string; cuerpo_html: string; seccion_ids: string[]; confirmacion_destinatarios?: number },
+  cuerpo: {
+    titulo: string;
+    cuerpo_html: string;
+    seccion_ids: string[];
+    confirmacion_destinatarios?: number;
+  },
 ): Promise<Resultado<{ destinatarios: number }>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/comunicaciones/anuncios`, { method: "POST", body: JSON.stringify(cuerpo) }),
+    await apiFetch(`/api/cursos/${cursoId}/comunicaciones/anuncios`, {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    }),
   );
 }
 
@@ -1839,9 +2032,14 @@ export interface ReglaComunicacion {
   vista_previa_con_ejemplo: boolean;
 }
 
-export async function obtenerReglasTarea(cursoId: string, tareaId: string): Promise<ReglaComunicacion[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/comunicaciones`);
-  if (!respuesta.ok) return [];
+export async function obtenerReglasTarea(
+  cursoId: string,
+  tareaId: string,
+): Promise<ReglaComunicacion[]> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/comunicaciones`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -1852,25 +2050,38 @@ export async function cambiarReglaTarea(
   activa: boolean,
 ): Promise<Resultado<Record<string, number | boolean | string>>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/comunicaciones/${evento}`, {
-      method: "PUT",
-      body: JSON.stringify({ activa }),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/tareas/${tareaId}/comunicaciones/${evento}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ activa }),
+      },
+    ),
   );
 }
 
-export async function obtenerReglaMapeo(cursoId: string): Promise<ReglaComunicacion | null> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/comunicaciones-curso/recordatorio-mapeo`);
-  if (!respuesta.ok) return null;
+export async function obtenerReglaMapeo(
+  cursoId: string,
+): Promise<ReglaComunicacion | null> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/comunicaciones-curso/recordatorio-mapeo`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function cambiarReglaMapeo(cursoId: string, activa: boolean): Promise<Resultado<Record<string, unknown>>> {
+export async function cambiarReglaMapeo(
+  cursoId: string,
+  activa: boolean,
+): Promise<Resultado<Record<string, unknown>>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/comunicaciones-curso/recordatorio-mapeo`, {
-      method: "PUT",
-      body: JSON.stringify({ activa }),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/comunicaciones-curso/recordatorio-mapeo`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ activa }),
+      },
+    ),
   );
 }
 
@@ -1881,16 +2092,25 @@ export async function suprimirComunicaciones(
   motivo: string,
 ): Promise<Resultado<{ alcance: string }>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/estudiantes/${estudianteId}/supresion`, {
-      method: "POST",
-      body: JSON.stringify({ alcance, motivo }),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/estudiantes/${estudianteId}/supresion`,
+      {
+        method: "POST",
+        body: JSON.stringify({ alcance, motivo }),
+      },
+    ),
   );
 }
 
-export async function levantarSupresion(cursoId: string, estudianteId: string): Promise<Resultado<{ levantada: boolean }>> {
+export async function levantarSupresion(
+  cursoId: string,
+  estudianteId: string,
+): Promise<Resultado<{ levantada: boolean }>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/estudiantes/${estudianteId}/supresion`, { method: "DELETE" }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/estudiantes/${estudianteId}/supresion`,
+      { method: "DELETE" },
+    ),
   );
 }
 
@@ -1919,7 +2139,11 @@ export interface BandejaCorreccion {
   puede_repartir: boolean;
   puede_publicar: boolean;
   es_profesor: boolean;
-  tareas: { id: string; nombre: string; entregas: { id: string; nombre: string; orden: number }[] }[];
+  tareas: {
+    id: string;
+    nombre: string;
+    entregas: { id: string; nombre: string; orden: number }[];
+  }[];
 }
 
 export interface CeldaCorreccion {
@@ -1934,11 +2158,22 @@ export interface CeldaCorreccion {
 
 export interface MatrizCorreccion {
   entregas: { id: string; nombre: string; orden: number }[];
-  sujetos: { sujeto_id: string; sujeto: string; activo: boolean; seccion: string | null; celdas: Record<string, CeldaCorreccion> }[];
+  sujetos: {
+    sujeto_id: string;
+    sujeto: string;
+    activo: boolean;
+    seccion: string | null;
+    celdas: Record<string, CeldaCorreccion>;
+  }[];
   por_corrector: Record<string, Record<string, number>>;
   por_entrega: Record<string, Record<string, number>>;
   por_seccion: Record<string, Record<string, number>>;
-  contador: { corregidas: number; con_nota_en_canvas: number; total: number; comprobado_en: string | null };
+  contador: {
+    corregidas: number;
+    con_nota_en_canvas: number;
+    total: number;
+    comprobado_en: string | null;
+  };
 }
 
 export interface CriterioRubrica {
@@ -1962,7 +2197,12 @@ export interface PantallaCorreccion {
     fecha_efectiva: string | null;
     origen_fecha: string | null;
   };
-  sujeto: { id: string; nombre: string; integrantes: string[]; activo: boolean };
+  sujeto: {
+    id: string;
+    nombre: string;
+    integrantes: string[];
+    activo: boolean;
+  };
   estado: string;
   etiqueta: string;
   corrector: string | null;
@@ -1971,7 +2211,12 @@ export interface PantallaCorreccion {
   titular: string;
   publicable: boolean;
   motivo_no_publicable: string | null;
-  banderas: { version_desactualizada: boolean; reclamo_abierto: boolean; sin_commits: boolean; reconocimiento_sin_codigo: boolean };
+  banderas: {
+    version_desactualizada: boolean;
+    reclamo_abierto: boolean;
+    sin_commits: boolean;
+    reconocimiento_sin_codigo: boolean;
+  };
   version: {
     id: string;
     estado: string;
@@ -1986,7 +2231,10 @@ export interface PantallaCorreccion {
   motivo_sin_enlace: string | null;
   borrador: {
     nota: string | null;
-    rubrica: Record<string, { points?: number; rating_id?: string; comments?: string }> | null;
+    rubrica: Record<
+      string,
+      { points?: number; rating_id?: string; comments?: string }
+    > | null;
     comentario: string | null;
     version: number;
   } | null;
@@ -1997,21 +2245,47 @@ export interface PantallaCorreccion {
     suma_sugerida: number | null;
     cambio_sin_revisar: boolean;
   };
-  notas_internas: { clase: string; texto: string | null; desenlace: string | null; creada_en: string }[];
-  historial: { entrega: string; estado: string; nota_publicada: string | null }[];
-  canvas: { estudiante: string; score: number | null; calificada_en: string | null }[];
-  navegacion: { posicion: number; total: number; anterior: string | null; siguiente: string | null; siguiente_sin_corregir: string | null };
+  notas_internas: {
+    clase: string;
+    texto: string | null;
+    desenlace: string | null;
+    creada_en: string;
+  }[];
+  historial: {
+    entrega: string;
+    estado: string;
+    nota_publicada: string | null;
+  }[];
+  canvas: {
+    estudiante: string;
+    score: number | null;
+    calificada_en: string | null;
+  }[];
+  navegacion: {
+    posicion: number;
+    total: number;
+    anterior: string | null;
+    siguiente: string | null;
+    siguiente_sin_corregir: string | null;
+  };
 }
 
-export async function obtenerBandejaCorreccion(cursoId: string): Promise<BandejaCorreccion> {
+export async function obtenerBandejaCorreccion(
+  cursoId: string,
+): Promise<BandejaCorreccion> {
   const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion`);
-  if (!respuesta.ok) throw new Error(`GET correccion -> ${respuesta.status}`);
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
-export async function obtenerMatrizCorreccion(cursoId: string, tareaId: string): Promise<MatrizCorreccion> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/tareas/${tareaId}/correccion/estado`);
-  if (!respuesta.ok) throw new Error(`GET correccion/estado -> ${respuesta.status}`);
+export async function obtenerMatrizCorreccion(
+  cursoId: string,
+  tareaId: string,
+): Promise<MatrizCorreccion> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/tareas/${tareaId}/correccion/estado`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -2020,8 +2294,10 @@ export async function obtenerPantallaCorreccion(
   entregaId: string,
   sujetoId: string,
 ): Promise<PantallaCorreccion | null> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}`);
-  if (!respuesta.ok) return null;
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
@@ -2033,7 +2309,12 @@ export async function guardarBorradorCorreccion(
   cursoId: string,
   entregaId: string,
   sujetoId: string,
-  cuerpo: { nota: string | null; rubrica: Record<string, unknown> | null; comentario: string | null; version: number | null },
+  cuerpo: {
+    nota: string | null;
+    rubrica: Record<string, unknown> | null;
+    comentario: string | null;
+    version: number | null;
+  },
 ): Promise<Resultado<{ estado: string; version: number }>> {
   return resultado(
     await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/borrador`, {
@@ -2048,7 +2329,11 @@ export async function marcarCorreccionLista(
   entregaId: string,
   sujetoId: string,
 ): Promise<Resultado<{ estado: string; nota: string }>> {
-  return resultado(await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/lista`, { method: "POST" }));
+  return resultado(
+    await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/lista`, {
+      method: "POST",
+    }),
+  );
 }
 
 export async function agregarNotaInterna(
@@ -2074,14 +2359,25 @@ export interface CorrectorCurso {
   sin_github: boolean;
 }
 
-export async function obtenerCorrectores(cursoId: string): Promise<CorrectorCurso[]> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/correctores`);
-  if (!respuesta.ok) return [];
+export async function obtenerCorrectores(
+  cursoId: string,
+): Promise<CorrectorCurso[]> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/correccion/correctores`,
+  );
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
   return respuesta.json();
 }
 
 export interface PropuestaReparto {
-  filas: { sujeto_id: string; sujeto: string; actual: string | null; propuesto: string | null; estado: string; sobrescribe: boolean }[];
+  filas: {
+    sujeto_id: string;
+    sujeto: string;
+    actual: string | null;
+    propuesto: string | null;
+    estado: string;
+    sobrescribe: boolean;
+  }[];
   totales: Record<string, number>;
   requiere_decision: string[];
 }
@@ -2089,26 +2385,40 @@ export interface PropuestaReparto {
 export async function previsualizarReparto(
   cursoId: string,
   entregaId: string,
-  cuerpo: { criterio: string; reasignar: boolean; manual?: Record<string, string | null> },
+  cuerpo: {
+    criterio: string;
+    reasignar: boolean;
+    manual?: Record<string, string | null>;
+  },
 ): Promise<Resultado<PropuestaReparto>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/reparto/previsualizar`, {
-      method: "POST",
-      body: JSON.stringify(cuerpo),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/correccion/${entregaId}/reparto/previsualizar`,
+      {
+        method: "POST",
+        body: JSON.stringify(cuerpo),
+      },
+    ),
   );
 }
 
 export async function aplicarReparto(
   cursoId: string,
   entregaId: string,
-  cuerpo: { criterio: string; reasignar: boolean; manual?: Record<string, string | null> },
+  cuerpo: {
+    criterio: string;
+    reasignar: boolean;
+    manual?: Record<string, string | null>;
+  },
 ): Promise<Resultado<{ cambios: number }>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/reparto/aplicar`, {
-      method: "POST",
-      body: JSON.stringify(cuerpo),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/correccion/${entregaId}/reparto/aplicar`,
+      {
+        method: "POST",
+        body: JSON.stringify(cuerpo),
+      },
+    ),
   );
 }
 
@@ -2121,7 +2431,11 @@ export interface ResultadoPublicacion {
   detalle: {
     codigo?: string;
     motivo?: string;
-    conflictos?: { estudiante: string; nota_canvas: number | null; calificada_en: string | null }[];
+    conflictos?: {
+      estudiante: string;
+      nota_canvas: number | null;
+      calificada_en: string | null;
+    }[];
     nota_propia?: string | null;
   } | null;
 }
@@ -2137,23 +2451,35 @@ export async function publicarCorreccion(
     reconocimiento_sin_codigo?: boolean;
   },
 ): Promise<ResultadoPublicacion> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}/publicar`, {
-    method: "POST",
-    body: JSON.stringify(cuerpo),
-  });
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}/publicar`,
+    {
+      method: "POST",
+      body: JSON.stringify(cuerpo),
+    },
+  );
   let json: unknown = null;
   try {
     json = await respuesta.json();
   } catch {
     json = null;
   }
-  if (respuesta.ok) return { ok: true, status: respuesta.status, datos: json as { estado: string }, detalle: null };
+  if (respuesta.ok)
+    return {
+      ok: true,
+      status: respuesta.status,
+      datos: json as { estado: string },
+      detalle: null,
+    };
   const detalle = (json as { detail?: unknown } | null)?.detail;
   return {
     ok: false,
     status: respuesta.status,
     datos: null,
-    detalle: typeof detalle === "object" && detalle ? (detalle as ResultadoPublicacion["detalle"]) : { motivo: String(detalle ?? "") },
+    detalle:
+      typeof detalle === "object" && detalle
+        ? (detalle as ResultadoPublicacion["detalle"])
+        : { motivo: String(detalle ?? "") },
   };
 }
 
@@ -2165,14 +2491,23 @@ export async function accionPublicacion(
   motivo = "",
 ): Promise<Resultado<{ estado?: string; nota?: string }>> {
   return resultado(
-    await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}/${accion}`, {
-      method: "POST",
-      body: JSON.stringify({ motivo }),
-    }),
+    await apiFetch(
+      `/api/cursos/${cursoId}/correccion/${entregaId}/${sujetoId}/${accion}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ motivo }),
+      },
+    ),
   );
 }
 
-export async function comprobarContraCanvas(cursoId: string, entregaId: string): Promise<boolean> {
-  const respuesta = await apiFetch(`/api/cursos/${cursoId}/correccion/${entregaId}/comprobar`, { method: "POST" });
+export async function comprobarContraCanvas(
+  cursoId: string,
+  entregaId: string,
+): Promise<boolean> {
+  const respuesta = await apiFetch(
+    `/api/cursos/${cursoId}/correccion/${entregaId}/comprobar`,
+    { method: "POST" },
+  );
   return respuesta.ok;
 }

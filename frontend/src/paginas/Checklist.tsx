@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ejecutarPruebaEscritura,
   encolarChecklist,
@@ -18,9 +18,11 @@ import {
   Estado,
   Mensajes,
   Tabla,
+  etiqueta,
   useConfirmar,
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
+import { fechaLegible } from "../lib/textosTarea";
 const NOMBRES_ITEMS: Record<string, string> = {
   "1": "El token es válido y es tuyo",
   "2": "El curso existe, es visible y está publicado",
@@ -64,14 +66,42 @@ const ORDEN_VISUAL = [
   "18",
   "19",
 ];
+const GRUPO: Record<string, string> = {
+  "1": "Identidad y acceso a Canvas",
+  "4": "Permisos y capacidades de Canvas",
+  "8": "Organización académica y fechas",
+  "14": "Organización y acceso a GitHub",
+  "15": "Estudiantes y publicación en Canvas",
+  "18": "Acceso docente y limpieza de pruebas",
+};
 
 export function Checklist() {
   const { curso, puede, recargar } = useCurso();
   const administra = puede("curso.administrar");
-  const [ejecucion, setEjecucion] = useState<{
-    id: string;
-    cantidad: number;
-  } | null>(null);
+  const [params, setParams] = useSearchParams();
+  const ejecucion = useMemo(() => {
+    const id = params.get("ejecucion");
+    if (!id || !/^[a-zA-Z0-9-]{1,80}$/.test(id)) return null;
+    const item = params.get("item");
+    return {
+      id,
+      cantidad: item && ORDEN_VISUAL.includes(item) ? 1 : 19,
+      item: item && ORDEN_VISUAL.includes(item) ? item : null,
+    };
+  }, [params]);
+  function setEjecucion(valor: { id: string; item?: string } | null) {
+    setParams(
+      (actual) => {
+        const siguientes = new URLSearchParams(actual);
+        if (valor) siguientes.set("ejecucion", valor.id);
+        else siguientes.delete("ejecucion");
+        if (valor?.item) siguientes.set("item", valor.item);
+        else siguientes.delete("item");
+        return siguientes;
+      },
+      { replace: true },
+    );
+  }
   const [items, setItems] = useState<Record<string, ItemVerificacion>>({});
   const [consentimientos, setConsentimientos] = useState({
     "5-bis": false,
@@ -103,7 +133,13 @@ export function Checklist() {
   useEffect(() => {
     if (corrida.datos && ejecucion) {
       incorporar(corrida.datos);
-      if (corrida.datos.length >= ejecucion.cantidad) {
+      if (
+        new Set(
+          corrida.datos
+            .map((i) => i.item)
+            .filter((item) => item && ORDEN_VISUAL.includes(item)),
+        ).size >= ejecucion.cantidad
+      ) {
         setEjecucion(null);
         recargar();
       }
@@ -121,7 +157,14 @@ export function Checklist() {
   }, [ejecucion]);
   const ocupado = op.ocupado || ejecucion !== null;
   const filas = Object.values(items).filter(
-    (i) => i.item && !i.item.includes("bis"),
+    (i) =>
+      i.item &&
+      !i.item.includes("bis") &&
+      !(
+        ejecucion &&
+        (!ejecucion.item || ejecucion.item === i.item) &&
+        !corrida.datos?.some((nuevo) => nuevo.item === i.item)
+      ),
   );
   return (
     <>
@@ -139,6 +182,7 @@ export function Checklist() {
         <Link aria-current="page" to={`/cursos/${curso.id}/verificacion`}>
           Verificación
         </Link>
+        {administra && <Link to={`/cursos/${curso.id}/ajustes`}>Ajustes</Link>}
       </nav>
       <Mensajes {...op} />
       {ultima.error && (
@@ -177,7 +221,7 @@ export function Checklist() {
                 void op.ejecutar(async () => {
                   const r = await encolarChecklist(curso.id);
                   setItems({});
-                  setEjecucion({ id: r.ejecucion_id, cantidad: 19 });
+                  setEjecucion({ id: r.ejecucion_id });
                 }, "Verificación solicitada. Los resultados aparecerán a medida que se completen.")
               }
             >
@@ -203,69 +247,111 @@ export function Checklist() {
             </thead>
             <tbody>
               {ORDEN_VISUAL.map((id) => (
-                <tr key={id}>
-                  <td>
-                    <strong>
-                      {id}. {NOMBRES_ITEMS[id]}
-                    </strong>
-                    <p className="help">
-                      {["14", "18"].includes(id) ? "GitHub" : "Canvas"}
-                    </p>
-                    {items[id]?.detalle &&
-                      Object.keys(items[id].detalle).length > 0 && (
-                        <details>
-                          <summary>Ver motivo y detalles</summary>
-                          <pre>
-                            {JSON.stringify(items[id].detalle, null, 2)}
-                          </pre>
-                        </details>
+                <Fragment key={id}>
+                  {GRUPO[id] && (
+                    <tr className="table-section">
+                      <th scope="rowgroup" colSpan={3}>
+                        {GRUPO[id]}
+                      </th>
+                    </tr>
+                  )}
+                  <tr>
+                    <td>
+                      <strong>
+                        {id}. {NOMBRES_ITEMS[id]}
+                      </strong>
+                      <p className="help">
+                        {["14", "18"].includes(id) ? "GitHub" : "Canvas"}
+                      </p>
+                      {items[id]?.detalle &&
+                        Object.keys(items[id].detalle).length > 0 && (
+                          <details>
+                            <summary>Ver motivo y detalles</summary>
+                            <dl>
+                              {Object.entries(items[id].detalle).map(
+                                ([clave, valor]) => (
+                                  <div key={clave}>
+                                    <dt>{etiqueta(clave)}</dt>
+                                    <dd>
+                                      {typeof valor === "boolean"
+                                        ? valor
+                                          ? "Sí"
+                                          : "No"
+                                        : typeof valor === "string"
+                                          ? etiqueta(valor)
+                                          : JSON.stringify(valor)}
+                                    </dd>
+                                  </div>
+                                ),
+                              )}
+                            </dl>
+                          </details>
+                        )}
+                    </td>
+                    <td>
+                      {ejecucion &&
+                      (!ejecucion.item || ejecucion.item === id) &&
+                      !corrida.datos?.some((i) => i.item === id) ? (
+                        <Estado valor="NO_VERIFICADO" texto="En comprobación" />
+                      ) : (
+                        <Estado
+                          valor={items[id]?.resultado ?? "NO_VERIFICADO"}
+                        />
                       )}
-                  </td>
-                  <td>
-                    <Estado valor={items[id]?.resultado ?? "NO_VERIFICADO"} />
-                  </td>
-                  <td>
-                    {administra && (
-                      <div className="actions">
-                        <button
-                          disabled={ocupado}
-                          onClick={() =>
-                            void op.ejecutar(async () => {
-                              const r = await reejecutarItem(curso.id, id);
-                              setEjecucion({ id: r.ejecucion_id, cantidad: 1 });
-                            })
-                          }
-                        >
-                          Reintentar{" "}
-                          <span className="sr-only">comprobación {id}</span>
-                        </button>
-                        {id === "14" &&
-                          Boolean(items[id]?.detalle.requiere_firma_manual) && (
-                            <button
-                              disabled={ocupado}
-                              onClick={async () => {
-                                if (
-                                  await confirmar({
-                                    titulo: "Registrar verificación manual",
-                                    descripcion:
-                                      "Confirma que revisaste la configuración indicada de la organización. Quedará registrada como verificación manual con tu identidad.",
-                                    accion: "Registrar verificación",
-                                  })
-                                )
-                                  void op.ejecutar(async () =>
-                                    incorporar([
-                                      await firmarItem14AMano(curso.id),
-                                    ]),
-                                  );
-                              }}
-                            >
-                              Verificar manualmente
-                            </button>
+                      {items[id]?.ejecutada_en && (
+                        <p className="help">
+                          {fechaLegible(
+                            items[id].ejecutada_en,
+                            curso.zona_horaria,
                           )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
+                        </p>
+                      )}
+                    </td>
+                    <td>
+                      {administra && (
+                        <div className="actions">
+                          <button
+                            disabled={ocupado}
+                            onClick={() =>
+                              void op.ejecutar(async () => {
+                                const r = await reejecutarItem(curso.id, id);
+                                setEjecucion({ id: r.ejecucion_id, item: id });
+                              })
+                            }
+                          >
+                            Reintentar{" "}
+                            <span className="sr-only">comprobación {id}</span>
+                          </button>
+                          {id === "14" &&
+                            Boolean(
+                              items[id]?.detalle.requiere_firma_manual,
+                            ) && (
+                              <button
+                                disabled={ocupado}
+                                onClick={async () => {
+                                  if (
+                                    await confirmar({
+                                      titulo: "Registrar verificación manual",
+                                      descripcion:
+                                        "Confirma que revisaste la configuración indicada de la organización. Quedará registrada como verificación manual con tu identidad.",
+                                      accion: "Registrar verificación",
+                                    })
+                                  )
+                                    void op.ejecutar(async () =>
+                                      incorporar([
+                                        await firmarItem14AMano(curso.id),
+                                      ]),
+                                    );
+                                }}
+                              >
+                                Verificar manualmente
+                              </button>
+                            )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                </Fragment>
               ))}
             </tbody>
           </table>

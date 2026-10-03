@@ -40,3 +40,4 @@ PARA-EL-EQUIPO/
 # Navegador: resultados locales de pruebas frontend
 frontend/test-results/
 frontend/playwright-report/
+frontend/.backend-test-state.json

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   crearRegistroGithub,
   declararMapeoManual,
@@ -21,6 +21,7 @@ import {
   Tabla,
   Vacio,
   etiqueta,
+  useConfirmar,
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
@@ -213,19 +214,35 @@ function ImportacionCsv({ guardado }: { guardado: () => void }) {
 }
 export function Personas() {
   const { curso, puede } = useCurso();
+  const [params, setParams] = useSearchParams();
+  const confirmar = useConfirmar();
   const op = useOperacion();
   const [sincronizacion, setSincronizacion] = useState<{
     anterior: string | null;
   } | null>(null);
+  const [registroPendiente, setRegistroPendiente] = useState(false);
   const consulta = useConsulta(
     `personas-${curso.id}`,
     (signal) => obtenerPersonas(curso.id, signal),
-    sincronizacion ? 10_000 : 0,
+    sincronizacion || registroPendiente ? 5000 : 0,
   );
-  const [buscar, setBuscar] = useState("");
-  const [seccion, setSeccion] = useState("");
-  const [estado, setEstado] = useState("");
-  const [pagina, setPagina] = useState(1);
+  const buscar = params.get("buscar") ?? "";
+  const seccion = params.get("seccion") ?? "";
+  const estado = params.get("estado") ?? "";
+  const estudiante = params.get("estudiante");
+  const pagina = Math.max(1, Number(params.get("pagina")) || 1);
+  function filtro(clave: string, valor: string) {
+    setParams(
+      (actual) => {
+        const siguiente = new URLSearchParams(actual);
+        if (valor) siguiente.set(clave, valor);
+        else siguiente.delete(clave);
+        if (clave !== "pagina") siguiente.delete("pagina");
+        return siguiente;
+      },
+      { replace: true },
+    );
+  }
   useEffect(() => {
     if (
       sincronizacion &&
@@ -236,6 +253,23 @@ export function Personas() {
       op.setMensaje("Los datos de estudiantes se actualizaron desde Canvas.");
     }
   }, [consulta.datos, sincronizacion]);
+  useEffect(() => {
+    if (registroPendiente && consulta.datos?.registro_estado === "ABIERTA") {
+      setRegistroPendiente(false);
+      op.setMensaje("La tarea de registro está disponible en Canvas.");
+    }
+  }, [consulta.datos, registroPendiente]);
+  useEffect(() => {
+    if (!sincronizacion && !registroPendiente) return;
+    const temporizador = window.setTimeout(() => {
+      setSincronizacion(null);
+      setRegistroPendiente(false);
+      op.setMensaje(
+        "El proceso sigue sin confirmar su resultado. Usa Actualizar vista para consultar los cambios; los datos disponibles permanecen visibles.",
+      );
+    }, 180_000);
+    return () => window.clearTimeout(temporizador);
+  }, [sincronizacion, registroPendiente]);
   const d = consulta.datos;
   if (!d)
     return (
@@ -250,6 +284,7 @@ export function Personas() {
     );
   const filas = d.estudiantes.filter(
     (e) =>
+      (!estudiante || e.id === estudiante) &&
       `${e.nombre} ${e.email ?? ""} ${e.sis_user_id ?? ""} ${e.mapeo.cuenta_login ?? ""}`
         .toLocaleLowerCase("es-CL")
         .includes(buscar.toLocaleLowerCase("es-CL")) &&
@@ -262,6 +297,9 @@ export function Personas() {
   );
   const estados = [...new Set(d.estudiantes.map((e) => e.mapeo.estado))];
   const secciones = [...new Set(d.estudiantes.flatMap((e) => e.secciones))];
+  const estudiantesVigentes = d.estudiantes.filter((e) =>
+    ["ACTIVO", "INVITADO"].includes(e.estado),
+  );
   return (
     <>
       <Cabecera
@@ -302,10 +340,13 @@ export function Personas() {
         </div>
         <div className="metric">
           <strong>
-            {d.estudiantes.filter((e) => e.mapeo.estado === "VIGENTE").length} /{" "}
-            {d.estudiantes.length}
+            {
+              estudiantesVigentes.filter((e) => e.mapeo.estado === "VIGENTE")
+                .length
+            }{" "}
+            / {estudiantesVigentes.length}
           </strong>
-          <span>Con cuenta verificada</span>
+          <span>Inscripciones vigentes con cuenta verificada</span>
         </div>
         <div className="metric">
           <strong>{d.secciones.length}</strong>
@@ -329,17 +370,37 @@ export function Personas() {
             ["ALTERADA", "DESAPARECIDA"].includes(d.registro_estado)) && (
             <button
               className="primary"
-              disabled={op.ocupado}
-              onClick={() =>
+              disabled={op.ocupado || registroPendiente}
+              onClick={async () => {
+                if (
+                  !(await confirmar({
+                    titulo:
+                      d.registro_estado === "NO_CREADA"
+                        ? "Crear registro en Canvas"
+                        : "Restaurar registro en Canvas",
+                    descripcion:
+                      "Se publicará la tarea Registro de tu cuenta de GitHub en Canvas para que los estudiantes declaren su usuario. No tienen que acceder a esta aplicación.",
+                    accion: "Publicar registro",
+                  }))
+                )
+                  return;
                 void op.ejecutar(async () => {
-                  await comprobar(
-                    await (d.registro_estado === "NO_CREADA"
-                      ? crearRegistroGithub(curso.id)
-                      : restaurarRegistroGithub(curso.id)),
-                  );
+                  const respuesta = await (d.registro_estado === "NO_CREADA"
+                    ? crearRegistroGithub(curso.id)
+                    : restaurarRegistroGithub(curso.id));
+                  await comprobar(respuesta);
+                  if (respuesta.status === 202) {
+                    setRegistroPendiente(true);
+                    op.setMensaje(
+                      "La creación quedó pendiente en Canvas. Consultaremos el resultado mientras continúas trabajando.",
+                    );
+                  } else
+                    op.setMensaje(
+                      "La tarea de registro está disponible en Canvas.",
+                    );
                   consulta.recargar();
-                }, "La tarea de registro está disponible en Canvas.")
-              }
+                });
+              }}
             >
               {d.registro_estado === "NO_CREADA"
                 ? "Crear tarea de registro en Canvas"
@@ -353,6 +414,20 @@ export function Personas() {
       </section>
       <section className="panel">
         <h2>Estudiantes</h2>
+        {estudiante && (
+          <p className="help">
+            Mostrando la persona seleccionada desde Pendientes.{" "}
+            <button onClick={() => filtro("estudiante", "")}>
+              Ver todas las personas
+            </button>
+          </p>
+        )}
+        {!puede("mapeo.editar") && (
+          <p className="help">
+            Los correos e identificadores personales están enmascarados para tu
+            permiso actual.
+          </p>
+        )}
         <p className="help">
           Última sincronización:{" "}
           {d.roster_sincronizado_en
@@ -367,8 +442,7 @@ export function Personas() {
               type="search"
               value={buscar}
               onChange={(e) => {
-                setBuscar(e.target.value);
-                setPagina(1);
+                filtro("buscar", e.target.value);
               }}
               placeholder="Nombre, correo o cuenta"
             />
@@ -378,8 +452,7 @@ export function Personas() {
             <select
               value={seccion}
               onChange={(e) => {
-                setSeccion(e.target.value);
-                setPagina(1);
+                filtro("seccion", e.target.value);
               }}
             >
               <option value="">Todas las secciones</option>
@@ -393,8 +466,7 @@ export function Personas() {
             <select
               value={estado}
               onChange={(e) => {
-                setEstado(e.target.value);
-                setPagina(1);
+                filtro("estado", e.target.value);
               }}
             >
               <option value="">Todos los estados</option>
@@ -478,7 +550,7 @@ export function Personas() {
             <Paginacion
               total={filas.length}
               pagina={paginaActual}
-              cambiar={setPagina}
+              cambiar={(numero) => filtro("pagina", String(numero))}
             />
           </>
         )}
@@ -502,8 +574,8 @@ export function Personas() {
         <details className="panel">
           <summary>Grupos ({d.grupos.length})</summary>
           <p className="help">
-            Información de Canvas. Las tareas de esta entrega son individuales.
-            Última sincronización:{" "}
+            Integrantes y conjuntos de grupos sincronizados desde Canvas. Última
+            sincronización:{" "}
             {d.grupos_sincronizado_en
               ? fechaLegible(d.grupos_sincronizado_en, curso.zona_horaria)
               : "sin sincronizar"}
@@ -523,7 +595,7 @@ export function Personas() {
         </details>
       </div>
       <section className="panel next-step">
-        <h2>Configura tu tarea individual</h2>
+        <h2>Continúa con las tareas</h2>
         <p>Puedes continuar aunque queden cuentas de GitHub pendientes.</p>
         <Link className="button primary" to={`/cursos/${curso.id}/tareas`}>
           Ir a Tareas
