@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.adaptadores import (
@@ -15,14 +17,19 @@ from app.adaptadores import (
     cuenta_repo,
     cursos_repo,
     invitaciones_correo,
+    trabajos_repo,
 )
 from app.adaptadores.base import ahora_utc
+from app.adaptadores.modelos_aprovisionamiento import Repositorio
+from app.adaptadores.modelos_correccion import AsignacionCorreccion, Correccion
 from app.adaptadores.modelos_curso import Curso, InvitacionEquipo, MembresiaCurso
+from app.adaptadores.modelos_github import AccesoDocenteRepositorio
 from app.adaptadores.modelos_identidad import Sesion, Usuario
 from app.adaptadores.modelos_infraestructura import Bitacora
 from app.adaptadores.proveedor_correo import motivo_bloqueo
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere, usuario_actual
 from app.dominio.estados import RolMembresia
+from app.dominio.correccion import TERMINALES
 from app.dominio.identidad import RechazoCorreo, normalizar_correo_google
 from app.dominio.membresia import UltimoProfesorActivo, puede_retirar_o_degradar
 from app.dominio.permisos import (
@@ -67,6 +74,36 @@ class CursoSalida(BaseModel):
     periodo: str
     slug: str
     zona_horaria: str
+    umbral_dias_sin_actividad: int
+    umbral_desbalance_pct: int
+
+
+class AjustesCursoEntrada(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: str | None = Field(default=None, min_length=1, max_length=200)
+    zona_horaria: str | None = Field(default=None, min_length=1, max_length=100)
+    umbral_dias_sin_actividad: int | None = Field(default=None, ge=1, le=30, strict=True)
+    umbral_desbalance_pct: int | None = Field(default=None, ge=50, le=95, strict=True)
+
+    @field_validator("nombre", "zona_horaria", mode="before")
+    @classmethod
+    def texto_no_vacio(cls, valor: object) -> object:
+        if isinstance(valor, str):
+            valor = valor.strip()
+            if not valor:
+                raise ValueError("El valor no puede quedar vacío.")
+        return valor
+
+    @field_validator("zona_horaria")
+    @classmethod
+    def zona_iana(cls, valor: str | None) -> str | None:
+        if valor is not None:
+            try:
+                ZoneInfo(valor)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise ValueError("Indica una zona IANA válida, por ejemplo America/Santiago.") from None
+        return valor
 
 
 class CursoEntrada(BaseModel):
@@ -86,6 +123,7 @@ class MiembroSalida(BaseModel):
     permisos: list[str]
     estado: str
     retirada_en: datetime | None
+    es_via_compartida: bool
     github_login: str | None = None
     github_estado: str | None = None
     github_error: str | None = None
@@ -123,6 +161,7 @@ class RolEntrada(BaseModel):
 class ContextoSalida(BaseModel):
     rol: str
     permisos_efectivos: list[str]
+    es_via_compartida: bool
 
 
 class InvitacionPublicaSalida(BaseModel):
@@ -183,6 +222,43 @@ def listar_cursos(
     return cursos_repo.listar_cursos_de_usuario(bd, usuario.id)
 
 
+@router.patch(
+    "/api/cursos/{curso_id}", response_model=CursoSalida, dependencies=[Depends(exigir_csrf)]
+)
+def actualizar_curso(
+    curso_id: uuid.UUID,
+    datos: AjustesCursoEntrada,
+    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
+    bd: Session = Depends(obtener_sesion_bd),
+    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
+) -> Curso:
+    cambios = datos.model_dump(exclude_unset=True)
+    if not cambios or any(valor is None for valor in cambios.values()):
+        raise HTTPException(status_code=422, detail="Indica al menos un ajuste, sin valores nulos.")
+    curso = bd.query(Curso).filter(Curso.id == curso_id).with_for_update().one_or_none()
+    if curso is None:
+        raise HTTPException(status_code=404)
+    cambios = {clave: valor for clave, valor in cambios.items() if getattr(curso, clave) != valor}
+    if not cambios:
+        return curso
+    antes = {clave: getattr(curso, clave) for clave in cambios}
+    for clave, valor in cambios.items():
+        setattr(curso, clave, valor)
+    curso.actualizado_en = ahora_utc()
+    bitacora_repo.registrar(
+        bd, accion="CURSO_AJUSTES_ACTUALIZADOS", entidad="curso", entidad_id=str(curso_id),
+        actor_usuario_id=actual[0].id, curso_id=curso_id, antes=antes, despues=cambios,
+    )
+    if cambios.keys() & {"zona_horaria", "umbral_dias_sin_actividad", "umbral_desbalance_pct"}:
+        # Los agregados se recomputan desde el espejo; nunca se cambian fechas UTC ni commits.
+        trabajos_repo.encolar(
+            bd, tipo="agregar_metricas", curso_id=curso_id, max_intentos=2,
+            clave_idempotencia=f"ajustes-metricas:{curso_id}:{uuid.uuid4()}",
+            payload={"motivo": "AJUSTES_CURSO_CAMBIADOS"},
+        )
+    return curso
+
+
 @router.get("/api/cursos/{curso_id}/contexto", response_model=ContextoSalida)
 def obtener_contexto(
     membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
@@ -190,7 +266,10 @@ def obtener_contexto(
     efectivos = permisos_efectivos(
         rol=membresia.rol, permisos_configurados=frozenset(Permiso(p) for p in membresia.permisos)
     )
-    return ContextoSalida(rol=membresia.rol, permisos_efectivos=sorted(p.value for p in efectivos))
+    return ContextoSalida(
+        rol=membresia.rol, permisos_efectivos=sorted(p.value for p in efectivos),
+        es_via_compartida=membresia.es_via_compartida,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -218,6 +297,7 @@ def listar_equipo(
             permisos=f.permisos,
             estado=f.estado,
             retirada_en=f.retirada_en,
+            es_via_compartida=f.es_via_compartida,
             github_login=usuarios[f.usuario_id].github_login_declarado,
             github_estado=f.org_github_estado,
             github_error=f.org_github_ultimo_error,
@@ -542,18 +622,40 @@ def impacto_retiro(
     bd: Session = Depends(obtener_sesion_bd),
     _membresia: MembresiaCurso = Depends(requiere(Permiso.EQUIPO_ADMINISTRAR)),
 ) -> dict[str, object]:
-    """S2.9.5. Repositorios/entregas sin corrector se computan desde P4/F11 en
-    adelante; hoy siempre son cero porque esas tablas todavia no existen."""
+    """S2.9.5: efectos sobre acceso local y asignaciones todavía reasignables."""
     objetivo = _obtener_membresia_o_404(bd, curso_id=curso_id, membresia_id=membresia_id)
     sesiones_activas = (
         bd.query(Sesion)
-        .filter(Sesion.usuario_id == objetivo.usuario_id, Sesion.revocada_en.is_(None))
+        .filter(
+            Sesion.usuario_id == objetivo.usuario_id, Sesion.revocada_en.is_(None),
+            Sesion.expira_en > ahora_utc(),
+        )
         .count()
     )
+    accesos = bd.query(AccesoDocenteRepositorio.repositorio_id).join(
+        Repositorio, Repositorio.id == AccesoDocenteRepositorio.repositorio_id
+    ).filter(
+        Repositorio.curso_id == curso_id,
+        AccesoDocenteRepositorio.estado == "CONCEDIDO",
+        or_(
+            AccesoDocenteRepositorio.membresia_id == objetivo.id,
+            and_(AccesoDocenteRepositorio.via == "TEAM", objetivo.org_github_estado == "ACTIVA"),
+        ),
+    ).distinct().count()
+    asignaciones = bd.query(AsignacionCorreccion.entrega_id).join(
+        Correccion,
+        and_(Correccion.entrega_id == AsignacionCorreccion.entrega_id,
+             Correccion.sujeto_id == AsignacionCorreccion.sujeto_id),
+    ).filter(
+        AsignacionCorreccion.membresia_id == objetivo.id,
+        Correccion.estado.notin_(TERMINALES | {"PUBLICANDO"}),
+    ).all()
+    activa = objetivo.estado == "ACTIVA"
     return {
-        "sesiones_a_cerrar": sesiones_activas,
-        "repositorios_perdidos": 0,
-        "entregas_sin_corrector": 0,
+        "sesiones_a_cerrar": sesiones_activas if activa else 0,
+        "repositorios_perdidos": accesos if activa else 0,
+        "entregas_sin_corrector": len({a.entrega_id for a in asignaciones}) if activa else 0,
+        "asignaciones_sin_corrector": len(asignaciones) if activa else 0,
         "es_profesor": objetivo.rol == RolMembresia.PROFESOR.value,
     }
 

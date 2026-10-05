@@ -16,10 +16,17 @@ import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
 import { NotificacionesPerfil } from "./NotificacionesPerfil";
 interface FilaSesion {
-  id: number;
+  id: string;
   agente: string | null;
   creada_en: string;
   es_la_actual: boolean;
+}
+interface IdentidadCanvas {
+  id: string;
+  canvas_base_url: string;
+  canvas_user_id: number;
+  verificada_en: string;
+  cursos: { id: string; nombre: string; operativa: boolean }[];
 }
 export function PerfilPagina() {
   const sesion = useSesion();
@@ -36,6 +43,11 @@ export function PerfilPagina() {
     const r = await apiFetch("/api/perfil/sesiones", { signal });
     await comprobar(r);
     return r.json() as Promise<FilaSesion[]>;
+  });
+  const identidades = useConsulta("identidades-canvas", async (signal) => {
+    const r = await apiFetch("/api/perfil/identidades-canvas", { signal });
+    await comprobar(r);
+    return r.json() as Promise<IdentidadCanvas[]>;
   });
   async function guardar(path: string, method: string, body?: object) {
     const r = await apiFetch(path, {
@@ -210,6 +222,79 @@ export function PerfilPagina() {
           </form>
         </section>
         <section className="panel">
+          <h2>Mis identidades de Canvas</h2>
+          <p>
+            Cuentas verificadas al vincular tus cursos. Desvincular retira tus
+            credenciales en esa instancia; se usará una credencial de respaldo
+            cuando exista.
+          </p>
+          {identidades.error && (
+            <ErrorCarga
+              error={identidades.error}
+              reintentar={identidades.recargar}
+            />
+          )}
+          {!identidades.datos ? (
+            !identidades.error && <Cargando />
+          ) : identidades.datos.length === 0 ? (
+            <p className="help">No tienes identidades de Canvas vinculadas.</p>
+          ) : (
+            <ul className="list-clean">
+              {identidades.datos.map((identidad) => (
+                <li key={identidad.id}>
+                  <strong>{identidad.canvas_base_url}</strong>
+                  <p className="help">
+                    Cuenta de Canvas {identidad.canvas_user_id} · Verificada el{" "}
+                    {fechaLegible(identidad.verificada_en)}
+                  </p>
+                  {identidad.cursos.length > 0 && (
+                    <ul>
+                      {identidad.cursos.map((c) => (
+                        <li key={c.id}>
+                          <Link to={`/cursos/${c.id}/vinculacion`}>
+                            {c.nombre}
+                          </Link>{" "}
+                          ·{" "}
+                          {c.operativa
+                            ? "Credencial operativa"
+                            : "Credencial de respaldo"}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <button
+                    className="danger"
+                    disabled={op.ocupado}
+                    onClick={async () => {
+                      if (
+                        !(await confirmar({
+                          titulo: "Desvincular identidad de Canvas",
+                          descripcion: `Se retirarán tus ${identidad.cursos.length} credenciales en ${identidad.canvas_base_url}. Los cursos que no tengan respaldo quedarán esperando una nueva credencial. El historial se conserva.`,
+                          accion: "Desvincular identidad",
+                          peligro: true,
+                        }))
+                      )
+                        return;
+                      void op.ejecutar(async () => {
+                        await comprobar(
+                          await apiFetch(
+                            `/api/perfil/identidades-canvas/${identidad.id}`,
+                            { method: "DELETE" },
+                          ),
+                        );
+                        identidades.recargar();
+                        sesion.recargar();
+                      }, "Identidad desvinculada y credenciales retiradas.");
+                    }}
+                  >
+                    Desvincular identidad
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section className="panel">
           <h2>Apariencia</h2>
           <Apariencia />
         </section>
@@ -229,6 +314,32 @@ export function PerfilPagina() {
                   </strong>
                   <p className="help">{s.agente ?? "Navegador no informado"}</p>
                   <p className="help">Desde {fechaLegible(s.creada_en)}</p>
+                  <button
+                    disabled={op.ocupado}
+                    onClick={async () => {
+                      if (
+                        !(await confirmar({
+                          titulo: s.es_la_actual
+                            ? "Cerrar esta sesión"
+                            : "Cerrar sesión",
+                          descripcion: `Se cerrará el acceso de ${s.agente ?? "ese navegador"}. Las demás sesiones seguirán activas.`,
+                          accion: "Cerrar sesión",
+                        }))
+                      )
+                        return;
+                      void op.ejecutar(async () => {
+                        await comprobar(
+                          await apiFetch(`/api/perfil/sesiones/${s.id}`, {
+                            method: "DELETE",
+                          }),
+                        );
+                        if (s.es_la_actual) window.location.assign("/acceso");
+                        else sesiones.recargar();
+                      }, "Sesión cerrada.");
+                    }}
+                  >
+                    {s.es_la_actual ? "Cerrar esta sesión" : "Cerrar sesión"}
+                  </button>
                 </li>
               ))}
             </ul>

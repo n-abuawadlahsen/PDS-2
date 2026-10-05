@@ -5,9 +5,8 @@ import {
   listarTareas,
   obtenerAssignmentsCanvas,
   obtenerVistaPreviaNombre,
-  sincronizarAhora,
 } from "../lib/api";
-import { comprobar } from "../lib/errores";
+import { SincronizarCanvas } from "../components/SeguimientoTrabajos";
 import { useCurso } from "../components/Layout";
 import {
   Aviso,
@@ -33,13 +32,9 @@ export function Tareas() {
   const lista = useConsulta(`tareas-${curso.id}`, (signal) =>
     listarTareas(curso.id, signal),
   );
-  const [sincronizacion, setSincronizacion] = useState<{
-    anterior: string | null;
-  } | null>(null);
   const canvas = useConsulta(
     `assignments-${curso.id}`,
     (signal) => obtenerAssignmentsCanvas(curso.id, signal),
-    sincronizacion ? 10_000 : 0,
   );
   const [crear, setCrear] = useState(false);
   const [assignment, setAssignment] = useState("");
@@ -69,16 +64,6 @@ export function Tareas() {
           )
         : Promise.resolve(null),
   );
-  useEffect(() => {
-    if (
-      sincronizacion &&
-      canvas.datos?.sincronizado_en &&
-      canvas.datos.sincronizado_en !== sincronizacion.anterior
-    ) {
-      setSincronizacion(null);
-      op.setMensaje("Las tareas de Canvas se actualizaron.");
-    }
-  }, [canvas.datos, sincronizacion]);
   const vistaVigente =
     previewClave.nombre === nombre && previewClave.slug === slug;
   const elegida = canvas.datos?.assignments.find(
@@ -131,27 +116,10 @@ export function Tareas() {
                   : "sin sincronizar"}
                 .
               </p>
-              {puede("curso.administrar") && (
-                <button
-                  disabled={op.ocupado || Boolean(sincronizacion)}
-                  onClick={() =>
-                    void op.ejecutar(async () => {
-                      await comprobar(await sincronizarAhora(curso.id));
-                      setSincronizacion({
-                        anterior: canvas.datos!.sincronizado_en,
-                      });
-                    }, "Sincronización solicitada. Esperaremos los datos actualizados de Canvas.")
-                  }
-                >
-                  {sincronizacion
-                    ? "Sincronización solicitada"
-                    : "Sincronizar tareas de Canvas"}
-                </button>
-              )}
+              <SincronizarCanvas actualizado={canvas.recargar} titulo="Sincronizar tareas de Canvas" />
               {!canvas.datos.assignments.length ? (
                 <Vacio>
-                  No hay tareas de Canvas sincronizadas. Un profesor puede
-                  solicitar la sincronización.
+                  No hay tareas de Canvas sincronizadas. Solicita la sincronización para leer las tareas publicadas.
                 </Vacio>
               ) : (
                 <form
@@ -223,7 +191,7 @@ export function Tareas() {
                     <p className="help">
                       Modalidad:{" "}
                       {elegida.es_grupal
-                        ? "Grupal · conjunto de grupos definido en Canvas"
+                        ? `Grupal · ${elegida.conjunto_grupos_nombre ?? "Nombre del conjunto aún no sincronizado"}${elegida.canvas_group_category_id ? ` · Canvas #${elegida.canvas_group_category_id}` : ""}`
                         : "Individual"}
                       . Cierre:{" "}
                       {fechaLegible(elegida.due_at, curso.zona_horaria)} ·{" "}

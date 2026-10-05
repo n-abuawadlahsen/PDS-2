@@ -38,6 +38,7 @@ from app.adaptadores.modelos_identidad import Usuario
 from app.adaptadores.modelos_mapeo import MapeoGithub
 from app.adaptadores.modelos_padron import Estudiante, Grupo, Matricula, PertenenciaGrupo, Seccion
 from app.adaptadores.modelos_tarea import Entrega, Tarea
+from app.adaptadores.recordatorios_repo import resumen_recordatorios
 from app.dominio.comunicaciones import (
     DIAS_SUSPENSION_MAXIMA,
     EVENTOS,
@@ -416,7 +417,7 @@ def _programar_recordatorio_mapeo(bd: Session, curso: Curso, ahora: datetime) ->
         )
     }
     nuevos = 0
-    for est in bd.query(Estudiante).filter(Estudiante.curso_id == curso.id):
+    for est in bd.query(Estudiante).filter(Estudiante.curso_id == curso.id).with_for_update():
         previos = _previos(bd, "recordatorio_mapeo", curso_id=curso.id, estudiante_id=est.id)
         if est.id in vigentes:
             for m in previos:
@@ -425,7 +426,10 @@ def _programar_recordatorio_mapeo(bd: Session, curso: Curso, ahora: datetime) ->
             continue
         if est.estado != "ACTIVO" or local.hour < HORA_RECORDATORIO_MAPEO:
             continue
-        if ahora - curso.registro_creado_en < timedelta(hours=24) or len(previos) >= 3:
+        resumen = resumen_recordatorios(bd, est)
+        if (resumen.enviados + resumen.reservados >= 3
+            or (resumen.proximo_en is not None and resumen.proximo_en > ahora)
+            or ahora - curso.registro_creado_en < timedelta(hours=24) or len(previos) >= 3):
             continue
         if previos:
             ultimo = previos[-1].creado_en.astimezone(ZoneInfo(curso.zona_horaria)).date()

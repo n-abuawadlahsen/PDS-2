@@ -73,6 +73,7 @@ class IntegranteSalida(BaseModel):
 
 
 class FilaRepositorioSalida(BaseModel):
+    sujeto_id: uuid.UUID
     repositorio_id: uuid.UUID
     estudiante_id: uuid.UUID | None
     sujeto: str
@@ -189,6 +190,7 @@ def listar_repositorios(
         filas.append(
             FilaRepositorioSalida(
                 repositorio_id=repositorio.id,
+                sujeto_id=sujeto.id,
                 estudiante_id=estudiante.id if estudiante is not None else None,
                 sujeto=(
                     grupo.nombre

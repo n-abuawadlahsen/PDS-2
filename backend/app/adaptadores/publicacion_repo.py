@@ -40,7 +40,6 @@ from app.adaptadores.modelos_correccion import (
     PublicacionNota,
 )
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
-from app.adaptadores.modelos_identidad import Usuario
 from app.adaptadores.modelos_padron import Estudiante
 from app.adaptadores.modelos_tarea import AssignmentCanvas, Entrega, Tarea
 from app.adaptadores.modelos_version import VersionEntrega
@@ -157,27 +156,33 @@ def _marcar_no_publicable(bd: Session, c: Correccion, motivo: str) -> None:
     bd.flush()
 
 
+def comentario_para_publicar(bd: Session, c: Correccion, *, entrega: Entrega, curso: Curso) -> str:
+    """El mismo texto sirve de previsualización autorizada y de payload real."""
+    from app.adaptadores.correccion_detalle_repo import autoria
+
+    autor = autoria(bd, c, curso.id)
+    version = bd.get(VersionEntrega, c.version_entrega_id) if c.version_entrega_id else None
+    fecha = _fecha_de_entrega(bd, entrega, c.sujeto_id)
+    return pie_comentario(
+        texto=c.comentario or "",
+        entrega=entrega.nombre,
+        cierre=formatear_fecha(fecha, curso.zona_horaria) if fecha else "sin fecha",
+        sha=version.commit_sha if version and version.estado != "SIN_COMMITS" else None,
+        repositorio_full_name=version.repositorio_full_name if version else None,
+        corrector=autor["nombre"] or "el equipo docente",
+        rol={"PROFESOR": "profesor", "AYUDANTE": "ayudante"}.get(autor["rol"], "equipo docente"),
+    )
+
+
 def _payload(
     bd: Session,
     c: Correccion,
     *,
     entrega: Entrega,
     curso: Curso,
-    corrector: Usuario | None,
-    rol: str,
     grupal_no_individual: bool,
 ) -> dict[str, Any]:
-    version = bd.get(VersionEntrega, c.version_entrega_id) if c.version_entrega_id else None
-    fecha = _fecha_de_entrega(bd, entrega, c.sujeto_id)
-    texto = pie_comentario(
-        texto=c.comentario or "",
-        entrega=entrega.nombre,
-        cierre=formatear_fecha(fecha, curso.zona_horaria) if fecha else "sin fecha",
-        sha=version.commit_sha if version and version.estado != "SIN_COMMITS" else None,
-        repositorio_full_name=version.repositorio_full_name if version else None,
-        corrector=corrector.nombre if corrector else "el equipo docente",
-        rol="profesor" if rol == "PROFESOR" else "ayudante",
-    )
+    texto = comentario_para_publicar(bd, c, entrega=entrega, curso=curso)
     c.comentario_renderizado = texto
     payload: dict[str, Any] = {
         "submission": {
@@ -322,16 +327,12 @@ def publicar(
     # 3. Intencion persistida antes de la llamada (A-169 punto 2).
     grupal = sujeto.grupo_id is not None
     individual = not grupal or _individual_en_canvas(bd, entrega)
-    corrector = bd.get(Usuario, c.corrector_usuario_id) if c.corrector_usuario_id else None
-    rol_corrector = actor.rol
     try:
         payload = _payload(
             bd,
             c,
             entrega=entrega,
             curso=curso,
-            corrector=corrector,
-            rol=rol_corrector,
             grupal_no_individual=grupal and not individual,
         )
     except ValueError as exc:
