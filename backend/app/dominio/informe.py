@@ -226,42 +226,181 @@ def renderizar_texto(doc: DocumentoInforme, *, url_base: str, pie: str) -> str:
     return "\n".join(lineas)
 
 
+# Color de acento por seccion: rojo = actuar hoy, ambar = falta informacion,
+# gris = silencio, azul = calendario, verde = resumen. Contraste AA sobre blanco.
+_COLOR_SECCION = {1: "#b42318", 2: "#93370d", 3: "#475467", 4: "#175cd3", 5: "#216044"}
+_FONDO_SECCION = {1: "#fef3f2", 2: "#fffaeb", 3: "#f2f4f7", 4: "#eff8ff", 5: "#ecfdf3"}
+_FUENTE = "font-family:Lato,'Segoe UI',Arial,sans-serif"
+
+
+def _total_nombrados(s: Seccion) -> int:
+    return sum(len(li.items) + li.mas for li in s.lineas if li.cifra is None)
+
+
+def _resumen_html(doc: DocumentoInforme) -> str:
+    """Franja de cifras arriba del correo: cuanto hay en cada seccion de
+    alerta, para decidir de un vistazo si hay que abrir el detalle."""
+    celdas = []
+    for s in doc.secciones:
+        if s.numero == 5:
+            continue
+        color = _COLOR_SECCION[s.numero]
+        celdas.append(
+            f'<td style="padding:4px"><div style="background:{_FONDO_SECCION[s.numero]};'
+            f'border-radius:6px;padding:10px 12px;text-align:left">'
+            f'<div style="font-size:22px;font-weight:700;color:{color}">{_total_nombrados(s)}</div>'
+            f'<div style="font-size:12px;color:#344054">{escape(s.titulo)}</div></div></td>'
+        )
+    if not celdas:
+        return ""
+    return (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="margin:0 -4px 8px;table-layout:fixed"><tr>{"".join(celdas)}</tr></table>'
+    )
+
+
+def _pastilla(texto: str, numero: int) -> str:
+    return (
+        f'<span style="display:inline-block;min-width:18px;padding:1px 7px;border-radius:10px;'
+        f"background:{_FONDO_SECCION.get(numero, '#f2f4f7')};"
+        f"color:{_COLOR_SECCION.get(numero, '#475467')};font-size:12px;font-weight:700;"
+        f'text-align:center;vertical-align:1px">{escape(texto)}</span>'
+    )
+
+
+def _fila_item(i: Item, url_app: str, color: str) -> str:
+    """Un caso por fila: quien (destacado), que le pasa (en gris) y un enlace
+    corto, en vez de una vineta con todo el texto subrayado."""
+    e = escape
+    url = e(url_app + i.enlace)
+    nombre, sep, detalle = i.texto.partition(": ")
+    detalle_html = (
+        f'<div style="font-size:13px;color:#667085;margin-top:1px">{e(detalle)}</div>'
+        if sep
+        else ""
+    )
+    return (
+        '<tr><td style="padding:9px 12px;border-top:1px solid #eaecf0">'
+        f'<a href="{url}" style="color:#101828;font-size:14px;font-weight:600;'
+        f'text-decoration:none">{e(nombre)}</a>{detalle_html}</td>'
+        '<td width="56" style="padding:9px 12px;border-top:1px solid #eaecf0;'
+        f'text-align:right;white-space:nowrap"><a href="{url}" style="color:{color};'
+        f'font-size:13px;font-weight:600;text-decoration:none">Ver ›</a></td></tr>'
+    )
+
+
+def _linea_html(li: Linea, url_app: str, numero: int) -> str:
+    e = escape
+    if li.cifra is not None:
+        return (
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
+            '<tr><td style="padding:7px 0;border-top:1px solid #eaecf0;font-size:14px">'
+            f"{e(li.titulo)}</td>"
+            '<td style="padding:7px 0;border-top:1px solid #eaecf0;font-size:16px;'
+            f'text-align:right;font-weight:700;color:#101828">{e(li.cifra)}</td></tr></table>'
+        )
+    color = _COLOR_SECCION.get(numero, "#475467")
+    filas = "".join(_fila_item(i, url_app, color) for i in li.items)
+    extras = []
+    if li.mas:
+        extras.append(f"y {li.mas} más en la plataforma")
+    if li.contados_en_otra_seccion:
+        extras.append(f"{li.contados_en_otra_seccion} ya nombrados más arriba")
+    if extras:
+        filas += (
+            '<tr><td colspan="2" style="padding:7px 12px;border-top:1px solid #eaecf0;'
+            f'font-size:12px;color:#667085;background:#f9fafb">{e(" · ".join(extras))}</td></tr>'
+        )
+    return (
+        '<div style="margin-top:10px">'
+        f'<div style="font-size:14px;font-weight:700;color:#101828;margin-bottom:6px">'
+        f"{e(li.titulo)} {_pastilla(str(len(li.items) + li.mas), numero)}</div>"
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="border:1px solid #eaecf0;border-top:0;border-radius:6px;'
+        f'border-collapse:separate">{filas}</table></div>'
+    )
+
+
 def renderizar_html(doc: DocumentoInforme, *, url_base: str, url_app: str, pie: str) -> str:
+    """Correo de una columna con tablas y estilos en linea (los clientes de
+    correo ignoran <style> y CSS moderno), sin imagenes ni recursos remotos."""
     e = escape
     partes = [
-        '<div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif;color:#222">',
-        f'<h1 style="font-size:18px">Informe docente de {e(doc.curso_nombre)} '
-        f"({e(doc.curso_codigo)}) · {doc.fecha:%d-%m-%Y}</h1>",
-        f'<p style="color:#555;font-size:13px">{e(doc.ventana_texto)}</p>',
+        f'<div style="background:#f6f7f8;padding:16px 8px;{_FUENTE};color:#24313a">',
+        '<div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #d6dce1;'
+        'border-radius:8px;overflow:hidden">',
+        # Cabecera
+        '<div style="border-top:4px solid #b42318;padding:20px 24px 12px">',
+        f'<div style="font-size:12px;color:#596773;text-transform:uppercase;letter-spacing:.05em">'
+        f"{e(doc.curso_codigo)} · Informe docente diario</div>",
+        f'<h1 style="font-size:20px;line-height:1.3;margin:4px 0 2px;color:#101828">'
+        f"{e(doc.curso_nombre)}</h1>",
+        f'<div style="font-size:14px;color:#596773">{doc.fecha:%d-%m-%Y} · '
+        f"{e(doc.ventana_texto)}</div>",
+        "</div>",
+        '<div style="padding:4px 24px 20px">',
     ]
-    for f in doc.frescura_texto:
-        partes.append(f'<p style="color:#555;font-size:13px">{e(f)}</p>')
     if doc.aviso_datos_viejos:
-        partes.append(f'<p style="background:#fff3cd;padding:8px">{e(doc.aviso_datos_viejos)}</p>')
-    partes.append(
-        '<p style="font-size:13px">Si no ves este correo en tu bandeja, el informe completo '
-        f'está siempre en <a href="{e(url_base)}">{e(url_base)}</a>.</p>'
-    )
+        partes.append(
+            '<div style="background:#fffaeb;border:1px solid #fedf89;border-radius:6px;'
+            f'padding:10px 12px;font-size:14px;color:#93370d;margin:8px 0">'
+            f"<strong>Atención:</strong> {e(doc.aviso_datos_viejos)}</div>"
+        )
     if doc.sin_alertas:
-        partes.append("<p>Nada requiere tu atención hoy.</p>")
+        partes.append(
+            '<div style="background:#ecfdf3;border:1px solid #abefc6;border-radius:6px;'
+            'padding:10px 12px;font-size:14px;color:#085d3a;margin:8px 0">'
+            "<strong>✓ Nada requiere tu atención hoy.</strong></div>"
+        )
+    partes.append(_resumen_html(doc))
+    partes.append(
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 4px">'
+        f'<tr><td style="background:#b42318;border-radius:6px"><a href="{e(url_base)}" '
+        'style="display:inline-block;padding:10px 18px;color:#ffffff;font-size:14px;'
+        'font-weight:700;text-decoration:none">Abrir en la plataforma</a></td></tr></table>'
+    )
     for s in doc.secciones:
-        partes.append(f'<h2 style="font-size:16px;margin-top:20px">{e(s.titulo)}</h2>')
+        color = _COLOR_SECCION.get(s.numero, "#475467")
+        partes.append(
+            '<div style="margin-top:28px">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            f'style="border-bottom:2px solid {color}"><tr>'
+            f'<td style="padding-bottom:6px"><h2 style="font-size:17px;margin:0;color:{color}">'
+            f"{e(s.titulo)}</h2></td>"
+        )
+        if s.numero != 5:
+            partes.append(
+                '<td style="padding-bottom:6px;text-align:right">'
+                f"{_pastilla(str(_total_nombrados(s)), s.numero)}</td>"
+            )
+        partes.append("</tr></table>")
         if s.encabezado:
-            partes.append(f'<p style="color:#555;font-size:13px">{e(s.encabezado)}</p>')
-        partes.append("<ul>")
+            partes.append(
+                f'<p style="color:#667085;font-size:13px;margin:6px 0 0">{e(s.encabezado)}</p>'
+            )
+        # La tarea se muestra una vez, como subtitulo, no en cada linea.
+        tarea_actual: str | None = None
         for li in s.lineas:
-            prefijo = f"{e(li.tarea)} · " if li.tarea else ""
-            if li.cifra is not None:
-                partes.append(f"<li>{e(li.titulo)}: <strong>{e(li.cifra)}</strong></li>")
-                continue
-            partes.append(f"<li>{prefijo}{e(li.titulo)} ({len(li.items) + li.mas})<ul>")
-            for i in li.items:
-                partes.append(f'<li><a href="{e(url_app + i.enlace)}">{e(i.texto)}</a></li>')
-            if li.mas:
-                partes.append(f"<li>y {li.mas} más</li>")
-            if li.contados_en_otra_seccion:
-                partes.append(f"<li>{li.contados_en_otra_seccion} ya nombrados más arriba</li>")
-            partes.append("</ul></li>")
-        partes.append("</ul>")
-    partes.append(f'<p style="color:#777;font-size:12px;margin-top:24px">{e(pie)}</p></div>')
+            if li.tarea and li.tarea != tarea_actual:
+                partes.append(
+                    '<div style="margin-top:14px;font-size:12px;font-weight:700;color:#596773;'
+                    f'text-transform:uppercase;letter-spacing:.05em">{e(li.tarea)}</div>'
+                )
+            tarea_actual = li.tarea
+            partes.append(_linea_html(li, url_app, s.numero))
+        partes.append("</div>")
+    partes.append("</div>")  # cuerpo
+    # Pie
+    partes.append(
+        '<div style="background:#f6f7f8;border-top:1px solid #d6dce1;padding:14px 24px;'
+        'font-size:12px;color:#596773;line-height:1.5">'
+    )
+    for f in doc.frescura_texto:
+        partes.append(f"<div>{e(f)}</div>")
+    partes.append(
+        '<div style="margin-top:6px">Si los enlaces no funcionan, el informe completo está en '
+        f'<a href="{e(url_base)}" style="color:#596773">{e(url_base)}</a>.</div>'
+        f'<div style="margin-top:6px">{e(pie)}</div></div>'
+    )
+    partes.append("</div></div>")
     return "".join(partes)

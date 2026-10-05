@@ -625,3 +625,80 @@ hr {
 .two-columns {
   align-items: start;
 }
+
+/* Informe docente diario: acciones de hoy + historial / visor */
+.informe-hoy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+.informe-hoy h2 {
+  margin: 0 0 0.25rem;
+}
+.informe-hoy .help {
+  margin: 0;
+}
+.informes-layout {
+  display: grid;
+  grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+.informes-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+.informes-lista a {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius);
+  border-inline-start: 3px solid transparent;
+  color: var(--color-text);
+  text-decoration: none;
+}
+.informes-lista a:hover {
+  background: var(--color-surface-hover);
+}
+.informes-lista a[aria-current="page"] {
+  background: var(--color-info-background);
+  border-inline-start-color: var(--color-info);
+}
+.informes-lista .help {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+.informes-fecha {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.informes-dia {
+  display: inline-block;
+  min-width: 2.2em;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+  text-transform: capitalize;
+}
+.informe-documento {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius);
+  background: #f6f7f8;
+}
+@media (max-width: 960px) {
+  .informes-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .informe-visor {
+    order: -1;
+  }
+}
