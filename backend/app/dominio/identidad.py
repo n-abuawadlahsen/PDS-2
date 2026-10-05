@@ -74,7 +74,9 @@ def normalizar_correo_google(email: str, *, email_verified: bool, hd: str | None
     if dominio not in _DOMINIOS_GOOGLE_PERSONAL and dominio != _DOMINIO_INSTITUCIONAL:
         raise RechazoCorreo(MotivoRechazoCorreo.DOMINIO_NO_GMAIL)
 
-    email_normalizado = f"{local_part}@gmail.com" if dominio == "googlemail.com" else correo_minusculas
+    email_normalizado = (
+        f"{local_part}@gmail.com" if dominio == "googlemail.com" else correo_minusculas
+    )
     if dominio in _DOMINIOS_GOOGLE_PERSONAL:
         local_part_canonico = local_part.split("+", 1)[0].replace(".", "")
         email_canonico = f"{local_part_canonico}@gmail.com"

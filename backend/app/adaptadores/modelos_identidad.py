@@ -39,7 +39,9 @@ class Usuario(Base, ConId):
 
     __tablename__ = "usuario"
     __table_args__ = (
-        CheckConstraint("email LIKE '%@gmail.com' OR email LIKE '%@miuandes.cl'", name="email_dominio_admitido"),
+        CheckConstraint(
+            "email LIKE '%@gmail.com' OR email LIKE '%@miuandes.cl'", name="email_dominio_admitido"
+        ),
         Index(
             "uq_usuario_cuenta_github_id",
             "cuenta_github_id",
