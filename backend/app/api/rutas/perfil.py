@@ -10,11 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.adaptadores import acceso_docente_repo, bitacora_repo, cuenta_repo
+from app.adaptadores import acceso_docente_repo, cuenta_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.cliente_github import FalloProveedorGithub, crear_cliente_github_desde_config
-from app.adaptadores.modelos_canvas import CredencialCanvas, IdentidadCanvasUsuario
-from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_identidad import Sesion, Usuario
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, usuario_actual
 from app.dominio.vinculacion_github import es_cuenta_de_organizacion
@@ -202,123 +200,3 @@ def cerrar_otras_sesiones(
     )
     bd.flush()
     return {"sesiones_cerradas": afectadas}
-
-
-@router.delete("/sesiones/{sesion_id}", dependencies=[Depends(exigir_csrf)])
-def cerrar_sesion_individual(
-    sesion_id: uuid.UUID,
-    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
-    bd: Session = Depends(obtener_sesion_bd),
-) -> dict[str, bool]:
-    usuario, actual_sesion = actual
-    sesion = bd.query(Sesion).filter_by(id=sesion_id, usuario_id=usuario.id).one_or_none()
-    if sesion is None:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada")
-    if sesion.revocada_en is None:
-        sesion.revocada_en = ahora_utc()
-        bitacora_repo.registrar(
-            bd,
-            accion="SESION_CERRADA",
-            entidad="sesion",
-            entidad_id=str(sesion.id),
-            actor_usuario_id=usuario.id,
-        )
-    return {"ok": True, "es_la_actual": sesion.id == actual_sesion.id}
-
-
-class CursoIdentidadCanvas(BaseModel):
-    id: uuid.UUID
-    nombre: str
-    operativa: bool
-
-
-class IdentidadCanvasSalida(BaseModel):
-    id: uuid.UUID
-    canvas_base_url: str
-    canvas_user_id: int
-    verificada_en: datetime
-    cursos: list[CursoIdentidadCanvas]
-
-
-@router.get("/identidades-canvas", response_model=list[IdentidadCanvasSalida])
-def listar_identidades_canvas(
-    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
-    bd: Session = Depends(obtener_sesion_bd),
-) -> list[IdentidadCanvasSalida]:
-    usuario, _ = actual
-    identidades = bd.query(IdentidadCanvasUsuario).filter_by(usuario_id=usuario.id).all()
-    credenciales = (
-        bd.query(CredencialCanvas, Curso)
-        .join(Curso, Curso.id == CredencialCanvas.curso_id)
-        .filter(CredencialCanvas.usuario_id == usuario.id, CredencialCanvas.estado != "RETIRADA")
-        .all()
-    )
-    return [
-        IdentidadCanvasSalida(
-            id=identidad.id,
-            canvas_base_url=identidad.canvas_base_url,
-            canvas_user_id=identidad.canvas_user_id,
-            verificada_en=identidad.verificada_en,
-            cursos=[
-                CursoIdentidadCanvas(
-                    id=curso.id, nombre=curso.nombre, operativa=c.orden_respaldo == 0
-                )
-                for c, curso in credenciales
-                if curso.canvas_base_url == identidad.canvas_base_url
-            ],
-        )
-        for identidad in identidades
-    ]
-
-
-@router.delete("/identidades-canvas/{identidad_id}", dependencies=[Depends(exigir_csrf)])
-def desvincular_identidad_canvas(
-    identidad_id: uuid.UUID,
-    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
-    bd: Session = Depends(obtener_sesion_bd),
-) -> dict[str, int]:
-    usuario, _ = actual
-    bloquear_equipo(bd)
-    identidad = (
-        bd.query(IdentidadCanvasUsuario)
-        .filter_by(
-            id=identidad_id,
-            usuario_id=usuario.id,
-        )
-        .with_for_update()
-        .one_or_none()
-    )
-    if identidad is None:
-        raise HTTPException(status_code=404, detail="Identidad de Canvas no encontrada")
-    membresias = (
-        bd.query(MembresiaCurso)
-        .join(Curso, Curso.id == MembresiaCurso.curso_id)
-        .join(
-            CredencialCanvas,
-            (CredencialCanvas.curso_id == Curso.id)
-            & (CredencialCanvas.usuario_id == MembresiaCurso.usuario_id),
-        )
-        .filter(
-            MembresiaCurso.usuario_id == usuario.id,
-            Curso.canvas_base_url == identidad.canvas_base_url,
-            CredencialCanvas.estado != "RETIRADA",
-        )
-        .all()
-    )
-    for membresia in membresias:
-        cuenta_repo.retirar_credenciales(bd, membresia)
-    bitacora_repo.registrar(
-        bd,
-        accion="IDENTIDAD_CANVAS_DESVINCULADA",
-        entidad="identidad_canvas_usuario",
-        entidad_id=str(identidad.id),
-        actor_usuario_id=usuario.id,
-        antes={
-            "canvas_base_url": identidad.canvas_base_url,
-            "canvas_user_id": identidad.canvas_user_id,
-        },
-        despues={"credenciales_retiradas": len(membresias)},
-    )
-    bd.delete(identidad)
-    bd.flush()
-    return {"credenciales_retiradas": len(membresias)}

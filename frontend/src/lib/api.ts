@@ -94,8 +94,6 @@ export interface Curso {
   periodo: string;
   slug: string;
   zona_horaria: string;
-  umbral_dias_sin_actividad?: number;
-  umbral_desbalance_pct?: number;
 }
 
 export async function listarCursos(signal?: AbortSignal): Promise<Curso[]> {
@@ -130,7 +128,6 @@ export interface Miembro {
   permisos: string[];
   estado: "ACTIVA" | "RETIRADA";
   retirada_en: string | null;
-  es_via_compartida?: boolean;
   github_login?: string | null;
   github_estado?: string | null;
   github_error?: string | null;
@@ -148,7 +145,6 @@ export async function listarEquipo(
 export interface Contexto {
   rol: string;
   permisos_efectivos: string[];
-  es_via_compartida?: boolean;
 }
 
 export async function obtenerContexto(
@@ -240,8 +236,6 @@ export interface CursoCanvasDisponible {
   termino: string | null;
   total_estudiantes: number | null;
   ya_vinculado_a: string | null;
-  ya_vinculado_a_id: string | null;
-  es_vinculo_actual: boolean;
 }
 
 export async function listarCursosCanvasDisponibles(
@@ -613,12 +607,6 @@ export async function restaurarRegistroGithub(
 }
 
 export interface FilaPendienteSinCuenta {
-  recordatorios_enviados?: number;
-  recordatorios_en_cola?: number;
-  maximo_recordatorios?: number;
-  ultimo_recordatorio_en?: string | null;
-  proximo_recordatorio_en?: string | null;
-  recordatorio_bloqueado?: string | null;
   estudiante_id: string;
   nombre: string;
   estado_estudiante: string;
@@ -765,8 +753,6 @@ export interface TareaDetalle {
 }
 
 export interface AssignmentCanvasOpcion {
-  canvas_group_category_id?: number | null;
-  conjunto_grupos_nombre?: string | null;
   canvas_assignment_id: number;
   nombre: string;
   es_grupal: boolean;

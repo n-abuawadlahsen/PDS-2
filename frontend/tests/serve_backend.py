@@ -23,7 +23,6 @@ FRONTEND = Path(__file__).resolve().parents[1]
 BACKEND = FRONTEND.parent / "backend"
 STATE = FRONTEND / ".backend-test-state.json"
 CONTAINER = f"pds2-ui-review-{os.getpid()}"
-PYTEST = sys.argv[1:2] == ["--pytest"]
 children: list[subprocess.Popen] = []
 
 
@@ -35,8 +34,7 @@ def cleanup():
             child.wait(timeout=5)
         except subprocess.TimeoutExpired:
             child.kill()
-    if not PYTEST:
-        STATE.unlink(missing_ok=True)
+    STATE.unlink(missing_ok=True)
     subprocess.run(
         ["docker", "rm", "-f", CONTAINER],
         stdout=subprocess.DEVNULL,
@@ -95,7 +93,7 @@ key = base64.b64encode(os.urandom(32)).decode()
 os.environ.update(
     {
         "ENTORNO": "local",
-        "PERFIL_ALCANCE": "parcial" if PYTEST else "completo",
+        "PERFIL_ALCANCE": "completo",
         "CANVAS_MODO": "doble",
         "GITHUB_MODO": "doble",
         "CANVAS_BASE_URL": "https://canvas-doble.local",
@@ -145,11 +143,6 @@ subprocess.run(
     check=True,
     stdout=subprocess.DEVNULL,
 )
-if PYTEST:
-    # Cada ejecución usa su propia base: pytest limpia tablas después de cada caso.
-    resultado = subprocess.run([sys.executable, "-m", "pytest", "--no-cov", *sys.argv[2:]])
-    sys.exit(resultado.returncode)
-
 from tests.api.test_cursos import _crear_usuario_con_sesion  # noqa: E402
 
 _, token = _crear_usuario_con_sesion(

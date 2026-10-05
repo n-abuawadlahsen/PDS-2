@@ -226,9 +226,6 @@ def asegurar_filas(bd: Session, entrega: Entrega, *, ahora: datetime | None = No
             )
             nuevos += 1
         _refrescar_banderas(bd, correccion, entrega, sujeto, ahora=ahora)
-    from app.adaptadores.realineacion_repo import detectar
-
-    detectar(bd, entrega)
     if nuevos and hubo_reparto:
         sin = (
             bd.query(Correccion)
@@ -456,11 +453,6 @@ def aplicar(
         manual=manual,
         por_seccion=por_seccion,
     )
-    from app.adaptadores.realineacion_repo import premisa
-
-    elegibles = {m.id for m, _ in correctores(bd, entrega.curso_id)}
-    if any(f.propuesto is not None and f.propuesto not in elegibles for f in propuesta.filas):
-        raise RechazoCorreccion("El corrector elegido no está activo en este curso.", codigo=422)
     ahora = ahora_utc()
     cambios = 0
     for fila in propuesta.filas:
@@ -485,16 +477,6 @@ def aplicar(
         a.asignada_por = actor.id
         a.asignada_en = ahora
         a.criterio = criterio.value
-        a.desalineada_motivo = None
-        a.desalineada_en = None
-        sujeto = bd.get(Sujeto, fila.sujeto_id)
-        assert sujeto is not None
-        contexto = premisa(bd, sujeto, por_seccion)
-        a.criterio_seccion_id = (
-            uuid.UUID(contexto["secciones"][0])
-            if criterio == CriterioAsignacion.SECCION and len(contexto["secciones"]) == 1
-            else None
-        )
         if fila.propuesto is None:
             transicionar(
                 bd,
@@ -524,7 +506,6 @@ def aplicar(
             despues={
                 "membresia_id": str(fila.propuesto) if fila.propuesto else None,
                 "criterio": criterio.value,
-                **contexto,
             },
         )
         cambios += 1
@@ -714,15 +695,6 @@ def guardar_borrador(
     c.huella_rubrica = huella_rubrica(criterios, rubrica_de(bd, entrega)[1]) if criterios else None
     c.version += 1
     c.actualizado_en = ahora_utc()
-    bitacora_repo.registrar(
-        bd,
-        accion="BORRADOR_CORRECCION_GUARDADO",
-        entidad="correccion",
-        entidad_id=str(c.id),
-        actor_usuario_id=membresia.usuario_id,
-        curso_id=entrega.curso_id,
-        despues={"version": c.version, "rol": membresia.rol},
-    )
     bd.flush()
 
 
@@ -802,7 +774,6 @@ def acceso_docente(bd: Session, repositorio_id: uuid.UUID | None) -> str | None:
 def matriz(bd: Session, curso: Curso, tarea: Tarea) -> dict[str, Any]:
     """Una sola pasada sobre las filas de la tarea; nunca `submission_summary`
     de Canvas: el lado de Canvas sale de `estado_canvas_submission`."""
-    from app.adaptadores.correccion_detalle_repo import evidencia_sin_commits
     from app.dominio.estado_correccion import contraste_canvas
 
     entregas = bd.query(Entrega).filter(Entrega.tarea_id == tarea.id).order_by(Entrega.orden).all()
@@ -873,11 +844,6 @@ def matriz(bd: Session, curso: Curso, tarea: Tarea) -> dict[str, Any]:
             "corrector_membresia_id": str(a.membresia_id) if a.membresia_id else None,
             "publicable": c.publicable,
             "motivo_no_publicable": c.motivo_no_publicable,
-            "evidencia_sin_commits": evidencia_sin_commits(
-                bd, next(e for e in entregas if e.id == c.entrega_id), s
-            )
-            if c.sin_commits
-            else None,
             "banderas": [
                 b
                 for b, v in (

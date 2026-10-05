@@ -1,13 +1,5 @@
 import { lazy } from "react";
-import {
-  createBrowserRouter,
-  createRoutesFromElements,
-  Link,
-  Navigate,
-  Outlet,
-  Route,
-  RouterProvider,
-} from "react-router-dom";
+import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 import {
   AccesoArea,
   Estructura,
@@ -71,149 +63,149 @@ const Personas = lazy(() =>
   import("./paginas/Personas").then((modulo) => ({ default: modulo.Personas })),
 );
 
-const router = createBrowserRouter(
-  createRoutesFromElements(
-    <Route
-      element={
-        <Confirmaciones>
-          <Outlet />
-        </Confirmaciones>
-      }
-    >
-      <Route path="/" element={<Navigate to="/cursos" replace />} />
-      <Route element={<Publico />}>
-        <Route path="/acceso" element={<Acceso />} />
-        <Route path="/confirmar" element={<Confirmar />} />
-        <Route path="/vinculacion/github/retorno" element={<GithubRetorno />} />
-        <Route path="/invitaciones/:token" element={<InvitacionPublica />} />
-        <Route path="/baja/:token" element={<Baja />} />
-        <Route
-          path="*"
-          element={
-            <section className="panel">
-              <h1>Página no encontrada</h1>
-              <p>El enlace no corresponde a una pantalla disponible.</p>
-              <Link className="button primary" to="/cursos">
-                Volver a mis cursos
-              </Link>
-            </section>
-          }
-        />
-      </Route>
-      <Route element={<LayoutAutenticado />}>
-        <Route element={<Estructura />}>
-          <Route path="/cursos" element={<Cursos />} />
-          <Route path="/perfil" element={<PerfilPagina />} />
-        </Route>
-        <Route path="/cursos/:cursoId" element={<LayoutCurso />}>
-          <Route index element={<InicioCurso />} />
-          <Route path="equipo" element={<Equipo />} />
-          <Route
-            path="ajustes"
-            element={
-              <AccesoArea permiso="curso.administrar">
-                <Ajustes />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="vinculacion"
-            element={
-              <AccesoArea permiso="curso.administrar">
-                <Vinculacion />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="verificacion"
-            element={
-              <AccesoArea permiso="curso.administrar">
-                <Checklist />
-              </AccesoArea>
-            }
-          />
-          <Route path="personas" element={<Personas />} />
-          <Route path="pendientes" element={<Pendientes />} />
-          <Route path="tareas" element={<Tareas />} />
-          <Route path="tareas/:tareaId" element={<Tarea />} />
-          <Route
-            path="tareas/:tareaId/entregas"
-            element={
-              <AccesoArea capacidad="versiones_entrega">
-                <EntregasTarea />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="tareas/:tareaId/repos/:repoId"
-            element={
-              <AccesoArea capacidad="repositorio_timeline">
-                <RepositorioTimeline />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="seguimiento"
-            element={
-              <AccesoArea capacidad="tablero_actividad">
-                <Seguimiento />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="informes"
-            element={
-              <AccesoArea capacidad="informe_diario">
-                <Informes />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="informes/:fecha"
-            element={
-              <AccesoArea capacidad="informe_diario">
-                <Informes />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="mis-notificaciones"
-            element={
-              <AccesoArea capacidad="mis_notificaciones">
-                <MisNotificaciones />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="comunicaciones"
-            element={
-              <AccesoArea capacidad="comunicaciones_automaticas">
-                <Comunicaciones />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="correccion"
-            element={
-              <AccesoArea capacidad="correccion">
-                <Correccion />
-              </AccesoArea>
-            }
-          />
-          <Route
-            path="correccion/:entregaId/:sujetoId"
-            element={
-              <AccesoArea capacidad="correccion">
-                <CorreccionSujeto />
-              </AccesoArea>
-            }
-          />
-        </Route>
-      </Route>
-    </Route>,
-  ),
-);
-
 export function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <BrowserRouter>
+      <Confirmaciones>
+        <Routes>
+          <Route path="/" element={<Navigate to="/cursos" replace />} />
+          <Route element={<Publico />}>
+            <Route path="/acceso" element={<Acceso />} />
+            <Route path="/confirmar" element={<Confirmar />} />
+            <Route
+              path="/vinculacion/github/retorno"
+              element={<GithubRetorno />}
+            />
+            <Route
+              path="/invitaciones/:token"
+              element={<InvitacionPublica />}
+            />
+            <Route path="/baja/:token" element={<Baja />} />
+            <Route
+              path="*"
+              element={
+                <section className="panel">
+                  <h1>Página no encontrada</h1>
+                  <p>El enlace no corresponde a una pantalla disponible.</p>
+                  <Link className="button primary" to="/cursos">
+                    Volver a mis cursos
+                  </Link>
+                </section>
+              }
+            />
+          </Route>
+          <Route element={<LayoutAutenticado />}>
+            <Route element={<Estructura />}>
+              <Route path="/cursos" element={<Cursos />} />
+              <Route path="/perfil" element={<PerfilPagina />} />
+            </Route>
+            <Route path="/cursos/:cursoId" element={<LayoutCurso />}>
+              <Route index element={<InicioCurso />} />
+              <Route path="equipo" element={<Equipo />} />
+              <Route
+                path="ajustes"
+                element={
+                  <AccesoArea permiso="curso.administrar">
+                    <Ajustes />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="vinculacion"
+                element={
+                  <AccesoArea permiso="curso.administrar">
+                    <Vinculacion />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="verificacion"
+                element={
+                  <AccesoArea permiso="curso.administrar">
+                    <Checklist />
+                  </AccesoArea>
+                }
+              />
+              <Route path="personas" element={<Personas />} />
+              <Route path="pendientes" element={<Pendientes />} />
+              <Route path="tareas" element={<Tareas />} />
+              <Route path="tareas/:tareaId" element={<Tarea />} />
+              <Route
+                path="tareas/:tareaId/entregas"
+                element={
+                  <AccesoArea capacidad="versiones_entrega">
+                    <EntregasTarea />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="tareas/:tareaId/repos/:repoId"
+                element={
+                  <AccesoArea capacidad="repositorio_timeline">
+                    <RepositorioTimeline />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="seguimiento"
+                element={
+                  <AccesoArea capacidad="tablero_actividad">
+                    <Seguimiento />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="informes"
+                element={
+                  <AccesoArea capacidad="informe_diario">
+                    <Informes />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="informes/:fecha"
+                element={
+                  <AccesoArea capacidad="informe_diario">
+                    <Informes />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="mis-notificaciones"
+                element={
+                  <AccesoArea capacidad="mis_notificaciones">
+                    <MisNotificaciones />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="comunicaciones"
+                element={
+                  <AccesoArea capacidad="comunicaciones_automaticas">
+                    <Comunicaciones />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="correccion"
+                element={
+                  <AccesoArea capacidad="correccion">
+                    <Correccion />
+                  </AccesoArea>
+                }
+              />
+              <Route
+                path="correccion/:entregaId/:sujetoId"
+                element={
+                  <AccesoArea capacidad="correccion">
+                    <CorreccionSujeto />
+                  </AccesoArea>
+                }
+              />
+            </Route>
+          </Route>
+        </Routes>
+      </Confirmaciones>
+    </BrowserRouter>
+  );
 }

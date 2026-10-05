@@ -13,9 +13,8 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -26,7 +25,6 @@ from app.adaptadores.canvas_repo import descifrar_token, obtener_credencial_oper
 from app.adaptadores.cliente_canvas import FalloProveedorCanvas, crear_cliente_canvas
 from app.adaptadores.cliente_github import FalloProveedorGithub, crear_cliente_github_desde_config
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
-from app.adaptadores.modelos_identidad import Usuario
 from app.adaptadores.modelos_infraestructura import CursorSincronizacion, Trabajo
 from app.adaptadores.modelos_mapeo import CuentaGithub, MapeoGithub
 from app.adaptadores.modelos_padron import (
@@ -38,7 +36,6 @@ from app.adaptadores.modelos_padron import (
     Seccion,
 )
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere
-from app.api.estado_trabajos import TrabajoSalida, salida_trabajo
 from app.dominio.estados import EstadoEstudiante, EstadoMapeoGithub, EstadoTrabajo
 from app.dominio.mapeo_github import RechazoMapeo
 from app.dominio.permisos import Permiso, permisos_efectivos
@@ -318,148 +315,53 @@ def obtener_cabecera_personas(
     return CabeceraCursoSalida(con_cuenta_verificada=con_cuenta, total=total)
 
 
-class SincronizacionSalida(BaseModel):
-    ok: bool = True
-    en_curso: bool
-    trabajos: list[TrabajoSalida]
-    disponible_en: datetime
-
-
-@router.get("/api/cursos/{curso_id}/trabajos/{trabajo_id}", response_model=TrabajoSalida)
-def obtener_trabajo(
-    curso_id: uuid.UUID,
-    trabajo_id: uuid.UUID,
-    bd: Session = Depends(obtener_sesion_bd),
-    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
-) -> TrabajoSalida:
-    trabajo = (
-        bd.query(Trabajo)
-        .filter(Trabajo.id == trabajo_id, Trabajo.curso_id == curso_id)
-        .one_or_none()
-    )
-    if trabajo is None:
-        raise HTTPException(status_code=404, detail="trabajo no encontrado en este curso")
-    return salida_trabajo(trabajo)
-
-
 @router.post(
-    "/api/cursos/{curso_id}/sincronizaciones",
-    status_code=202,
-    response_model=SincronizacionSalida,
-    dependencies=[Depends(exigir_csrf)],
+    "/api/cursos/{curso_id}/sincronizaciones", status_code=202, dependencies=[Depends(exigir_csrf)]
 )
 def sincronizar_ahora(
     curso_id: uuid.UUID,
     bd: Session = Depends(obtener_sesion_bd),
-    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
-) -> SincronizacionSalida:
-    """Lectura encolada (SPEC 13 §13.8.4): reutiliza trabajos y espera 60 s.
+    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
+) -> dict[str, bool]:
+    """S7.3.1, S9.9: encola los mismos trabajos que el ciclo automatico, nunca
+    llama a Canvas dentro de la peticion (Ley 1). Roster antes que grupos, y
+    ambos antes que tareas: un grupo referencia estudiantes que deben existir
+    primero (S7.2.5), y la visibilidad de una entrega se calcula sobre ese
+    padron (A-164).
 
-    El bloqueo del curso serializa peticiones simultáneas, también cuando el
-    trabajo previo ya terminó y su índice parcial deja libre la clave.
-    """
-    curso = bd.query(Curso).filter(Curso.id == curso_id).with_for_update().one_or_none()
-    if curso is None:
-        raise HTTPException(status_code=404)
-    ahora = ahora_utc()
-    trabajos = []
-    reutilizado = False
-    for tipo in ("sync_roster", "sync_grupos", "sync_tareas_y_fechas"):
-        previo = (
-            bd.query(Trabajo)
-            .filter(
-                Trabajo.curso_id == curso_id,
-                Trabajo.tipo == tipo,
-                (Trabajo.creado_en > ahora - timedelta(seconds=60))
-                | Trabajo.estado.in_(
-                    [
-                        EstadoTrabajo.PENDIENTE.value,
-                        EstadoTrabajo.EN_CURSO.value,
-                        EstadoTrabajo.REINTENTAR.value,
-                        EstadoTrabajo.ESPERANDO_LIMITE.value,
-                    ]
-                ),
-            )
-            .order_by(Trabajo.creado_en.desc())
-            .first()
+    CA-9.4-04: con un ciclo ya en vuelo no se encola otro; la respuesta dice
+    `en_curso` para que la pantalla escriba «sincronizando ahora mismo»."""
+    en_vuelo = (
+        bd.query(Trabajo.id)
+        .filter(
+            Trabajo.curso_id == curso_id,
+            Trabajo.tipo == "sync_tareas_y_fechas",
+            Trabajo.estado.in_(
+                [
+                    EstadoTrabajo.PENDIENTE.value,
+                    EstadoTrabajo.EN_CURSO.value,
+                    EstadoTrabajo.REINTENTAR.value,
+                ]
+            ),
         )
-        if previo is not None:
-            trabajos.append(previo)
-            reutilizado = True
-            continue
-        nuevo = trabajos_repo.encolar(
+        .first()
+    )
+    if en_vuelo is not None:
+        return {"ok": True, "en_curso": True}
+    ahora = ahora_utc()
+    for tipo, prefijo in (
+        ("sync_roster", "manual_roster"),
+        ("sync_grupos", "manual_grupos"),
+        ("sync_tareas_y_fechas", "manual_tareas"),
+    ):
+        trabajos_repo.encolar(
             bd,
             tipo=tipo,
-            clave_idempotencia=f"sync:{tipo}:{curso_id}:{int(ahora.timestamp()) // 60}",
+            clave_idempotencia=f"{prefijo}:{curso_id}:{ahora.isoformat()}",
             max_intentos=4,
             curso_id=curso_id,
         )
-        if nuevo is not None:
-            trabajos.append(nuevo)
-    return SincronizacionSalida(
-        en_curso=reutilizado,
-        trabajos=[salida_trabajo(t) for t in trabajos],
-        disponible_en=max(t.creado_en for t in trabajos) + timedelta(seconds=60),
-    )
-
-
-class MapeoHistoricoSalida(BaseModel):
-    id: uuid.UUID
-    estado: str
-    origen: str | None
-    confianza: str | None
-    login_declarado: str | None
-    cuenta_login_actual: str | None
-    github_user_id: int | None
-    motivo_invalidacion: str | None
-    creado_en: datetime
-    vigente_desde: datetime | None
-    vigente_hasta: datetime | None
-    creado_por_nombre: str | None
-
-
-@router.get(
-    "/api/cursos/{curso_id}/personas/{estudiante_id}/mapeo/historial",
-    response_model=list[MapeoHistoricoSalida],
-)
-def historial_mapeo(
-    curso_id: uuid.UUID,
-    estudiante_id: uuid.UUID,
-    bd: Session = Depends(obtener_sesion_bd),
-    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
-) -> list[MapeoHistoricoSalida]:
-    estudiante = (
-        bd.query(Estudiante.id)
-        .filter(Estudiante.id == estudiante_id, Estudiante.curso_id == curso_id)
-        .first()
-    )
-    if estudiante is None:
-        raise HTTPException(status_code=404)
-    filas = (
-        bd.query(MapeoGithub, CuentaGithub, Usuario)
-        .outerjoin(CuentaGithub, CuentaGithub.id == MapeoGithub.cuenta_github_id)
-        .outerjoin(Usuario, Usuario.id == MapeoGithub.creado_por)
-        .filter(MapeoGithub.curso_id == curso_id, MapeoGithub.estudiante_id == estudiante_id)
-        .order_by(MapeoGithub.creado_en.desc(), MapeoGithub.id.desc())
-        .all()
-    )
-    return [
-        MapeoHistoricoSalida(
-            id=m.id,
-            estado=m.estado,
-            origen=m.origen,
-            confianza=m.confianza,
-            login_declarado=(m.evidencia or {}).get("login_declarado"),
-            cuenta_login_actual=c.login if c else None,
-            github_user_id=c.github_user_id if c else None,
-            motivo_invalidacion=m.motivo_invalidacion,
-            creado_en=m.creado_en,
-            vigente_desde=m.vigente_desde,
-            vigente_hasta=m.vigente_hasta,
-            creado_por_nombre=u.nombre if u else None,
-        )
-        for m, c, u in filas
-    ]
+    return {"ok": True, "en_curso": False}
 
 
 def _detalle_rechazo(exc: RechazoMapeo) -> dict[str, str]:
@@ -670,7 +572,6 @@ def importar_mapeo_csv(
 
 
 class RegistroGithubSalida(BaseModel):
-    trabajo_id: uuid.UUID | None = None
     registro_estado: str
     canvas_assignment_id: int | None
 
@@ -682,10 +583,9 @@ class RegistroGithubSalida(BaseModel):
 )
 def crear_registro_github(
     curso_id: uuid.UUID,
-    response: Response,
     bd: Session = Depends(obtener_sesion_bd),
     settings: Settings = Depends(obtener_configuracion),
-    membresia: MembresiaCurso = Depends(requiere(Permiso.COMUNICACION_ENVIAR)),
+    membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
 ) -> RegistroGithubSalida:
     """S7.4.1, S5.5.1 escritura sincrona #4: crea "Registro de tu cuenta de
     GitHub" en Canvas."""
@@ -704,20 +604,18 @@ def crear_registro_github(
         curso = registro_github_repo.crear_tarea_registro(
             bd, cliente, token, curso=curso, actor_usuario_id=membresia.usuario_id
         )
-    except FalloProveedorCanvas:
-        trabajo = trabajos_repo.encolar(
+    except FalloProveedorCanvas as exc:
+        trabajos_repo.encolar(
             bd,
             tipo="crear_registro_github",
             clave_idempotencia=f"crear_registro:{curso_id}:{ahora_utc().isoformat()}",
             max_intentos=4,
             curso_id=curso_id,
         )
-        response.status_code = 202
-        return RegistroGithubSalida(
-            registro_estado=curso.registro_estado,
-            canvas_assignment_id=curso.canvas_assignment_id_registro,
-            trabajo_id=trabajo.id if trabajo else None,
-        )
+        raise HTTPException(
+            status_code=202,
+            detail=f"Canvas no respondio a tiempo ({exc}); se reintenta en segundo plano",
+        ) from None
     return RegistroGithubSalida(
         registro_estado=curso.registro_estado,
         canvas_assignment_id=curso.canvas_assignment_id_registro,
@@ -731,10 +629,9 @@ def crear_registro_github(
 )
 def restaurar_registro_github(
     curso_id: uuid.UUID,
-    response: Response,
     bd: Session = Depends(obtener_sesion_bd),
     settings: Settings = Depends(obtener_configuracion),
-    membresia: MembresiaCurso = Depends(requiere(Permiso.COMUNICACION_ENVIAR)),
+    membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
 ) -> RegistroGithubSalida:
     curso = bd.query(Curso).filter(Curso.id == curso_id).one_or_none()
     if curso is None:
@@ -751,20 +648,18 @@ def restaurar_registro_github(
         curso = registro_github_repo.restaurar_tarea_registro(
             bd, cliente, token, curso=curso, actor_usuario_id=membresia.usuario_id
         )
-    except FalloProveedorCanvas:
-        trabajo = trabajos_repo.encolar(
+    except FalloProveedorCanvas as exc:
+        trabajos_repo.encolar(
             bd,
             tipo="crear_registro_github",
             clave_idempotencia=f"restaurar_registro:{curso_id}:{ahora_utc().isoformat()}",
             max_intentos=4,
             curso_id=curso_id,
         )
-        response.status_code = 202
-        return RegistroGithubSalida(
-            registro_estado=curso.registro_estado,
-            canvas_assignment_id=curso.canvas_assignment_id_registro,
-            trabajo_id=trabajo.id if trabajo else None,
-        )
+        raise HTTPException(
+            status_code=202,
+            detail=f"Canvas no respondio a tiempo ({exc}); se reintenta en segundo plano",
+        ) from None
     return RegistroGithubSalida(
         registro_estado=curso.registro_estado,
         canvas_assignment_id=curso.canvas_assignment_id_registro,

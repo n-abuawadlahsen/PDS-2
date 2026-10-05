@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   adoptarInstalacionHuerfana,
-  apiFetch,
   iniciarInstalacionGithub,
   listarCursosCanvasDisponibles,
   listarInstalacionesHuerfanas,
@@ -11,10 +10,9 @@ import {
   obtenerEstadoVinculacionGithub,
   vincularCanvas,
   type CursoCanvasDisponible,
-  type Curso,
 } from "../lib/api";
 import { comprobar } from "../lib/errores";
-import { useCurso, useSesion } from "../components/Layout";
+import { useCurso } from "../components/Layout";
 import {
   Aviso,
   Cabecera,
@@ -29,7 +27,6 @@ import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
 export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
   const { curso, puede, recargar } = useCurso();
-  const { agregarCurso } = useSesion();
   const administra = puede("curso.administrar");
   const [instancia, setInstancia] = useState("");
   const [token, setToken] = useState("");
@@ -76,7 +73,38 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
         </Link>
       </nav>
       {ajustes && (
-        <FormularioAjustes curso={curso} administra={administra} guardar={agregarCurso} />
+        <section className="panel">
+          <h2>Información del curso</h2>
+          <dl className="facts">
+            <div>
+              <dt>Nombre</dt>
+              <dd>{curso.nombre}</dd>
+            </div>
+            <div>
+              <dt>Código</dt>
+              <dd>{curso.codigo}</dd>
+            </div>
+            <div>
+              <dt>Período</dt>
+              <dd>{curso.periodo}</dd>
+            </div>
+            <div>
+              <dt>Zona horaria</dt>
+              <dd>{curso.zona_horaria}</dd>
+            </div>
+            <div>
+              <dt>Estado</dt>
+              <dd>
+                <Estado valor={curso.estado} />
+              </dd>
+            </div>
+          </dl>
+          <p className="help">
+            Los datos generales se fijaron al crear el curso. Aquí puedes
+            revisar sus conexiones, instalar GitHub y volver a ejecutar la
+            verificación.
+          </p>
+        </section>
       )}
       {!administra && (
         <Aviso>
@@ -274,7 +302,7 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
                             <button
                               disabled={
                                 op.ocupado ||
-                                (Boolean(c.ya_vinculado_a) && c.ya_vinculado_a_id !== curso.id) ||
+                                Boolean(c.ya_vinculado_a) ||
                                 !titular ||
                                 !escritura
                               }
@@ -294,19 +322,15 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
                                   }
                                   canvas.recargar();
                                   recargar();
-                                }, c.ya_vinculado_a_id === curso.id
-                                  ? "Credencial renovada. Si es la operativa, la verificación de Canvas se ha vuelto a programar."
-                                  : "Canvas está vinculado. Conecta GitHub y luego verifica las conexiones.")
+                                }, "Canvas está vinculado. Conecta GitHub y luego verifica las conexiones.")
                               }
                             >
-                              {c.ya_vinculado_a_id === curso.id ? "Renovar mi credencial" : "Elegir este curso"}
+                              Elegir este curso
                             </button>
                           </div>
                           {c.ya_vinculado_a && (
                             <p className="help">
-                              {c.ya_vinculado_a_id === curso.id
-                                ? "Es el curso Canvas vinculado a este curso. Puedes sustituir tu propia credencial."
-                                : `Ya vinculado a ${c.ya_vinculado_a}.`}
+                              Ya vinculado a {c.ya_vinculado_a}.
                             </p>
                           )}
                         </li>
@@ -447,53 +471,4 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
 
 export function Ajustes() {
   return <Vinculacion ajustes />;
-}
-
-function FormularioAjustes({ curso, administra, guardar }: {
-  curso: Curso;
-  administra: boolean;
-  guardar: (curso: Curso) => void;
-}) {
-  const op = useOperacion();
-  const confirmar = useConfirmar();
-  return (
-    <section className="panel">
-      <h2>Información y seguimiento del curso</h2>
-      <p className="help">{curso.codigo} · {curso.periodo} · {curso.slug}</p>
-      <Mensajes {...op} />
-      <form className="form-stack" onSubmit={(e) => {
-        e.preventDefault();
-        const datos = new FormData(e.currentTarget);
-        const ajustes = {
-          nombre: String(datos.get("nombre")).trim(),
-          zona_horaria: String(datos.get("zona_horaria")).trim(),
-          umbral_dias_sin_actividad: Number(datos.get("inactividad")),
-          umbral_desbalance_pct: Number(datos.get("desbalance")),
-        };
-        void op.ejecutar(async () => {
-          if (!(await confirmar({
-            titulo: "Guardar ajustes del curso",
-            descripcion: "La zona horaria cambia cómo se muestran las fechas, sin modificar los vencimientos. Los umbrales cambian las alertas de seguimiento; las métricas se volverán a calcular en segundo plano.",
-            accion: "Guardar ajustes",
-          }))) return;
-          const respuesta = await apiFetch(`/api/cursos/${curso.id}`, {
-            method: "PATCH", body: JSON.stringify(ajustes),
-          });
-          await comprobar(respuesta);
-          guardar(await respuesta.json() as Curso);
-          op.setMensaje("Ajustes guardados. El seguimiento se actualizará en segundo plano.");
-        });
-      }}>
-        <fieldset disabled={!administra || op.ocupado}>
-          <legend>Datos generales</legend>
-          <label>Nombre del curso<input name="nombre" defaultValue={curso.nombre} maxLength={200} required /></label>
-          <label>Zona horaria del curso<input name="zona_horaria" defaultValue={curso.zona_horaria} placeholder="America/Santiago" maxLength={100} required aria-describedby="zona-curso-ayuda" /></label>
-          <p className="help" id="zona-curso-ayuda">Usa una zona IANA, por ejemplo America/Santiago o UTC.</p>
-          <label>Días sin actividad para alertar<input name="inactividad" type="number" min={1} max={30} step={1} defaultValue={curso.umbral_dias_sin_actividad ?? 7} required /></label>
-          <label>Umbral de desbalance de participación (%)<input name="desbalance" type="number" min={50} max={95} step={1} defaultValue={curso.umbral_desbalance_pct ?? 70} required /></label>
-          <button className="primary" type="submit">{op.ocupado ? "Guardando…" : "Guardar ajustes"}</button>
-        </fieldset>
-      </form>
-    </section>
-  );
 }

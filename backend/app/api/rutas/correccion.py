@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.adaptadores import correccion_detalle_repo, correccion_repo, publicacion_repo
+from app.adaptadores import correccion_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.modelos_aprovisionamiento import FechaEfectiva, Sujeto
 from app.adaptadores.modelos_correccion import (
@@ -155,117 +155,6 @@ def estado_de_la_entrega(
         raise HTTPException(status_code=404)
     response.headers["X-Llamadas-Externas"] = "0"
     return correccion_repo.matriz(bd, curso, tarea)
-
-
-class PesoEntrada(BaseModel):
-    peso: int = Field(ge=0, le=10, strict=True)
-
-
-@router.patch(
-    "/api/cursos/{curso_id}/correccion/correctores/{membresia_id}",
-    dependencies=[Depends(exigir_csrf)],
-)
-def cambiar_peso(
-    curso_id: uuid.UUID,
-    membresia_id: uuid.UUID,
-    datos: PesoEntrada,
-    bd: Session = Depends(obtener_sesion_bd),
-    actor: MembresiaCurso = Depends(requiere(Permiso.CORRECCION_ASIGNAR)),
-) -> dict[str, Any]:
-    from app.adaptadores import bitacora_repo
-
-    miembro = (
-        bd.query(MembresiaCurso)
-        .filter(
-            MembresiaCurso.id == membresia_id,
-            MembresiaCurso.curso_id == curso_id,
-            MembresiaCurso.estado == "ACTIVA",
-        )
-        .with_for_update()
-        .one_or_none()
-    )
-    if miembro is None:
-        raise HTTPException(status_code=404, detail="El corrector no está activo en este curso.")
-    anterior = correccion_repo.peso_de(miembro)
-    miembro.peso_correccion = datos.peso
-    bitacora_repo.registrar(
-        bd,
-        accion="PESO_CORRECCION_CAMBIADO",
-        entidad="membresia_curso",
-        entidad_id=str(miembro.id),
-        curso_id=curso_id,
-        actor_usuario_id=actor.usuario_id,
-        antes={"peso": anterior},
-        despues={"peso": datos.peso},
-    )
-    return {"membresia_id": str(miembro.id), "peso": datos.peso}
-
-
-@router.post(
-    "/api/cursos/{curso_id}/correccion/avisar-profesores",
-    status_code=202,
-    dependencies=[Depends(exigir_csrf)],
-)
-def avisar_profesores(
-    curso_id: uuid.UUID,
-    bd: Session = Depends(obtener_sesion_bd),
-    actor: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
-) -> dict[str, int]:
-    from app.adaptadores import bitacora_repo
-    from app.adaptadores.informe_repo import _url_app
-    from app.adaptadores.modelos_aprovisionamiento import MensajeSaliente
-
-    curso = bd.query(Curso).filter(Curso.id == curso_id).with_for_update().one()
-    sin = (
-        bd.query(Correccion)
-        .join(Entrega, Entrega.id == Correccion.entrega_id)
-        .filter(Entrega.curso_id == curso_id, Correccion.estado == "SIN_CORRECTOR")
-        .count()
-    )
-    if not sin:
-        raise HTTPException(status_code=409, detail="No hay correcciones pendientes de asignar.")
-    ahora = ahora_utc()
-    nuevos = 0
-    for miembro, usuario in correccion_repo.correctores(bd, curso_id):
-        if miembro.rol != "PROFESOR":
-            continue
-        clave = f"correccion-sin-corrector:{curso_id}:{miembro.id}:{ahora:%Y%m%d}"
-        if bd.query(MensajeSaliente.id).filter(MensajeSaliente.clave_idempotencia == clave).first():
-            continue
-        texto = f"Hay {sin} correcciones sin asignar en {curso.nombre}. Revisa el reparto: {_url_app()}/cursos/{curso.id}/correccion?pestana=repartir"
-        bd.add(
-            MensajeSaliente(
-                curso_id=curso_id,
-                canal="CORREO",
-                evento="correccion_sin_corrector",
-                clave_idempotencia=clave,
-                generacion=1,
-                membresia_id=miembro.id,
-                referencia={"sin_corrector": sin},
-                destinatario=usuario.email,
-                plantilla="correccion_sin_corrector",
-                plantilla_version=1,
-                asunto=f"Correcciones sin asignar · {curso.codigo}",
-                cuerpo_renderizado=texto,
-                origen="SISTEMA",
-                disparado_por_usuario_id=actor.usuario_id,
-                reserva="OPERATIVO",
-                estado="PENDIENTE",
-                intentos=0,
-                creado_en=ahora,
-            )
-        )
-        nuevos += 1
-    bitacora_repo.registrar(
-        bd,
-        accion="CORRECCION_AVISO_PROFESORES",
-        entidad="curso",
-        entidad_id=str(curso_id),
-        curso_id=curso_id,
-        actor_usuario_id=actor.usuario_id,
-        despues={"encolados": nuevos, "sin_corrector": sin},
-    )
-    return {"encolados": nuevos, "sin_corrector": sin}
 
 
 # --- Pantalla de correccion (S12.8) ---
@@ -419,17 +308,6 @@ def pantalla(
         "motivo_sin_enlace": None
         if acceso == "CONCEDIDO"
         else _MOTIVO_SIN_ENLACE.get(acceso, _MOTIVO_SIN_ENLACE[None]),
-        "autoria_borrador": correccion_detalle_repo.autoria(bd, c, curso.id)
-        if propietario
-        else None,
-        "comentario_para_publicar": publicacion_repo.comentario_para_publicar(
-            bd, c, entrega=entrega, curso=curso
-        )
-        if propietario
-        else None,
-        "evidencia_sin_commits": correccion_detalle_repo.evidencia_sin_commits(bd, entrega, sujeto)
-        if c.sin_commits
-        else None,
         "borrador": {
             "nota": c.nota_local,
             "rubrica": c.rubrica_local,
@@ -523,11 +401,7 @@ def guardar_borrador(
         )
     except correccion_repo.RechazoCorreccion as exc:
         raise _rechazo(exc) from exc
-    return {
-        "estado": c.estado,
-        "version": c.version,
-        "autoria_borrador": correccion_detalle_repo.autoria(bd, c, entrega.curso_id),
-    }
+    return {"estado": c.estado, "version": c.version}
 
 
 @router.post(
@@ -653,7 +527,6 @@ class RepartoEntrada(BaseModel):
     incluir_no_calificables: bool = False
     manual: dict[uuid.UUID, uuid.UUID | None] = {}
     por_seccion: dict[uuid.UUID, uuid.UUID] = {}
-    solo_desalineadas: bool = False
 
 
 def _propuesta_salida(
@@ -711,12 +584,6 @@ def previsualizar_reparto(
 ) -> dict[str, Any]:
     """Nada se escribe al previsualizar (S12.5.3)."""
     entrega = _entrega(bd, curso_id, entrega_id)
-    if datos.solo_desalineadas:
-        from app.adaptadores import realineacion_repo
-
-        return _propuesta_salida(
-            bd, realineacion_repo.previsualizar(bd, entrega, datos.por_seccion), curso_id
-        )
     propuesta = correccion_repo.previsualizar(
         bd,
         entrega,
@@ -741,10 +608,6 @@ def aplicar_reparto(
     membresia: MembresiaCurso = Depends(requiere(Permiso.CORRECCION_ASIGNAR)),
 ) -> dict[str, int]:
     entrega = _entrega(bd, curso_id, entrega_id)
-    if datos.solo_desalineadas:
-        from app.adaptadores import realineacion_repo
-
-        return {"cambios": realineacion_repo.aplicar(bd, entrega, membresia, datos.por_seccion)}
     cambios = correccion_repo.aplicar(
         bd,
         entrega,

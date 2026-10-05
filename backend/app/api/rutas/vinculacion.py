@@ -14,7 +14,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.adaptadores import canvas_repo, github_repo
-from app.adaptadores.renovacion_canvas_repo import al_renovar_operativa
 from app.adaptadores.cliente_canvas import FalloProveedorCanvas, crear_cliente_canvas
 from app.adaptadores.cliente_github import FalloProveedorGithub, crear_cliente_github_desde_config
 from app.adaptadores.modelos_canvas import CredencialCanvas
@@ -27,7 +26,6 @@ from app.dominio.vinculacion_canvas import RechazoVinculacion
 from app.dominio.vinculacion_github import RechazoInstalacion
 from app.infraestructura.cifrado import Llavero
 from app.infraestructura.config import Settings, obtener_configuracion
-from app.infraestructura.cerrojos import bloquear_equipo
 
 router = APIRouter(tags=["vinculacion"])
 
@@ -59,7 +57,6 @@ class CursosDisponiblesEntrada(BaseModel):
 
 @router.post("/api/cursos/{curso_id}/vinculacion/canvas/cursos-disponibles")
 def cursos_disponibles(
-    curso_id: uuid.UUID,
     datos: CursosDisponiblesEntrada,
     bd: Session = Depends(obtener_sesion_bd),
     settings: Settings = Depends(obtener_configuracion),
@@ -72,12 +69,9 @@ def cursos_disponibles(
             instancias_permitidas=[i.base_url for i in settings.instancias_canvas()],
         )
         cliente = crear_cliente_canvas(modo=settings.canvas_modo, canvas_base_url=base_url)
-        cursos = canvas_repo.listar_cursos_disponibles(
+        return canvas_repo.listar_cursos_disponibles(
             cliente, bd, token=datos.token, canvas_base_url=base_url
         )
-        for curso in cursos:
-            curso["es_vinculo_actual"] = curso["ya_vinculado_a_id"] == str(curso_id)
-        return cursos
     except RechazoVinculacion as exc:
         raise HTTPException(status_code=422, detail=exc.motivo.value) from None
     except FalloProveedorCanvas as exc:
@@ -100,19 +94,11 @@ def vincular_canvas(
     _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
 ) -> dict[str, object]:
     usuario, _ = actual
-    bloquear_equipo(bd)
-    bd.refresh(usuario)
-    bd.refresh(_membresia)
-    if not usuario.activo or _membresia.estado != "ACTIVA" or _membresia.rol != "PROFESOR":
-        raise HTTPException(status_code=403, detail="La membresía ya no permite administrar el curso.")
     curso = bd.query(Curso).filter(Curso.id == curso_id).one_or_none()
     if curso is None:
         raise HTTPException(status_code=404)
 
     base_url = canvas_repo.normalizar_canvas_base_url(datos.canvas_base_url)
-    tenia_vinculo = curso.canvas_course_id is not None
-    if tenia_vinculo and (curso.canvas_base_url != base_url or curso.canvas_course_id != datos.canvas_course_id):
-        raise HTTPException(status_code=409, detail="Renueva la credencial del curso Canvas ya vinculado; cambiar su identidad invalidaría el padrón y las tareas existentes.")
     try:
         canvas_repo.validar_instancia_permitida(
             canvas_base_url=base_url,
@@ -129,8 +115,6 @@ def vincular_canvas(
             canvas_base_url=base_url,
             canvas_course_id=datos.canvas_course_id,
         )
-        if tenia_vinculo and resultado.orden_respaldo == 0:
-            al_renovar_operativa(bd, curso=curso, usuario=usuario)
     except RechazoVinculacion as exc:
         detalle: str | object = exc.motivo.value
         if exc.detalle:

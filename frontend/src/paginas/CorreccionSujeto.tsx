@@ -18,9 +18,9 @@ import {
   ErrorCarga,
   Estado,
   Mensajes,
+  useConfirmar,
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
-import { useProtegerCambios } from "../hooks/useProtegerCambios";
 import { PanelPublicacion } from "./PanelPublicacion";
 
 type Rubrica = Record<
@@ -55,6 +55,7 @@ export function CorreccionSujeto() {
   const [recorridos, setRecorridos] = useState<Set<string>>(new Set());
   const idActual = useRef("");
   const sucio = useRef(false);
+  const confirmar = useConfirmar();
   const op = useOperacion();
   const cambios = serializar(nota, comentario, rubrica) !== guardado;
   sucio.current = cambios;
@@ -76,7 +77,54 @@ export function CorreccionSujeto() {
       idActual.current = `${entregaId}/${sujetoId}`;
     }
   }, [datos, entregaId, sujetoId]);
-  useProtegerCambios(cambios);
+  useEffect(() => {
+    if (!cambios) return;
+    const salir = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    function enlace(event: MouseEvent) {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey
+      )
+        return;
+      const anchor = (event.target as HTMLElement).closest("a");
+      if (
+        !anchor ||
+        anchor.target === "_blank" ||
+        anchor.hasAttribute("download")
+      )
+        return;
+      const url = new URL(anchor.href);
+      if (
+        url.origin !== window.location.origin ||
+        url.pathname === window.location.pathname
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      void confirmar({
+        titulo: "Cambios sin guardar",
+        descripcion:
+          "Si sales de esta corrección, los cambios del borrador se descartarán.",
+        accion: "Salir sin guardar",
+        peligro: true,
+      }).then((acepta) => {
+        if (acepta) navegar(url.pathname + url.search);
+      });
+    }
+    window.addEventListener("beforeunload", salir);
+    document.addEventListener("click", enlace, true);
+    return () => {
+      window.removeEventListener("beforeunload", salir);
+      document.removeEventListener("click", enlace, true);
+    };
+  }, [cambios, confirmar, navegar]);
   const posicion = recorrido
     ? recorrido.sujetos.indexOf(sujetoId)
     : (datos?.navegacion.posicion ?? 1) - 1;
@@ -96,6 +144,17 @@ export function CorreccionSujeto() {
     : (datos?.navegacion.siguiente_sin_corregir ?? null);
   async function ir(sujeto: string | null) {
     if (!sujeto || op.ocupado) return;
+    if (
+      cambios &&
+      !(await confirmar({
+        titulo: "Cambios sin guardar",
+        descripcion:
+          "Guarda el borrador antes de continuar, o confirma que deseas descartar estos cambios.",
+        accion: "Descartar y continuar",
+        peligro: true,
+      }))
+    )
+      return;
     setRecorridos((n) => new Set([...n, sujetoId]));
     navegar(`/cursos/${cursoId}/correccion/${entregaId}/${sujeto}`, {
       state: contexto,

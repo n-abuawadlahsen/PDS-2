@@ -198,9 +198,6 @@ export function Equipo() {
                     <td>
                       <strong>{m.nombre}</strong>
                       <p className="help">{m.email}</p>
-                      {m.es_via_compartida && (
-                        <p className="help">Cuenta de vía compartida</p>
-                      )}
                     </td>
                     <td>{etiqueta(m.rol)}</td>
                     <td>
@@ -282,15 +279,12 @@ export function Equipo() {
                                     const impacto =
                                       (await respuesta.json()) as {
                                         sesiones_a_cerrar: number;
-                                        repositorios_perdidos: number;
-                                        entregas_sin_corrector: number;
-                                        asignaciones_sin_corrector: number;
                                         es_profesor: boolean;
                                       };
                                     if (
                                       !(await confirmar({
                                         titulo: `Retirar a ${m.nombre}`,
-                                        descripcion: `Perderá el acceso al curso ${curso.nombre} desde ${impacto.sesiones_a_cerrar} sesiones activas. Se solicitará retirar su acceso docente a ${impacto.repositorios_perdidos} repositorios de GitHub. ${impacto.asignaciones_sin_corrector} asignaciones de ${impacto.entregas_sin_corrector} entregas quedarán sin corrector; sus borradores se conservan para reasignarlos.${impacto.es_profesor ? " Sus credenciales de Canvas dejarán de estar disponibles para este curso; revisa que exista otra credencial válida." : ""}`,
+                                        descripcion: `Perderá el acceso al curso ${curso.nombre}. Se cerrarán ${impacto.sesiones_a_cerrar} sesiones y se solicitará retirar su acceso docente a GitHub.${impacto.es_profesor ? " Sus credenciales de Canvas dejarán de estar disponibles para este curso; revisa que exista otra credencial válida." : ""}`,
                                         accion: "Retirar del curso",
                                         peligro: true,
                                       }))

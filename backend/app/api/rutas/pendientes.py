@@ -7,9 +7,7 @@ literales de S7.8.1. El bloque 4 (invitaciones de GitHub sin aceptar) lee
 
 from __future__ import annotations
 
-import math
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -19,13 +17,11 @@ from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.canvas_repo import descifrar_token, obtener_credencial_operativa
 from app.adaptadores.cliente_canvas import FalloProveedorCanvas, crear_cliente_canvas
-from app.adaptadores.comunicaciones_repo import supresion_vigente
 from app.adaptadores.modelos_aprovisionamiento import AccesoRepositorio, Repositorio
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_infraestructura import Incidencia
 from app.adaptadores.modelos_mapeo import CuentaGithub, MapeoGithub
 from app.adaptadores.modelos_padron import Estudiante, Grupo, PertenenciaGrupo
-from app.adaptadores.recordatorios_repo import MAXIMO_RECORDATORIOS, resumen_recordatorios
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere
 from app.dominio.estados import EstadoAccesoRepositorio, EstadoMapeoGithub, MotivoInvalidacionMapeo
 from app.dominio.permisos import Permiso
@@ -34,6 +30,7 @@ from app.infraestructura.config import Settings, obtener_configuracion
 
 router = APIRouter(tags=["pendientes"])
 
+_TOPE_RECORDATORIOS_HORAS = 24
 _MOTIVOS_BLOQUE_2 = {
     MotivoInvalidacionMapeo.LOGIN_REASIGNADO.value,
     MotivoInvalidacionMapeo.CUENTA_NO_ELEGIBLE.value,
@@ -49,32 +46,6 @@ class FilaBloque1(BaseModel):
     nombre: str
     estado_estudiante: str
     estado_mapeo: str
-    recordatorios_enviados: int
-    recordatorios_en_cola: int
-    maximo_recordatorios: int = MAXIMO_RECORDATORIOS
-    ultimo_recordatorio_en: datetime | None
-    proximo_recordatorio_en: datetime | None
-    recordatorio_bloqueado: str | None
-
-
-def _datos_recordatorio(bd: Session, curso: Curso, estudiante: Estudiante) -> dict:
-    resumen = resumen_recordatorios(bd, estudiante)
-    motivo = None
-    if curso.comunicaciones_salientes == "SUSPENDIDAS":
-        motivo = "Las comunicaciones del curso están suspendidas."
-    elif estudiante.estado != "ACTIVO":
-        motivo = "El estudiante no tiene una inscripción activa."
-    elif resumen.enviados + resumen.reservados >= MAXIMO_RECORDATORIOS:
-        motivo = "Se alcanzó el máximo de tres recordatorios por estudiante y curso."
-    elif supresion_vigente(bd, curso.id, estudiante.id, ahora_utc()):
-        motivo = "Los mensajes de este estudiante están suspendidos."
-    return {
-        "recordatorios_enviados": resumen.enviados,
-        "recordatorios_en_cola": resumen.reservados,
-        "ultimo_recordatorio_en": resumen.ultimo_en,
-        "proximo_recordatorio_en": resumen.proximo_en if motivo is None else None,
-        "recordatorio_bloqueado": motivo,
-    }
 
 
 class FilaBloque2(BaseModel):
@@ -144,7 +115,6 @@ def obtener_pendientes(
             nombre=nombre_por_id[m.estudiante_id].nombre,
             estado_estudiante=nombre_por_id[m.estudiante_id].estado,
             estado_mapeo=m.estado,
-            **_datos_recordatorio(bd, curso, nombre_por_id[m.estudiante_id]),
         )
         for m in mapeos_vivos
         if m.estado != EstadoMapeoGithub.VIGENTE.value and m.estudiante_id in nombre_por_id
@@ -289,7 +259,7 @@ def enviar_recordatorio(
     bd: Session = Depends(obtener_sesion_bd),
     settings: Settings = Depends(obtener_configuracion),
     membresia: MembresiaCurso = Depends(requiere(Permiso.COMUNICACION_ENVIAR)),
-) -> dict:
+) -> dict[str, bool]:
     """Via 4, caso por estudiante (S7.4.5): mensaje sincrono de Canvas,
     tope de 1 por estudiante por dia via `estudiante.ultimo_recordatorio_en`."""
     curso = bd.query(Curso).filter(Curso.id == curso_id).one_or_none()
@@ -298,34 +268,18 @@ def enviar_recordatorio(
     estudiante = (
         bd.query(Estudiante)
         .filter(Estudiante.id == estudiante_id, Estudiante.curso_id == curso_id)
-        .with_for_update()
         .one_or_none()
     )
     if estudiante is None:
         raise HTTPException(status_code=404)
 
     ahora = ahora_utc()
-    datos = _datos_recordatorio(bd, curso, estudiante)
-    if datos["recordatorio_bloqueado"]:
-        raise HTTPException(status_code=409, detail=datos["recordatorio_bloqueado"])
-    vigente = (
-        bd.query(MapeoGithub.id)
-        .filter(
-            MapeoGithub.curso_id == curso_id,
-            MapeoGithub.estudiante_id == estudiante_id,
-            MapeoGithub.estado == EstadoMapeoGithub.VIGENTE.value,
-        )
-        .first()
-    )
-    if vigente:
-        raise HTTPException(status_code=409, detail="La cuenta de GitHub ya está verificada.")
-    proximo = datos["proximo_recordatorio_en"]
-    if proximo and proximo > ahora:
-        raise HTTPException(
-            status_code=429,
-            detail="Ya se envió un recordatorio en las últimas 24 horas.",
-            headers={"Retry-After": str(math.ceil((proximo - ahora).total_seconds()))},
-        )
+    if estudiante.ultimo_recordatorio_en is not None:
+        transcurridas = (ahora - estudiante.ultimo_recordatorio_en).total_seconds() / 3600
+        if transcurridas < _TOPE_RECORDATORIOS_HORAS:
+            raise HTTPException(
+                status_code=429, detail="ya se envio un recordatorio a este estudiante hoy"
+            )
 
     credencial = obtener_credencial_operativa(bd, curso_id)
     if credencial is None or curso.canvas_course_id is None:
@@ -357,7 +311,5 @@ def enviar_recordatorio(
         entidad_id=str(estudiante_id),
         actor_usuario_id=membresia.usuario_id,
         curso_id=curso_id,
-        despues={"es_via_compartida": membresia.es_via_compartida},
     )
-    bd.flush()
-    return {"ok": True, **_datos_recordatorio(bd, curso, estudiante)}
+    return {"ok": True}

@@ -6,11 +6,9 @@ import {
   importarMapeoCsv,
   obtenerPersonas,
   restaurarRegistroGithub,
+  sincronizarAhora,
   type FilaCsvMapeo,
 } from "../lib/api";
-import { SeguimientoTrabajos, SincronizarCanvas } from "../components/SeguimientoTrabajos";
-import { obtenerHistorialMapeo } from "../lib/seguimientoOperacion";
-import { fechaLegible } from "../lib/textosTarea";
 import { comprobar, detalleLegible } from "../lib/errores";
 import { useCurso } from "../components/Layout";
 import {
@@ -214,37 +212,19 @@ function ImportacionCsv({ guardado }: { guardado: () => void }) {
     </details>
   );
 }
-function HistorialMapeo({ estudianteId }: { estudianteId: string }) {
-  const { curso } = useCurso();
-  const [abierto, setAbierto] = useState(false);
-  const c = useConsulta(`historial-${curso.id}-${estudianteId}-${abierto}`, (signal) =>
-    abierto ? obtenerHistorialMapeo(curso.id, estudianteId, signal) : Promise.resolve([]));
-  return <details onToggle={(e) => setAbierto(e.currentTarget.open)}>
-    <summary>Historial de cuentas</summary>
-    {abierto && <>
-      {c.error ? <ErrorCarga error={c.error} reintentar={c.recargar} /> : c.cargando ? <Cargando /> : !c.datos?.length ? <p>No hay asociaciones registradas.</p> :
-        <ol className="list-clean">{c.datos.map((m) => <li key={m.id}>
-          <strong>{m.login_declarado ? `@${m.login_declarado}` : "Sin usuario declarado"}</strong> · <Estado valor={m.estado} />
-          <p className="help">{fechaLegible(m.creado_en, curso.zona_horaria)} · {m.origen ? etiqueta(m.origen) : "Origen no registrado"} · {m.creado_por_nombre ?? "Sin autor docente registrado"}</p>
-          {m.cuenta_login_actual && <p className="help">Cuenta actual: @{m.cuenta_login_actual} · Identificador de GitHub: {m.github_user_id}</p>}
-          {m.vigente_desde && <p className="help">Vigencia: {fechaLegible(m.vigente_desde, curso.zona_horaria)} — {m.vigente_hasta ? fechaLegible(m.vigente_hasta, curso.zona_horaria) : "sin término registrado"}</p>}
-          {m.motivo_invalidacion && <p>{etiqueta(m.motivo_invalidacion)}</p>}
-        </li>)}</ol>}
-    </>}
-  </details>;
-}
-
 export function Personas() {
   const { curso, puede } = useCurso();
   const [params, setParams] = useSearchParams();
   const confirmar = useConfirmar();
   const op = useOperacion();
+  const [sincronizacion, setSincronizacion] = useState<{
+    anterior: string | null;
+  } | null>(null);
   const [registroPendiente, setRegistroPendiente] = useState(false);
-  const [trabajoRegistro, setTrabajoRegistro] = useState<string | null>(null);
   const consulta = useConsulta(
     `personas-${curso.id}`,
     (signal) => obtenerPersonas(curso.id, signal),
-    registroPendiente ? 5000 : 0,
+    sincronizacion || registroPendiente ? 5000 : 0,
   );
   const buscar = params.get("buscar") ?? "";
   const seccion = params.get("seccion") ?? "";
@@ -264,21 +244,32 @@ export function Personas() {
     );
   }
   useEffect(() => {
+    if (
+      sincronizacion &&
+      consulta.datos?.roster_sincronizado_en &&
+      consulta.datos.roster_sincronizado_en !== sincronizacion.anterior
+    ) {
+      setSincronizacion(null);
+      op.setMensaje("Los datos de estudiantes se actualizaron desde Canvas.");
+    }
+  }, [consulta.datos, sincronizacion]);
+  useEffect(() => {
     if (registroPendiente && consulta.datos?.registro_estado === "ABIERTA") {
       setRegistroPendiente(false);
       op.setMensaje("La tarea de registro está disponible en Canvas.");
     }
   }, [consulta.datos, registroPendiente]);
   useEffect(() => {
-    if (!registroPendiente) return;
+    if (!sincronizacion && !registroPendiente) return;
     const temporizador = window.setTimeout(() => {
+      setSincronizacion(null);
       setRegistroPendiente(false);
       op.setMensaje(
         "El proceso sigue sin confirmar su resultado. Usa Actualizar vista para consultar los cambios; los datos disponibles permanecen visibles.",
       );
     }, 180_000);
     return () => window.clearTimeout(temporizador);
-  }, [registroPendiente]);
+  }, [sincronizacion, registroPendiente]);
   const d = consulta.datos;
   if (!d)
     return (
@@ -319,7 +310,22 @@ export function Personas() {
             <button disabled={consulta.cargando} onClick={consulta.recargar}>
               Actualizar vista
             </button>
-            <SincronizarCanvas actualizado={consulta.recargar} />
+            {puede("curso.administrar") && (
+              <button
+                className="primary"
+                disabled={op.ocupado || Boolean(sincronizacion)}
+                onClick={() =>
+                  void op.ejecutar(async () => {
+                    await comprobar(await sincronizarAhora(curso.id));
+                    setSincronizacion({ anterior: d.roster_sincronizado_en });
+                  }, "Sincronización solicitada. Los datos se actualizarán cuando termine.")
+                }
+              >
+                {sincronizacion
+                  ? "Sincronización solicitada"
+                  : "Sincronizar con Canvas"}
+              </button>
+            )}
           </>
         }
       />
@@ -359,7 +365,7 @@ export function Personas() {
           </div>
           <Estado valor={d.registro_estado} />
         </div>
-        {puede("comunicacion.enviar") &&
+        {puede("curso.administrar") &&
           (d.registro_estado === "NO_CREADA" ||
             ["ALTERADA", "DESAPARECIDA"].includes(d.registro_estado)) && (
             <button
@@ -385,8 +391,6 @@ export function Personas() {
                   await comprobar(respuesta);
                   if (respuesta.status === 202) {
                     setRegistroPendiente(true);
-                    const cuerpo = await respuesta.json();
-                    setTrabajoRegistro(cuerpo.trabajo_id ?? null);
                     op.setMensaje(
                       "La creación quedó pendiente en Canvas. Consultaremos el resultado mientras continúas trabajando.",
                     );
@@ -403,7 +407,6 @@ export function Personas() {
                 : "Restaurar tarea de registro"}
             </button>
           )}
-        {trabajoRegistro && <SeguimientoTrabajos ids={[trabajoRegistro]} terminado={() => { setRegistroPendiente(false); consulta.recargar(); }} />}
         <p className="help">
           Una cuenta pendiente no detiene a los demás estudiantes.{" "}
           <Link to={`/cursos/${curso.id}/pendientes`}>Revisar pendientes</Link>
@@ -530,7 +533,6 @@ export function Personas() {
                               {etiqueta(e.mapeo.motivo_invalidacion)}
                             </p>
                           )}
-                          <HistorialMapeo estudianteId={e.id} />
                           {puede("mapeo.editar") && (
                             <EditorMapeo
                               estudianteId={e.id}

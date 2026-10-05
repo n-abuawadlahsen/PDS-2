@@ -174,10 +174,10 @@ export function TableroTarea({
         </button>{" "}
         <a
           href={urlApi(
-            `/api/cursos/${cursoId}/tareas/${tareaId}/tablero.csv?${parametrosOperacion({ periodo: datos.periodo, seccion: params.get("seccion") ?? "", grupo_estado: params.get("grupo_estado") ?? "", solo_alertas: params.get("solo_alertas") === "1" })}`,
+            `/api/cursos/${cursoId}/tareas/${tareaId}/tablero.csv?${new URLSearchParams({ periodo: datos.periodo })}`,
           )}
         >
-          Exportar resultados en CSV
+          Exportar todos en CSV
         </a>
       </div>
       <Mensajes {...op} />
@@ -188,7 +188,8 @@ export function TableroTarea({
         </p>
       )}
       <p className="help">
-        El CSV contiene los resultados del período con los filtros de esta tabla, en todas las páginas.
+        El CSV contiene todos los repositorios del período, sin los filtros de
+        esta tabla.
       </p>
 
       <h3>Entregas</h3>

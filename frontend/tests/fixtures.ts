@@ -232,7 +232,6 @@ export async function preparar(page: Page) {
       estado.perfil.github_login_declarado = body?.login ?? null;
       return responder(estado.perfil);
     }
-    if (path === "/api/perfil/identidades-canvas") return responder([]);
     if (path === "/api/perfil/sesiones")
       return responder(
         method === "GET"

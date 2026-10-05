@@ -23,9 +23,7 @@ from app.adaptadores.cliente_canvas import ClienteCanvas, crear_cliente_canvas
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_github import VerificacionVinculacion
 from app.adaptadores.modelos_identidad import Sesion, Usuario
-from app.adaptadores.modelos_infraestructura import Trabajo
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere, usuario_actual
-from app.api.estado_trabajos import TrabajoSalida, salida_trabajo
 from app.dominio.permisos import Permiso
 from app.dominio.verificacion import CATALOGO_VERIFICACION
 from app.infraestructura.cifrado import Llavero
@@ -83,7 +81,6 @@ def _ultima_fila(bd: Session, curso_id: uuid.UUID, item: str) -> VerificacionVin
 
 class EjecucionSalida(BaseModel):
     ejecucion_id: uuid.UUID
-    trabajo_id: uuid.UUID
 
 
 @router.post(
@@ -100,7 +97,7 @@ def encolar_checklist(
 ) -> EjecucionSalida:
     _obtener_curso_o_404(bd, curso_id)
     ejecucion_id = uuid7()
-    trabajo = trabajos_repo.encolar(
+    trabajos_repo.encolar(
         bd,
         tipo="ejecutar_checklist_vinculacion",
         clave_idempotencia=f"checklist:{curso_id}:{ejecucion_id}",
@@ -109,8 +106,7 @@ def encolar_checklist(
         payload={"ejecucion_id": str(ejecucion_id)},
     )
     response.headers["Location"] = f"/api/cursos/{curso_id}/verificacion/{ejecucion_id}"
-    assert trabajo is not None
-    return EjecucionSalida(ejecucion_id=ejecucion_id, trabajo_id=trabajo.id)
+    return EjecucionSalida(ejecucion_id=ejecucion_id)
 
 
 class PruebaEscrituraEntrada(BaseModel):
@@ -203,7 +199,7 @@ def reejecutar_item(
         )
     _obtener_curso_o_404(bd, curso_id)
     ejecucion_id = uuid7()
-    trabajo = trabajos_repo.encolar(
+    trabajos_repo.encolar(
         bd,
         tipo="ejecutar_checklist_vinculacion",
         clave_idempotencia=f"checklist-item:{curso_id}:{item}:{ejecucion_id}",
@@ -211,8 +207,7 @@ def reejecutar_item(
         curso_id=curso_id,
         payload={"ejecucion_id": str(ejecucion_id), "solo_items": [item]},
     )
-    assert trabajo is not None
-    return EjecucionSalida(ejecucion_id=ejecucion_id, trabajo_id=trabajo.id)
+    return EjecucionSalida(ejecucion_id=ejecucion_id)
 
 
 @router.get("/api/cursos/{curso_id}/verificacion/ultima", response_model=list[ItemSalida])
@@ -255,27 +250,3 @@ def estado_ejecucion(
         .all()
     )
     return [_a_salida(f) for f in filas]
-
-
-@router.get(
-    "/api/cursos/{curso_id}/verificacion/{ejecucion_id}/trabajo", response_model=TrabajoSalida
-)
-def trabajo_ejecucion(
-    curso_id: uuid.UUID,
-    ejecucion_id: uuid.UUID,
-    bd: Session = Depends(obtener_sesion_bd),
-    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
-) -> TrabajoSalida:
-    trabajo = (
-        bd.query(Trabajo)
-        .filter(
-            Trabajo.curso_id == curso_id,
-            Trabajo.tipo == "ejecutar_checklist_vinculacion",
-            Trabajo.payload["ejecucion_id"].astext == str(ejecucion_id),
-        )
-        .order_by(Trabajo.creado_en.desc())
-        .first()
-    )
-    if trabajo is None:
-        raise HTTPException(status_code=404, detail="ejecución no encontrada en este curso")
-    return salida_trabajo(trabajo)

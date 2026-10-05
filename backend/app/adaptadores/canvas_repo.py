@@ -64,7 +64,6 @@ def listar_cursos_disponibles(
                 "termino": c.termino,
                 "total_estudiantes": c.total_estudiantes,
                 "ya_vinculado_a": ocupante.nombre if ocupante is not None else None,
-                "ya_vinculado_a_id": str(ocupante.id) if ocupante is not None else None,
             }
         )
     return resultado
@@ -174,20 +173,8 @@ def vincular_canvas(
         is not None
     )
 
-    if not hay_operativa_valida:
-        # El indice reserva orden 0 incluso para una credencial invalida/retirada.
-        # Liberarlo antes del upsert evita conflictos y permite recuperar un respaldo.
-        ocupante = bd.query(CredencialCanvas).filter_by(curso_id=curso.id, orden_respaldo=0).first()
-        if ocupante is not None and ocupante is not existente:
-            maximo = bd.query(CredencialCanvas.orden_respaldo).filter_by(curso_id=curso.id).order_by(
-                CredencialCanvas.orden_respaldo.desc()
-            ).first()
-            ocupante.orden_respaldo = (maximo[0] if maximo else 0) + 1
-            bd.flush()
-
     if existente is not None:
-        orden_respaldo = existente.orden_respaldo if hay_operativa_valida else 0
-        existente.orden_respaldo = orden_respaldo
+        orden_respaldo = existente.orden_respaldo
         existente.token_cifrado = valor_cifrado.texto_cifrado
         existente.nonce = valor_cifrado.nonce
         existente.version_clave = valor_cifrado.version_clave
@@ -195,9 +182,6 @@ def vincular_canvas(
         existente.canvas_user_id = usuario_canvas.canvas_user_id
         existente.estado = EstadoCredencialCanvas.VALIDA.value
         existente.fallos_403_consecutivos = 0
-        existente.ultimo_error = None
-        existente.ultimo_chequeo_en = ahora
-        existente.consentimiento_en = ahora
         credencial = existente
     else:
         # S5.2.4: sin operativa valida, entra como operativa de inmediato;
@@ -224,7 +208,6 @@ def vincular_canvas(
             estado=EstadoCredencialCanvas.VALIDA.value,
             orden_respaldo=orden_respaldo,
             consentimiento_en=ahora,
-            ultimo_chequeo_en=ahora,
         )
         bd.add(credencial)
 

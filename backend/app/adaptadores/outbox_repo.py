@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -634,17 +633,11 @@ def _despachar_correo(
     # Guarda 2 para docentes (S11.4.6): membresia ACTIVA y, salvo que la
     # persona lo haya pedido para si misma, suscripcion activa.
     pedido_propio = mensaje.origen == OrigenMensaje.MANUAL.value
-    aviso_reparto = mensaje.evento == "correccion_sin_corrector"
     if (
         membresia is None
         or usuario is None
         or membresia.estado != "ACTIVA"
-        or (aviso_reparto and membresia.rol != "PROFESOR")
-        or (
-            not pedido_propio
-            and not aviso_reparto
-            and (suscripcion is None or not suscripcion.activa)
-        )
+        or (not pedido_propio and (suscripcion is None or not suscripcion.activa))
     ):
         mensaje.estado = EstadoMensaje.SUPRIMIDO.value
         mensaje.motivo_estado = "MATRICULA_NO_ACTIVA"
@@ -680,36 +673,26 @@ def _despachar_correo(
         )
         return
 
-    cabeceras: dict[str, str] = {}
-    if aviso_reparto:
-        texto = mensaje.cuerpo_renderizado or "Hay correcciones pendientes de asignar."
-        html = "<p>" + escape(texto).replace("\n", "<br>") + "</p>"
-    else:
-        informe = bd.get(InformeDiario, uuid.UUID(mensaje.referencia["informe_diario_id"]))
-        if informe is None or informe.contenido_html is None:
-            mensaje.estado = EstadoMensaje.CANCELADO.value
-            mensaje.motivo_estado = "ACCION_DOCENTE"
-            bd.flush()
-            return
-        token = informe_repo.emitir_token_baja(curso.id, usuario, ahora=ahora)
-        enlace_baja = informe_repo.url_baja(token)
-        enlace_notificaciones = f"{informe_repo._url_app()}/cursos/{curso.id}/mis-notificaciones"
-        pie_html = (
-            '<p style="color:#777;font-size:12px">'
-            f'<a href="{enlace_baja}">Darme de baja de este informe</a> · '
-            f'<a href="{enlace_notificaciones}">Mis notificaciones</a></p>'
-        )
-        texto = (
-            f"{informe.contenido_texto}\n\nDarme de baja: {enlace_baja}\n"
-            f"Mis notificaciones: {enlace_notificaciones}"
-        )
-        mensaje.asunto = str((informe.contenido or {}).get("asunto", ""))[:255]
-        mensaje.cuerpo_renderizado = texto[:16384]
-        html = informe.contenido_html + pie_html
-        cabeceras = {
-            "List-Unsubscribe": f"<{enlace_baja}>",
-            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-        }
+    informe = bd.get(InformeDiario, uuid.UUID(mensaje.referencia["informe_diario_id"]))
+    if informe is None or informe.contenido_html is None:
+        mensaje.estado = EstadoMensaje.CANCELADO.value
+        mensaje.motivo_estado = "ACCION_DOCENTE"
+        bd.flush()
+        return
+    token = informe_repo.emitir_token_baja(curso.id, usuario, ahora=ahora)
+    enlace_baja = informe_repo.url_baja(token)
+    enlace_notificaciones = f"{informe_repo._url_app()}/cursos/{curso.id}/mis-notificaciones"
+    pie_html = (
+        '<p style="color:#777;font-size:12px">'
+        f'<a href="{enlace_baja}">Darme de baja de este informe</a> · '
+        f'<a href="{enlace_notificaciones}">Mis notificaciones</a></p>'
+    )
+    texto = (
+        f"{informe.contenido_texto}\n\nDarme de baja: {enlace_baja}\n"
+        f"Mis notificaciones: {enlace_notificaciones}"
+    )
+    mensaje.asunto = str((informe.contenido or {}).get("asunto", ""))[:255]
+    mensaje.cuerpo_renderizado = texto[:16384]
     mensaje.estado = EstadoMensaje.EN_CURSO.value
     mensaje.tomado_por = tomado_por
     mensaje.tomado_en = ahora
@@ -719,11 +702,14 @@ def _despachar_correo(
         resultado = crear_proveedor_correo(settings).enviar(
             destinatario=usuario.email,
             asunto=mensaje.asunto,
-            html=html,
+            html=informe.contenido_html + pie_html,
             texto=texto,
             clave_idempotencia=mensaje.clave_idempotencia,
             reserva=reserva,
-            cabeceras=cabeceras,
+            cabeceras={
+                "List-Unsubscribe": f"<{enlace_baja}>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
         )
     except FalloCorreo as exc:
         mensaje.ultimo_codigo_http = exc.status
