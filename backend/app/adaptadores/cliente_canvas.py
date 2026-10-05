@@ -1193,8 +1193,9 @@ class ClienteCanvasDoble:
             return [
                 PeriodoCalificacionCanvas(
                     is_closed=True,
-                    start_date=datetime(2026, 1, 1, tzinfo=UTC),
-                    end_date=datetime(2027, 1, 1, tzinfo=UTC),
+                    # Relativo al cierre del doble para que siempre lo contenga.
+                    start_date=self._FECHA_CIERRE_DOBLE - timedelta(days=365),
+                    end_date=self._FECHA_CIERRE_DOBLE + timedelta(days=365),
                 )
             ]
         return []
@@ -1487,7 +1488,12 @@ class ClienteCanvasDoble:
     # 9102 grupal (capa 3 hasta el 23-sep), 9103 visible solo por un override
     # de la seccion 101 y 9104 visible solo para 2005 por
     # `assignment_visibility`: cubre las cuatro filas de A-164 paso 1.
-    _FECHA_CIERRE_DOBLE = datetime(2026, 10, 1, 23, 59, tzinfo=UTC)
+    # Relativa al arranque, no fija: una fecha fija termina quedando en el
+    # pasado y entonces todas las entregas del doble aparecen ya cerradas
+    # (paso el 01-10-2026 y rompio las pruebas que esperan una entrega abierta).
+    _FECHA_CIERRE_DOBLE = (datetime.now(UTC) + timedelta(days=60)).replace(
+        hour=23, minute=59, second=0, microsecond=0
+    )
 
     def _assignments_doble(self) -> list[AssignmentCanvasCrudo]:
         def assignment(

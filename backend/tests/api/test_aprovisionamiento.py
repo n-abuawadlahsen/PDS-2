@@ -12,12 +12,14 @@ from fastapi.testclient import TestClient
 
 from app.adaptadores import outbox_repo, trabajos_repo
 from app.adaptadores.base import ahora_utc
+from app.adaptadores.cliente_canvas import ClienteCanvasDoble
 from app.adaptadores.cliente_github import aceptar_invitacion_doble
 from app.adaptadores.modelos_aprovisionamiento import MensajeSaliente, Repositorio
 from app.adaptadores.modelos_identidad import Sesion, Usuario
 from app.adaptadores.modelos_infraestructura import TrabajoPeriodico
 from app.adaptadores.modelos_padron import Estudiante
 from app.api.dependencias import hash_token
+from app.dominio.fechas import formatear_fecha
 from app.trabajos import (  # noqa: F401 (registra los manejadores)
     aprovisionar_repositorios,
     despachar_outbox,
@@ -306,7 +308,9 @@ def test_fechas_de_la_entrega_en_modo_lectura(cliente: TestClient):
     respuesta = cliente.get(f"/api/cursos/{curso_id}/tareas/{tarea_id}/entregas/fechas")
     assert respuesta.status_code == 200, respuesta.text
     [entrega] = respuesta.json()
-    assert entrega["cierre_base"] == "01-10-2026 20:59 (America/Santiago)"
+    assert entrega["cierre_base"] == formatear_fecha(
+        ClienteCanvasDoble._FECHA_CIERRE_DOBLE, "America/Santiago"
+    )
     assert entrega["sujetos_con_fecha"] == 5
     assert entrega["excepciones"] == []
 

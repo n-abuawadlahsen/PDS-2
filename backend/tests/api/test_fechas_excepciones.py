@@ -7,7 +7,7 @@ doble: la aplicacion no distingue esa respuesta de la de Canvas real."""
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,7 +31,7 @@ from tests.api.test_aprovisionamiento import (
 )
 from tests.apoyo import fabrica_bd
 
-_BASE = datetime(2026, 10, 1, 23, 59, tzinfo=UTC)  # fecha base del doble
+_BASE = ClienteCanvasDoble._FECHA_CIERRE_DOBLE  # fecha base del doble
 
 
 @pytest.fixture
