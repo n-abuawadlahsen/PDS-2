@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
+  apiFetch,
   crearRegistroGithub,
   declararMapeoManual,
   importarMapeoCsv,
@@ -10,6 +11,7 @@ import {
   type FilaCsvMapeo,
 } from "../lib/api";
 import { comprobar, detalleLegible } from "../lib/errores";
+import { EstadoTrabajo } from "../components/EstadoTrabajo";
 import { useCurso } from "../components/Layout";
 import {
   Cabecera,
@@ -26,6 +28,67 @@ import {
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
 import { RecordatorioMapeo } from "./RecordatorioMapeo";
+
+function HistorialMapeo({ estudianteId }: { estudianteId: string }) {
+  const { curso } = useCurso();
+  const [abierto, setAbierto] = useState(false);
+  const consulta = useConsulta(
+    `historial-mapeo:${curso.id}:${estudianteId}:${abierto}`,
+    async (signal) => {
+      if (!abierto) return [];
+      const r = await apiFetch(
+        `/api/cursos/${curso.id}/personas/${estudianteId}/mapeo/historial`,
+        { signal },
+      );
+      await comprobar(r);
+      return r.json() as Promise<
+        {
+          id: string;
+          cuenta_login: string | null;
+          estado: string;
+          origen: string | null;
+          creado_en: string;
+          vigente_hasta: string | null;
+        }[]
+      >;
+    },
+  );
+  return (
+    <details onToggle={(e) => setAbierto(e.currentTarget.open)}>
+      <summary>Historial de cuentas</summary>
+      {consulta.error && (
+        <ErrorCarga error={consulta.error} reintentar={consulta.recargar} />
+      )}
+      {consulta.cargando ? (
+        <Cargando />
+      ) : (
+        <ul className="list-clean">
+          {consulta.datos?.map((m) => (
+            <li key={m.id}>
+              <strong>
+                {m.cuenta_login ? `@${m.cuenta_login}` : "Sin cuenta"}
+              </strong>{" "}
+              · {etiqueta(m.estado)}
+              <p className="help">
+                {fechaLegible(m.creado_en, curso.zona_horaria)} ·{" "}
+                {m.origen ? etiqueta(m.origen) : "Origen no registrado"}
+              </p>
+              {m.vigente_hasta && (
+                <p className="help">
+                  Fin de vigencia:{" "}
+                  {fechaLegible(m.vigente_hasta, curso.zona_horaria)}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!consulta.cargando &&
+        !consulta.error &&
+        consulta.datos?.length === 0 && <p>Sin historial registrado.</p>}
+    </details>
+  );
+}
 
 function EditorMapeo({
   estudianteId,
@@ -224,7 +287,12 @@ export function Personas() {
   const consulta = useConsulta(
     `personas-${curso.id}`,
     (signal) => obtenerPersonas(curso.id, signal),
-    sincronizacion || registroPendiente ? 5000 : 0,
+    sincronizacion ||
+      registroPendiente ||
+      params.has("sincronizacion") ||
+      params.has("registro")
+      ? 5000
+      : 0,
   );
   const buscar = params.get("buscar") ?? "";
   const seccion = params.get("seccion") ?? "";
@@ -254,7 +322,10 @@ export function Personas() {
     }
   }, [consulta.datos, sincronizacion]);
   useEffect(() => {
-    if (registroPendiente && consulta.datos?.registro_estado === "ABIERTA") {
+    if (
+      registroPendiente &&
+      ["ACTIVA", "ABIERTA"].includes(consulta.datos?.registro_estado ?? "")
+    ) {
       setRegistroPendiente(false);
       op.setMensaje("La tarea de registro está disponible en Canvas.");
     }
@@ -310,13 +381,26 @@ export function Personas() {
             <button disabled={consulta.cargando} onClick={consulta.recargar}>
               Actualizar vista
             </button>
-            {puede("curso.administrar") && (
+            {puede("curso.ver") && (
               <button
                 className="primary"
-                disabled={op.ocupado || Boolean(sincronizacion)}
+                disabled={
+                  op.ocupado ||
+                  Boolean(sincronizacion) ||
+                  params.has("sincronizacion")
+                }
                 onClick={() =>
                   void op.ejecutar(async () => {
-                    await comprobar(await sincronizarAhora(curso.id));
+                    const respuesta = await sincronizarAhora(curso.id);
+                    await comprobar(respuesta);
+                    const trabajo = (await respuesta.json()) as {
+                      trabajo_id?: string;
+                      trabajo_ids?: string[];
+                    };
+                    const ids =
+                      trabajo.trabajo_ids ??
+                      (trabajo.trabajo_id ? [trabajo.trabajo_id] : []);
+                    if (ids.length) filtro("sincronizacion", ids.join(","));
                     setSincronizacion({ anterior: d.roster_sincronizado_en });
                   }, "Sincronización solicitada. Los datos se actualizarán cuando termine.")
                 }
@@ -330,6 +414,63 @@ export function Personas() {
         }
       />
       <Mensajes {...op} />
+      {(params.get("sincronizacion")?.split(",") ?? [])
+        .filter((id) => /^[a-zA-Z0-9-]{1,80}$/.test(id))
+        .map((id) => (
+          <EstadoTrabajo
+            key={id}
+            ruta={`/api/cursos/${curso.id}/trabajos/${id}`}
+            zona={curso.zona_horaria}
+            cadencia={5000}
+            alTerminar={(trabajo) => {
+              setParams(
+                () => {
+                  const nuevo = new URLSearchParams(window.location.search);
+                  const pendientes = (
+                    nuevo.get("sincronizacion")?.split(",") ?? []
+                  ).filter((t) => t !== trabajo.id);
+                  if (pendientes.length)
+                    nuevo.set("sincronizacion", pendientes.join(","));
+                  else nuevo.delete("sincronizacion");
+                  return nuevo;
+                },
+                { replace: true },
+              );
+              consulta.recargar();
+              if (["REQUIERE_ATENCION", "CANCELADO"].includes(trabajo.estado)) {
+                setSincronizacion(null);
+                op.setError(
+                  "Una parte de la sincronización requiere atención. Los datos anteriores siguen disponibles; revisa Canvas y vuelve a solicitarla.",
+                );
+              }
+            }}
+          />
+        ))}
+      {params.get("registro") && (
+        <EstadoTrabajo
+          key={params.get("registro")}
+          ruta={`/api/cursos/${curso.id}/trabajos/${params.get("registro")}`}
+          zona={curso.zona_horaria}
+          cadencia={5000}
+          alTerminar={(trabajo) => {
+            setParams(
+              () => {
+                const nuevo = new URLSearchParams(window.location.search);
+                nuevo.delete("registro");
+                return nuevo;
+              },
+              { replace: true },
+            );
+            consulta.recargar();
+            if (["REQUIERE_ATENCION", "CANCELADO"].includes(trabajo.estado)) {
+              setRegistroPendiente(false);
+              op.setError(
+                "La tarea de registro no pudo completarse. Revisa la vinculación Canvas y vuelve a solicitarla.",
+              );
+            }
+          }}
+        />
+      )}
       {consulta.error && (
         <ErrorCarga error={consulta.error} reintentar={consulta.recargar} />
       )}
@@ -365,12 +506,14 @@ export function Personas() {
           </div>
           <Estado valor={d.registro_estado} />
         </div>
-        {puede("curso.administrar") &&
+        {puede("comunicacion.enviar") &&
           (d.registro_estado === "NO_CREADA" ||
             ["ALTERADA", "DESAPARECIDA"].includes(d.registro_estado)) && (
             <button
               className="primary"
-              disabled={op.ocupado || registroPendiente}
+              disabled={
+                op.ocupado || registroPendiente || params.has("registro")
+              }
               onClick={async () => {
                 if (
                   !(await confirmar({
@@ -390,6 +533,11 @@ export function Personas() {
                     : restaurarRegistroGithub(curso.id));
                   await comprobar(respuesta);
                   if (respuesta.status === 202) {
+                    const trabajo = (await respuesta.json()) as {
+                      trabajo_id?: string;
+                    };
+                    if (trabajo.trabajo_id)
+                      filtro("registro", trabajo.trabajo_id);
                     setRegistroPendiente(true);
                     op.setMensaje(
                       "La creación quedó pendiente en Canvas. Consultaremos el resultado mientras continúas trabajando.",
@@ -484,7 +632,7 @@ export function Personas() {
               ? "No hay estudiantes que coincidan con los filtros."
               : d.roster_sincronizado_en
                 ? "No hay estudiantes en los datos sincronizados."
-                : "Aún no hay estudiantes sincronizados. Un profesor puede solicitar la sincronización con Canvas."}
+                : "Aún no hay estudiantes sincronizados. Puedes solicitar la sincronización con Canvas."}
           </Vacio>
         ) : (
           <>
@@ -533,6 +681,7 @@ export function Personas() {
                               {etiqueta(e.mapeo.motivo_invalidacion)}
                             </p>
                           )}
+                          <HistorialMapeo estudianteId={e.id} />
                           {puede("mapeo.editar") && (
                             <EditorMapeo
                               estudianteId={e.id}

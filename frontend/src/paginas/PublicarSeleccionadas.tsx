@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   comprobarContraCanvas,
-  obtenerMatrizCorreccion,
   obtenerPantallaCorreccion,
   publicarCorreccion,
   type MatrizCorreccion,
@@ -10,6 +9,12 @@ import {
 import { prepararSinEntrega } from "../lib/apiFinal";
 import { Aviso, Mensajes, useConfirmar } from "../components/ui";
 import { useOperacion } from "../hooks/useConsulta";
+import { useCurso } from "../components/Layout";
+import { EstadoTrabajo } from "../components/EstadoTrabajo";
+import {
+  AccesosCorreccion,
+  CausasParticipacion,
+} from "../components/EvidenciaParticipacion";
 
 interface ResultadoFila {
   entregaId: string;
@@ -46,7 +51,13 @@ export function PublicarSeleccionadas({
     total: number;
   } | null>(null);
   const [resultados, setResultados] = useState<ResultadoFila[]>([]);
-  const [comprobando, setComprobando] = useState(false);
+  const { curso } = useCurso();
+  const [params, setParams] = useSearchParams();
+  const claveComprobacion = `comprobacion-${tareaId}`;
+  const trabajos = (params.get(claveComprobacion)?.split(",") ?? []).filter(
+    (id) => /^[a-zA-Z0-9-]{1,80}$/.test(id),
+  );
+  const comprobando = trabajos.length > 0;
   const [sinEntrega, setSinEntrega] = useState(false);
   const op = useOperacion();
   const confirmar = useConfirmar();
@@ -61,53 +72,6 @@ export function PublicarSeleccionadas({
       detener.current = true;
     };
   }, []);
-  useEffect(() => {
-    if (!comprobando) return;
-    let activo = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const inicial = matriz.contador.comprobado_en;
-    let intentos = 0;
-    async function revisar() {
-      if (!activo) return;
-      if (document.hidden) {
-        timer = setTimeout(revisar, 3000);
-        return;
-      }
-      try {
-        const nuevo = await obtenerMatrizCorreccion(cursoId, tareaId);
-        if (!activo) return;
-        if (
-          nuevo.contador.comprobado_en &&
-          nuevo.contador.comprobado_en !== inicial
-        ) {
-          setComprobando(false);
-          alFin.current();
-          return;
-        }
-      } catch {
-        if (activo) {
-          setComprobando(false);
-          op.setError(
-            "La comprobación se solicitó, pero no pudimos consultar su resultado. Actualiza el estado para revisarlo.",
-          );
-        }
-        return;
-      }
-      if (++intentos >= 40) {
-        setComprobando(false);
-        op.setMensaje(
-          "La comprobación sigue pendiente. Puedes actualizar el estado más tarde.",
-        );
-        return;
-      }
-      if (activo) timer = setTimeout(revisar, 3000);
-    }
-    timer = setTimeout(revisar, 3000);
-    return () => {
-      activo = false;
-      clearTimeout(timer);
-    };
-  }, [comprobando, cursoId, tareaId]);
   async function publicar() {
     const cola = listas.filter((fila) =>
       elegidas.has(`${fila.entregaId}/${fila.sujetoId}`),
@@ -209,12 +173,27 @@ export function PublicarSeleccionadas({
           onClick={() =>
             op.ejecutar(async () => {
               for (const entrega of matriz.entregas) {
-                if (!(await comprobarContraCanvas(cursoId, entrega.id)))
+                const resultado = await comprobarContraCanvas(
+                  cursoId,
+                  entrega.id,
+                );
+                if (!resultado.trabajo_id)
                   throw new Error(
-                    "No pudimos solicitar todas las comprobaciones. Actualiza el estado antes de reintentar.",
+                    "La comprobación se solicitó, pero el servidor no devolvió su identificador. Actualiza el estado para revisarlo.",
                   );
+                setParams(
+                  () => {
+                    const nuevos = new URLSearchParams(window.location.search);
+                    const ids = nuevos.get(claveComprobacion)?.split(",") ?? [];
+                    nuevos.set(
+                      claveComprobacion,
+                      [...new Set([...ids, resultado.trabajo_id!])].join(","),
+                    );
+                    return nuevos;
+                  },
+                  { replace: true },
+                );
               }
-              setComprobando(true);
             }, "Comprobación encolada. Se consultará el resultado automáticamente.")
           }
         >
@@ -225,6 +204,33 @@ export function PublicarSeleccionadas({
         </button>
       </div>
       <Mensajes error={op.error} mensaje={op.mensaje} />
+      {trabajos.map((id) => (
+        <EstadoTrabajo
+          key={id}
+          ruta={`/api/cursos/${cursoId}/trabajos/${id}`}
+          zona={curso.zona_horaria}
+          cadencia={3000}
+          alTerminar={(trabajo) => {
+            setParams(
+              () => {
+                const nuevos = new URLSearchParams(window.location.search);
+                const ids = (
+                  nuevos.get(claveComprobacion)?.split(",") ?? []
+                ).filter((t) => t !== trabajo.id);
+                if (ids.length) nuevos.set(claveComprobacion, ids.join(","));
+                else nuevos.delete(claveComprobacion);
+                return nuevos;
+              },
+              { replace: true },
+            );
+            alFin.current();
+            if (trabajo.estado !== "OK")
+              op.setError(
+                "La comprobación con Canvas requiere atención. El contraste anterior se conserva; revisa la vinculación antes de reintentar.",
+              );
+          }}
+        />
+      ))}
       {puedePublicar && (
         <>
           {listas.length > 0 && (
@@ -379,8 +385,9 @@ function SinEntrega({
       <h3>Calificaciones sin commits al cierre</h3>
       <Aviso tipo="warning">
         Revisa cada caso antes de seleccionarlo, especialmente si el estudiante
-        aceptó su invitación a GitHub. Esta vista no aporta la causa de la falta
-        de commits. Ningún sujeto está seleccionado por defecto.
+        aceptó su invitación a GitHub y si hay commits pendientes de atribuir.
+        Consulta las causas registradas y la evidencia de esta entrega. Ningún
+        sujeto está seleccionado por defecto.
       </Aviso>
       <Mensajes error={op.error} mensaje={op.mensaje} />
       <label>
@@ -402,24 +409,30 @@ function SinEntrega({
       <fieldset disabled={op.ocupado}>
         <legend>Sujetos que revisaste</legend>
         {filas.map((s) => (
-          <label className="check" key={s.sujeto_id}>
-            <input
-              type="checkbox"
-              checked={seleccion.has(s.sujeto_id)}
-              onChange={(e) => {
-                const n = new Set(seleccion);
-                if (e.target.checked) n.add(s.sujeto_id);
-                else n.delete(s.sujeto_id);
-                setSeleccion(n);
-              }}
+          <div className="form-stack" key={s.sujeto_id}>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={seleccion.has(s.sujeto_id)}
+                onChange={(e) => {
+                  const n = new Set(seleccion);
+                  if (e.target.checked) n.add(s.sujeto_id);
+                  else n.delete(s.sujeto_id);
+                  setSeleccion(n);
+                }}
+              />
+              {s.sujeto}
+            </label>
+            <AccesosCorreccion accesos={s.accesos} />
+            <CausasParticipacion
+              causas={s.celdas[entrega]?.causas_sin_participacion}
             />
-            {s.sujeto}{" "}
             <Link
               to={`/cursos/${cursoId}/correccion/${entrega}/${s.sujeto_id}`}
             >
               Ver evidencia
             </Link>
-          </label>
+          </div>
         ))}
       </fieldset>
       <label>

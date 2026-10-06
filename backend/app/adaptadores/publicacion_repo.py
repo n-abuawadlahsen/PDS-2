@@ -43,16 +43,13 @@ from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_identidad import Usuario
 from app.adaptadores.modelos_padron import Estudiante
 from app.adaptadores.modelos_tarea import AssignmentCanvas, Entrega, Tarea
-from app.adaptadores.modelos_version import VersionEntrega
 from app.dominio.correccion import TERMINALES, es_solo_lectura, huella_rubrica, normalizar_nota
 from app.dominio.estado_correccion import (
     contraste_canvas,
     hay_conflicto,
-    pie_comentario,
     resultado_verificacion,
 )
 from app.dominio.estados import EstadoCorreccion
-from app.dominio.fechas import formatear_fecha
 from app.infraestructura.cerrojos import cerrojo_canvas
 from app.infraestructura.cifrado import Llavero
 from app.infraestructura.config import obtener_configuracion
@@ -167,17 +164,7 @@ def _payload(
     rol: str,
     grupal_no_individual: bool,
 ) -> dict[str, Any]:
-    version = bd.get(VersionEntrega, c.version_entrega_id) if c.version_entrega_id else None
-    fecha = _fecha_de_entrega(bd, entrega, c.sujeto_id)
-    texto = pie_comentario(
-        texto=c.comentario or "",
-        entrega=entrega.nombre,
-        cierre=formatear_fecha(fecha, curso.zona_horaria) if fecha else "sin fecha",
-        sha=version.commit_sha if version and version.estado != "SIN_COMMITS" else None,
-        repositorio_full_name=version.repositorio_full_name if version else None,
-        corrector=corrector.nombre if corrector else "el equipo docente",
-        rol="profesor" if rol == "PROFESOR" else "ayudante",
-    )
+    texto = correccion_repo.comentario_para_canvas(bd, c, entrega, curso)
     c.comentario_renderizado = texto
     payload: dict[str, Any] = {
         "submission": {

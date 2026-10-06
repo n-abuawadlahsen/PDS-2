@@ -548,7 +548,7 @@ def listar_archivos(bd: Session, base: RepositorioBase) -> list[ArchivoRepositor
     return (
         bd.query(ArchivoRepositorioBase)
         .filter(ArchivoRepositorioBase.repositorio_base_id == base.id)
-        .order_by(ArchivoRepositorioBase.ruta)
+        .order_by(ArchivoRepositorioBase.ruta.collate("C"))
         .all()
     )
 

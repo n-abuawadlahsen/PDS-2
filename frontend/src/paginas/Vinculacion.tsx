@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  apiFetch,
   adoptarInstalacionHuerfana,
   iniciarInstalacionGithub,
   listarCursosCanvasDisponibles,
@@ -25,6 +26,119 @@ import {
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
+function AjustesGenerales() {
+  const { curso, recargar } = useCurso();
+  const [nombre, setNombre] = useState(curso.nombre);
+  const [zona, setZona] = useState(curso.zona_horaria);
+  const [inactividad, setInactividad] = useState(
+    curso.umbral_dias_sin_actividad ?? 7,
+  );
+  const [desbalance, setDesbalance] = useState(
+    curso.umbral_desbalance_pct ?? 70,
+  );
+  const op = useOperacion();
+  useEffect(() => {
+    setNombre(curso.nombre);
+    setZona(curso.zona_horaria);
+    setInactividad(curso.umbral_dias_sin_actividad ?? 7);
+    setDesbalance(curso.umbral_desbalance_pct ?? 70);
+  }, [curso]);
+  return (
+    <form
+      className="form-stack"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void op.ejecutar(async () => {
+          await comprobar(
+            await apiFetch(`/api/cursos/${curso.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                nombre,
+                zona_horaria: zona,
+                umbral_dias_sin_actividad: inactividad,
+                umbral_desbalance_pct: desbalance,
+              }),
+            }),
+          );
+          recargar();
+        }, "Ajustes guardados. Las métricas se recalcularán con los nuevos valores.");
+      }}
+    >
+      <Mensajes {...op} />
+      <label>
+        Nombre del curso
+        <input
+          required
+          maxLength={200}
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          aria-invalid={Boolean(op.campos.nombre)}
+        />
+        {op.campos.nombre && (
+          <span className="field-error">{op.campos.nombre}</span>
+        )}
+      </label>
+      <label>
+        Zona horaria
+        <input
+          required
+          value={zona}
+          onChange={(e) => setZona(e.target.value)}
+          aria-invalid={Boolean(op.campos.zona_horaria)}
+        />
+        {op.campos.zona_horaria && (
+          <span className="field-error">{op.campos.zona_horaria}</span>
+        )}
+        <span className="help">
+          Zona IANA, por ejemplo America/Santiago. Los instantes y versiones
+          registrados se conservan.
+        </span>
+      </label>
+      <div className="form-grid">
+        <label>
+          Días sin actividad
+          <input
+            type="number"
+            required
+            min={1}
+            max={30}
+            value={inactividad}
+            onChange={(e) => setInactividad(Number(e.target.value))}
+          />
+          {op.campos.umbral_dias_sin_actividad && (
+            <span className="field-error">
+              {op.campos.umbral_dias_sin_actividad}
+            </span>
+          )}
+        </label>
+        <label>
+          Umbral de desbalance (%)
+          <input
+            type="number"
+            required
+            min={50}
+            max={95}
+            value={desbalance}
+            onChange={(e) => setDesbalance(Number(e.target.value))}
+          />
+          {op.campos.umbral_desbalance_pct && (
+            <span className="field-error">
+              {op.campos.umbral_desbalance_pct}
+            </span>
+          )}
+        </label>
+      </div>
+      <div>
+        <button
+          className="primary"
+          disabled={op.ocupado || curso.estado === "ARCHIVADO"}
+        >
+          Guardar ajustes
+        </button>
+      </div>
+    </form>
+  );
+}
 export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
   const { curso, puede, recargar } = useCurso();
   const administra = puede("curso.administrar");
@@ -108,11 +222,7 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
               </Link>
             </Aviso>
           )}
-          <p className="help">
-            Los datos generales se fijaron al crear el curso. Aquí puedes
-            revisar sus conexiones, instalar GitHub y volver a ejecutar la
-            verificación.
-          </p>
+          <AjustesGenerales />
         </section>
       )}
       {!administra && (
@@ -311,7 +421,8 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
                             <button
                               disabled={
                                 op.ocupado ||
-                                Boolean(c.ya_vinculado_a) ||
+                                (Boolean(c.ya_vinculado_a) &&
+                                  c.ya_vinculado_curso_id !== curso.id) ||
                                 !titular ||
                                 !escritura
                               }
@@ -334,12 +445,16 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
                                 }, "Canvas está vinculado. Conecta GitHub y luego verifica las conexiones.")
                               }
                             >
-                              Elegir este curso
+                              {c.ya_vinculado_curso_id === curso.id
+                                ? "Renovar mi credencial"
+                                : "Elegir este curso"}
                             </button>
                           </div>
                           {c.ya_vinculado_a && (
                             <p className="help">
-                              Ya vinculado a {c.ya_vinculado_a}.
+                              {c.ya_vinculado_curso_id === curso.id
+                                ? "Este es el curso vinculado. Puedes renovar tu propia credencial."
+                                : `Ya vinculado a ${c.ya_vinculado_a}.`}
                             </p>
                           )}
                         </li>

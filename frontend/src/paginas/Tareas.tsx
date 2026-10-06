@@ -223,7 +223,7 @@ export function Tareas() {
                     <p className="help">
                       Modalidad:{" "}
                       {elegida.es_grupal
-                        ? "Grupal · conjunto de grupos definido en Canvas"
+                        ? `Grupal · ${elegida.conjunto_grupos_nombre ?? "Conjunto de grupos de Canvas"}${elegida.group_category_id_canvas ? ` (ID ${elegida.group_category_id_canvas})` : ""}`
                         : "Individual"}
                       . Cierre:{" "}
                       {fechaLegible(elegida.due_at, curso.zona_horaria)} ·{" "}

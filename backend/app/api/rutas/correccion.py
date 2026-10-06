@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.adaptadores import correccion_repo
+from app.adaptadores import bitacora_repo, correccion_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.modelos_aprovisionamiento import FechaEfectiva, Sujeto
 from app.adaptadores.modelos_correccion import (
@@ -39,6 +39,7 @@ from app.dominio.correccion import (
 from app.dominio.estados import CriterioAsignacion, EstadoCorreccion
 from app.dominio.fechas import formatear_fecha
 from app.dominio.permisos import Permiso, permisos_efectivos
+from app.infraestructura.cerrojos import bloquear_equipo
 
 router = APIRouter(tags=["correccion"])
 
@@ -313,6 +314,8 @@ def pantalla(
             "rubrica": c.rubrica_local,
             "comentario": c.comentario,
             "version": c.version,
+            **correccion_repo.metadatos_borrador(bd, c),
+            "comentario_renderizado": correccion_repo.comentario_para_canvas(bd, c, entrega, curso),
         }
         if propietario
         else None,
@@ -401,7 +404,14 @@ def guardar_borrador(
         )
     except correccion_repo.RechazoCorreccion as exc:
         raise _rechazo(exc) from exc
-    return {"estado": c.estado, "version": c.version}
+    return {
+        "estado": c.estado,
+        "version": c.version,
+        **correccion_repo.metadatos_borrador(bd, c),
+        "comentario_renderizado": correccion_repo.comentario_para_canvas(
+            bd, c, entrega, _curso(bd, curso_id)
+        ),
+    }
 
 
 @router.post(
@@ -569,6 +579,47 @@ def listar_correctores(
         }
         for m, u in correccion_repo.correctores(bd, curso_id)
     ]
+
+
+class PesoEntrada(BaseModel):
+    peso: int | None = Field(ge=0, le=10)
+
+
+@router.patch(
+    "/api/cursos/{curso_id}/correccion/correctores/{membresia_id}/peso",
+    dependencies=[Depends(exigir_csrf)],
+)
+def actualizar_peso(
+    curso_id: uuid.UUID,
+    membresia_id: uuid.UUID,
+    datos: PesoEntrada,
+    bd: Session = Depends(obtener_sesion_bd),
+    actor: MembresiaCurso = Depends(requiere(Permiso.CORRECCION_ASIGNAR)),
+) -> dict[str, Any]:
+    bloquear_equipo(bd)
+    objetivo = (
+        bd.query(MembresiaCurso)
+        .filter_by(id=membresia_id, curso_id=curso_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if objetivo is None:
+        raise HTTPException(status_code=404)
+    if objetivo.estado != "ACTIVA":
+        raise HTTPException(status_code=409, detail="Ese corrector ya no es miembro activo.")
+    antes = objetivo.peso_correccion
+    objetivo.peso_correccion = datos.peso
+    bitacora_repo.registrar(
+        bd,
+        accion="PESO_CORRECCION_ACTUALIZADO",
+        entidad="membresia_curso",
+        entidad_id=str(objetivo.id),
+        actor_usuario_id=actor.usuario_id,
+        curso_id=curso_id,
+        antes={"peso": antes},
+        despues={"peso": datos.peso},
+    )
+    return {"membresia_id": str(objetivo.id), "peso": correccion_repo.peso_de(objetivo)}
 
 
 @router.post(
@@ -739,15 +790,25 @@ def comprobar_contra_canvas(
     entrega_id: uuid.UUID,
     bd: Session = Depends(obtener_sesion_bd),
     _m: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
-) -> dict[str, bool]:
-    """Encola la lectura de Canvas; la pantalla no espera (CA-12.11-05)."""
+) -> dict[str, object]:
+    """Encola la lectura de Canvas y expone su estado consultable (CA-12.11-05)."""
     from app.adaptadores import publicacion_repo
 
     entrega = _entrega(bd, curso_id, entrega_id)
-    publicacion_repo.encolar_reconciliacion(
-        bd, curso_id, entrega.id, motivo=f"manual:{ahora_utc():%Y%m%d%H%M}"
+    motivo = f"manual:{ahora_utc():%Y%m%d%H%M}"
+    publicacion_repo.encolar_reconciliacion(bd, curso_id, entrega.id, motivo=motivo)
+    from app.adaptadores.modelos_infraestructura import Trabajo
+
+    trabajo = (
+        bd.query(Trabajo)
+        .filter_by(
+            curso_id=curso_id,
+            clave_idempotencia=f"{publicacion_repo.TIPO_RECONCILIAR}:{entrega_id}:{motivo}",
+        )
+        .order_by(Trabajo.creado_en.desc())
+        .first()
     )
-    return {"encolada": True}
+    return {"encolada": True, "trabajo_id": str(trabajo.id) if trabajo else None}
 
 
 class SinEntregaEntrada(BaseModel):

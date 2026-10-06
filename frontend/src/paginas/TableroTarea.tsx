@@ -212,9 +212,9 @@ export function TableroTarea({
         </button>
         <a
           className="button"
-          title="Incluye todos los repositorios del período, sin los filtros de la tabla."
+          title="Incluye todos los resultados de los filtros actuales, más allá de la página visible."
           href={urlApi(
-            `/api/cursos/${cursoId}/tareas/${tareaId}/tablero.csv?${new URLSearchParams({ periodo: datos.periodo })}`,
+            `/api/cursos/${cursoId}/tareas/${tareaId}/tablero.csv?${filtros}`,
           )}
         >
           Exportar CSV

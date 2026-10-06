@@ -7,7 +7,9 @@ literales de S7.8.1. El bloque 4 (invitaciones de GitHub sin aceptar) lee
 
 from __future__ import annotations
 
+import math
 import uuid
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -37,6 +39,10 @@ _MOTIVOS_BLOQUE_2 = {
 }
 
 
+def _proximo_recordatorio(ultimo: datetime | None) -> datetime | None:
+    return ultimo + timedelta(hours=_TOPE_RECORDATORIOS_HORAS) if ultimo else None
+
+
 def _llavero(settings: Settings) -> Llavero:
     return Llavero(settings.llavero_cifrado(), settings.app_encryption_key_activa)
 
@@ -46,6 +52,8 @@ class FilaBloque1(BaseModel):
     nombre: str
     estado_estudiante: str
     estado_mapeo: str
+    ultimo_recordatorio_en: datetime | None = None
+    proximo_recordatorio_en: datetime | None = None
 
 
 class FilaBloque2(BaseModel):
@@ -115,6 +123,10 @@ def obtener_pendientes(
             nombre=nombre_por_id[m.estudiante_id].nombre,
             estado_estudiante=nombre_por_id[m.estudiante_id].estado,
             estado_mapeo=m.estado,
+            ultimo_recordatorio_en=nombre_por_id[m.estudiante_id].ultimo_recordatorio_en,
+            proximo_recordatorio_en=_proximo_recordatorio(
+                nombre_por_id[m.estudiante_id].ultimo_recordatorio_en
+            ),
         )
         for m in mapeos_vivos
         if m.estado != EstadoMapeoGithub.VIGENTE.value and m.estudiante_id in nombre_por_id
@@ -268,6 +280,7 @@ def enviar_recordatorio(
     estudiante = (
         bd.query(Estudiante)
         .filter(Estudiante.id == estudiante_id, Estudiante.curso_id == curso_id)
+        .with_for_update()
         .one_or_none()
     )
     if estudiante is None:
@@ -278,7 +291,13 @@ def enviar_recordatorio(
         transcurridas = (ahora - estudiante.ultimo_recordatorio_en).total_seconds() / 3600
         if transcurridas < _TOPE_RECORDATORIOS_HORAS:
             raise HTTPException(
-                status_code=429, detail="ya se envio un recordatorio a este estudiante hoy"
+                status_code=429,
+                detail="ya se envio un recordatorio a este estudiante hoy",
+                headers={
+                    "Retry-After": str(
+                        math.ceil((_TOPE_RECORDATORIOS_HORAS - transcurridas) * 3600)
+                    )
+                },
             )
 
     credencial = obtener_credencial_operativa(bd, curso_id)

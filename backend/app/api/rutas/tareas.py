@@ -30,6 +30,7 @@ from app.adaptadores.cliente_github import (
 )
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_infraestructura import CursorSincronizacion
+from app.adaptadores.modelos_padron import ConjuntoGrupos
 from app.adaptadores.modelos_tarea import Entrega, Tarea
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere
 from app.dominio.permisos import Permiso
@@ -179,6 +180,8 @@ class TareaDetalleSalida(BaseModel):
 
 
 class AssignmentCanvasSalida(BaseModel):
+    group_category_id_canvas: int | None
+    conjunto_grupos_nombre: str | None
     canvas_assignment_id: int
     nombre: str
     es_grupal: bool
@@ -321,6 +324,17 @@ def listar_assignments_canvas(
     return AssignmentsCanvasSalida(
         assignments=[
             AssignmentCanvasSalida(
+                group_category_id_canvas=item.fila.group_category_id_canvas,
+                conjunto_grupos_nombre=(
+                    bd.query(ConjuntoGrupos.nombre)
+                    .filter_by(
+                        curso_id=curso.id,
+                        canvas_group_category_id=item.fila.group_category_id_canvas,
+                    )
+                    .scalar()
+                )
+                if item.fila.group_category_id_canvas is not None
+                else None,
                 canvas_assignment_id=item.fila.canvas_assignment_id,
                 nombre=item.fila.nombre,
                 es_grupal=item.fila.es_grupal,

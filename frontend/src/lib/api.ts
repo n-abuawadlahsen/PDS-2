@@ -87,6 +87,10 @@ export async function obtenerCapacidades(
 // --- Etapa P2: curso, equipo, invitaciones (SPEC 02 S2.4, S2.5) ---
 
 export interface Curso {
+  umbral_dias_sin_actividad?: number;
+  umbral_desbalance_pct?: number;
+  canvas_base_url?: string | null;
+  canvas_course_id?: number | null;
   id: string;
   estado: string;
   nombre: string;
@@ -131,6 +135,7 @@ export interface Miembro {
   github_login?: string | null;
   github_estado?: string | null;
   github_error?: string | null;
+  es_via_compartida?: boolean;
 }
 
 export async function listarEquipo(
@@ -143,6 +148,7 @@ export async function listarEquipo(
 }
 
 export interface Contexto {
+  es_via_compartida?: boolean;
   rol: string;
   permisos_efectivos: string[];
 }
@@ -236,6 +242,7 @@ export interface CursoCanvasDisponible {
   termino: string | null;
   total_estudiantes: number | null;
   ya_vinculado_a: string | null;
+  ya_vinculado_curso_id?: string | null;
 }
 
 export async function listarCursosCanvasDisponibles(
@@ -607,6 +614,8 @@ export async function restaurarRegistroGithub(
 }
 
 export interface FilaPendienteSinCuenta {
+  ultimo_recordatorio_en?: string | null;
+  proximo_recordatorio_en?: string | null;
   estudiante_id: string;
   nombre: string;
   estado_estudiante: string;
@@ -753,6 +762,8 @@ export interface TareaDetalle {
 }
 
 export interface AssignmentCanvasOpcion {
+  group_category_id_canvas?: number | null;
+  conjunto_grupos_nombre?: string | null;
   canvas_assignment_id: number;
   nombre: string;
   es_grupal: boolean;
@@ -2157,6 +2168,12 @@ export interface CeldaCorreccion {
   motivo_no_publicable: string | null;
   banderas: string[];
   contraste: string;
+  causas_sin_participacion?: {
+    estudiante_id: string;
+    nombre: string;
+    causa: "SIN_ACCESO" | "SIN_ATRIBUIR" | "SIN_COMMITS";
+    registrada_en: string;
+  }[];
 }
 
 export interface MatrizCorreccion {
@@ -2166,6 +2183,13 @@ export interface MatrizCorreccion {
     sujeto: string;
     activo: boolean;
     seccion: string | null;
+    repositorio_id?: string | null;
+    accesos?: {
+      estudiante_id: string;
+      nombre: string;
+      estado: string | null;
+      verificado_en: string | null;
+    }[];
     celdas: Record<string, CeldaCorreccion>;
   }[];
   por_corrector: Record<string, Record<string, number>>;
@@ -2239,6 +2263,14 @@ export interface PantallaCorreccion {
       { points?: number; rating_id?: string; comments?: string }
     > | null;
     comentario: string | null;
+    guardado_en?: string | null;
+    autor?: {
+      usuario_id: string;
+      nombre: string | null;
+      rol: string | null;
+      es_via_compartida: boolean;
+    } | null;
+    comentario_renderizado?: string;
     version: number;
   } | null;
   rubrica: {
@@ -2318,7 +2350,15 @@ export async function guardarBorradorCorreccion(
     comentario: string | null;
     version: number | null;
   },
-): Promise<Resultado<{ estado: string; version: number }>> {
+): Promise<
+  Resultado<{
+    estado: string;
+    version: number;
+    guardado_en?: string | null;
+    comentario_renderizado?: string;
+    autor?: NonNullable<PantallaCorreccion["borrador"]>["autor"];
+  }>
+> {
   return resultado(
     await apiFetch(`${rutaCorreccion(cursoId, entregaId, sujetoId)}/borrador`, {
       method: "PUT",
@@ -2507,10 +2547,11 @@ export async function accionPublicacion(
 export async function comprobarContraCanvas(
   cursoId: string,
   entregaId: string,
-): Promise<boolean> {
+): Promise<{ encolada: boolean; trabajo_id: string | null }> {
   const respuesta = await apiFetch(
     `/api/cursos/${cursoId}/correccion/${entregaId}/comprobar`,
     { method: "POST" },
   );
-  return respuesta.ok;
+  if (!respuesta.ok) throw await errorRespuesta(respuesta);
+  return respuesta.json();
 }

@@ -35,6 +35,7 @@ from app.trabajos import (  # noqa: F401 (registra manejadores)
     barrido_completo_actividad,
     comunicaciones_programadas,
     crear_etiqueta,
+    crear_registro_github,
     despachar_outbox,
     ejecutar_checklist_vinculacion,
     informe_diario,

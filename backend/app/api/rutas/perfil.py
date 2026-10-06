@@ -10,9 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.adaptadores import acceso_docente_repo, cuenta_repo
+from app.adaptadores import acceso_docente_repo, bitacora_repo, cuenta_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.cliente_github import FalloProveedorGithub, crear_cliente_github_desde_config
+from app.adaptadores.modelos_canvas import CredencialCanvas, IdentidadCanvasUsuario
+from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_identidad import Sesion, Usuario
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, usuario_actual
 from app.dominio.vinculacion_github import es_cuenta_de_organizacion
@@ -200,3 +202,106 @@ def cerrar_otras_sesiones(
     )
     bd.flush()
     return {"sesiones_cerradas": afectadas}
+
+
+@router.delete("/sesiones/{sesion_id}", dependencies=[Depends(exigir_csrf)])
+def cerrar_sesion_individual(
+    sesion_id: uuid.UUID,
+    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
+    bd: Session = Depends(obtener_sesion_bd),
+) -> dict[str, bool]:
+    fila = bd.query(Sesion).filter_by(id=sesion_id, usuario_id=actual[0].id).one_or_none()
+    if fila is None:
+        raise HTTPException(status_code=404)
+    if fila.revocada_en is None:
+        fila.revocada_en = ahora_utc()
+        bitacora_repo.registrar(
+            bd,
+            accion="SESION_CERRADA",
+            entidad="sesion",
+            entidad_id=str(fila.id),
+            actor_usuario_id=actual[0].id,
+        )
+    return {"ok": True, "es_la_actual": fila.id == actual[1].id}
+
+
+@router.get("/identidades-canvas")
+def listar_identidades_canvas(
+    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
+    bd: Session = Depends(obtener_sesion_bd),
+) -> list[dict[str, Any]]:
+    identidades = (
+        bd.query(IdentidadCanvasUsuario)
+        .filter_by(usuario_id=actual[0].id)
+        .order_by(IdentidadCanvasUsuario.canvas_base_url)
+        .all()
+    )
+    credenciales = (
+        bd.query(CredencialCanvas, Curso)
+        .join(Curso, Curso.id == CredencialCanvas.curso_id)
+        .filter(CredencialCanvas.usuario_id == actual[0].id, CredencialCanvas.estado != "RETIRADA")
+        .all()
+    )
+    return [
+        {
+            "id": str(i.id),
+            "canvas_base_url": i.canvas_base_url,
+            "canvas_user_id": i.canvas_user_id,
+            "verificada_en": i.verificada_en,
+            "cursos": [
+                {"id": str(c.id), "nombre": c.nombre, "operativa": cred.orden_respaldo == 0}
+                for cred, c in credenciales
+                if c.canvas_base_url == i.canvas_base_url
+            ],
+        }
+        for i in identidades
+    ]
+
+
+@router.delete("/identidades-canvas/{identidad_id}", dependencies=[Depends(exigir_csrf)])
+def desvincular_identidad_canvas(
+    identidad_id: uuid.UUID,
+    actual: tuple[Usuario, Sesion] = Depends(usuario_actual),
+    bd: Session = Depends(obtener_sesion_bd),
+) -> dict[str, Any]:
+    bloquear_equipo(bd)
+    identidad = (
+        bd.query(IdentidadCanvasUsuario)
+        .filter_by(id=identidad_id, usuario_id=actual[0].id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if identidad is None:
+        raise HTTPException(status_code=404)
+    membresias = (
+        bd.query(MembresiaCurso)
+        .join(Curso, Curso.id == MembresiaCurso.curso_id)
+        .join(
+            CredencialCanvas,
+            (CredencialCanvas.curso_id == Curso.id)
+            & (CredencialCanvas.usuario_id == MembresiaCurso.usuario_id),
+        )
+        .filter(
+            MembresiaCurso.usuario_id == actual[0].id,
+            Curso.canvas_base_url == identidad.canvas_base_url,
+            CredencialCanvas.estado != "RETIRADA",
+        )
+        .all()
+    )
+    for membresia in membresias:
+        cuenta_repo.retirar_credenciales(bd, membresia)
+    bitacora_repo.registrar(
+        bd,
+        accion="IDENTIDAD_CANVAS_DESVINCULADA",
+        entidad="identidad_canvas_usuario",
+        entidad_id=str(identidad.id),
+        actor_usuario_id=actual[0].id,
+        antes={
+            "canvas_base_url": identidad.canvas_base_url,
+            "canvas_user_id": identidad.canvas_user_id,
+        },
+        despues={"credenciales_retiradas": len(membresias)},
+    )
+    bd.delete(identidad)
+    bd.flush()
+    return {"ok": True, "credenciales_retiradas": len(membresias)}

@@ -1,6 +1,6 @@
 # Configuración, acceso y personas (P1–P6)
 
-Revisión realizada contra las rutas de `backend/app/api/rutas/{auth,perfil,cursos,vinculacion,verificacion,personas,pendientes,comunicaciones}.py`. No se modificó el backend ni se añadieron respuestas ficticias al producto.
+Revisión realizada contra las rutas de `backend/app/api/rutas/{auth,perfil,cursos,vinculacion,verificacion,personas,pendientes,comunicaciones}.py`. Se completaron los contratos que impedían los flujos de esta área, usando los modelos existentes. La revisión de octubre está en [LIMITACIONES.md](LIMITACIONES.md).
 
 ## Pantalla → acción → contrato → permiso
 
@@ -10,20 +10,22 @@ Todas las rutas de esta tabla llevan prefijo `/api`, salvo las rutas `/auth`. `{
 | --- | --- | --- | --- |
 | Acceso / Confirmar | `POST /auth/google/inicio`, `POST /auth/confirmar`; cookie opaca y formulario de navegación | Pública | Conserva destino interno permitido; rechazos de Google y confirmación existente. No guarda credenciales. |
 | Perfil | `GET/PATCH/DELETE /perfil`, `GET /perfil/cierre` | Sesión propia | Nombre editable, correo de identidad, cierre confirmado y cursos que bloquean el cierre. |
-| Perfil | `GET/DELETE /perfil/sesiones`, `PUT/DELETE /perfil/cuenta-github` | Sesión propia | Sesiones abiertas, cerrar las demás, cuenta docente GitHub y consentimiento. |
+| Perfil | `GET/DELETE /perfil/sesiones`, `DELETE /perfil/sesiones/{id}`, `GET /perfil/identidades-canvas`, `DELETE .../{id}`, `PUT/DELETE /perfil/cuenta-github` | Sesión propia | Cierre individual/de las demás, identidades Canvas propias con retiro confirmado de credenciales y cuenta docente GitHub. |
+| Ajustes | `PATCH /cursos/{c}` | `curso.administrar` | Nombre, zona IANA y umbrales; errores junto al campo, auditoría y recálculo en cola. |
 | Cursos | `GET/POST /cursos`, `GET /cursos/{c}/contexto` | Sesión / membresía activa | Curso nuevo y contexto de permisos reales; implementación general en shell/Cursos. |
 | Equipo | `GET /cursos/{c}/equipo`, `GET /cursos/{c}/equipo/historial` | `curso.ver` | Lista legible e historial bajo demanda. Todos los profesores tienen nueve permisos. |
 | Equipo | `POST/GET /cursos/{c}/equipo/invitaciones`, `POST .../{invitacion}/reenviar`, `DELETE .../{invitacion}` | `equipo.administrar` | Emisión, enlace nominal, estado del correo, reenvío y revocación. Formulario con cinco permisos concedibles, dos implícitos y dos exclusivos de profesor explicados. |
-| Equipo | `PATCH /cursos/{c}/miembros/{m}/permisos`, `PATCH .../rol`, `GET .../impacto-retiro`, `POST /cursos/{c}/equipo/{m}/retiro`, `POST .../reincorporacion`, `POST .../github/reintentar` | `equipo.administrar` | Conserva último profesor, previsualiza sesiones y efectos de retiro, permite reincorporación y reintento de acceso GitHub. |
+| Equipo | `PATCH /cursos/{c}/miembros/{m}/permisos`, `PATCH .../rol`, `GET .../impacto-retiro`, `POST /cursos/{c}/equipo/{m}/retiro`, `POST .../reincorporacion`, `POST .../github/reintentar` | `equipo.administrar` | Conserva último profesor, calcula repositorios/correcciones afectados; el retiro impide acceso al curso y conserva borradores. Marca la vía compartida. |
 | Invitación | `GET /invitaciones/{token}`, `POST .../aceptar` o OAuth con `invitacion_token` | Token nominal / sesión coincidente | Rol, permisos, consentimiento y estados vencido/revocado/aceptado; cambiar cuenta conserva la invitación. |
-| Vinculación / Ajustes | `GET /canvas/instancias`, `GET /cursos/{c}/vinculacion/canvas`, `POST .../canvas/cursos-disponibles`, `POST .../canvas` | Escritura `curso.administrar` | Credencial propia con consentimientos y selección desde cursos reales. Cursos ocupados visibles y deshabilitados. Token descartado al vincular o fallar. |
+| Vinculación / Ajustes | `GET /canvas/instancias`, `GET /cursos/{c}/vinculacion/canvas`, `POST .../canvas/cursos-disponibles`, `POST .../canvas` | Escritura `curso.administrar` | Credencial propia con consentimientos. Renueva el vínculo propio por UUID; otros cursos ocupados quedan deshabilitados. Token descartado al vincular o fallar. |
 | Vinculación / Ajustes | `GET /cursos/{c}/vinculacion/github`, `POST .../github/iniciar`, `GET .../github/huerfanas`, `POST .../github/huerfanas/adoptar`, `POST /vinculacion/github/callback` | `curso.administrar` / callback con sesión | GitHub App, retorno validado, instalación existente y adopción con confirmación escrita. No hay token personal GitHub. |
-| Verificación | `GET /cursos/{c}/verificacion/ultima`, `POST .../verificacion`, `GET .../verificacion/{ejecucion}`, `POST .../items/{item}` | Lectura `curso.ver`, escritura `curso.administrar` | 19 comprobaciones agrupadas, fecha y resultado; sondeo cada 2 segundos. ID de ejecución en URL para retomar tras recarga; resultados anteriores no representan comprobaciones pendientes como correctas. |
+| Verificación | `GET /cursos/{c}/verificacion/ultima`, `POST .../verificacion`, `GET .../verificacion/{ejecucion}`, `GET .../{ejecucion}/estado`, `POST .../items/{item}` | Lectura `curso.ver`, escritura `curso.administrar` | 19 comprobaciones, sondeo cada 2 segundos, estado/intentos/próximo reintento del trabajo. ID de ejecución en URL; los fallos no convierten pendientes en correctos. |
 | Verificación | `POST .../items/14/firmar`, `POST .../items/5-bis`, `POST .../items/17-bis` | `curso.administrar` | Firma manual separada y dos pruebas de escritura con consentimiento explícito. |
 | Personas | `GET /cursos/{c}/personas` | `curso.ver` | Espejo completo (sin paginación de servidor), paginación local de 20 filas, filtros en URL, secciones/grupos y sello de sincronización. Mantiene enmascarado del servidor. |
-| Personas | `POST /cursos/{c}/sincronizaciones`, `POST .../registro-github`, `POST .../registro-github/restaurar` | **Contrato: `curso.administrar`** | Sincronización encolada y registro confirmado antes de publicar. Un `202` permanece pendiente y se consulta el espejo; nunca anuncia publicación anticipada. |
+| Personas | `POST /cursos/{c}/sincronizaciones`, `POST .../registro-github`, `POST .../registro-github/restaurar`, `GET .../trabajos/{id}` | Sincronizar `curso.ver`; registro `comunicacion.enviar` | IDs consultables en URL y estado real de cada trabajo, incluido el registro en cola; no anuncia publicación anticipada. |
 | Personas | `POST /cursos/{c}/personas/{e}/mapeo`, `POST .../mapeo/importar-csv` | `mapeo.editar` | Validación docente y archivo/textarea CSV, previsualización fila a fila y aplicación de la revisión vigente. Cambiar el CSV invalida la revisión. |
-| Pendientes | `GET /cursos/{c}/pendientes`, `POST .../pendientes/{e}/recordatorio` | Lectura `curso.ver`, envío `comunicacion.enviar` | Cuatro grupos de pendientes, causa y enlace a la persona por ID estable. Diferencia envío confirmado / cola y limita repetición tras `429`. |
+| Personas | `GET /cursos/{c}/personas/{e}/mapeo/historial` | `curso.ver` | Historial bajo demanda por IDs estables y fecha, sin evidencia sensible del proveedor. |
+| Pendientes | `GET /cursos/{c}/pendientes`, `POST .../pendientes/{e}/recordatorio` | Lectura `curso.ver`, envío `comunicacion.enviar` | Cuatro grupos, causa y persona por ID; último/próximo envío y `Retry-After` en `429`. |
 | Personas | `GET/PUT /cursos/{c}/comunicaciones-curso/recordatorio-mapeo` | Lectura `curso.ver`, cambio `comunicacion.enviar` | Regla automática, vista previa, carga/error recuperable, permiso explícito y bloqueo de doble envío. Respeta capacidad `comunicaciones_automaticas`. |
 
 ## Trazabilidad del enunciado
@@ -32,7 +34,7 @@ Todas las rutas de esta tabla llevan prefijo `/api`, salvo las rutas `/auth`. `{
 | --- | --- |
 | R2.1.1 | Acceso Google, Perfil, Equipo, invitación nominal, roles/retiro/reincorporación. |
 | R2.1.2 | Registro/inicio mediante Google. Gmail personal admitido; diferencia institucional existente consignada abajo. |
-| R2.1.3 | Cursos → Crear curso → Vinculación; Ajustes muestra datos y operaciones de conexión disponibles. La edición general posterior no tiene endpoint. |
+| R2.1.3 | Cursos → Crear curso → Vinculación; Ajustes edita nombre, zona horaria y umbrales. |
 | R2.1.4 | Vinculación Canvas → credencial propia → buscar cursos → seleccionar → verificación. |
 | R2.1.5 | Vinculación GitHub → instalación App → callback → verificación. |
 | R2.1.6 | Ayuda de token, consentimientos, progreso persistido y checklist con motivos/pruebas explícitas. |
@@ -46,17 +48,11 @@ Todas las rutas de esta tabla llevan prefijo `/api`, salvo las rutas `/auth`. `{
 | R2.2.5 | Pendientes → persona seleccionada → validar cuenta / enviar recordatorio. El backend reanuda la creación progresiva. |
 | R2.2.6 | Pendientes → sin cuenta, conflicto, grupo incompleto o invitación pendiente con causa/acción. |
 
-## Límites y discrepancias verificables
+## Límites que siguen vigentes
 
-1. **Dominio de Google.** `backend/app/dominio/identidad.py::normalizar_correo_google` admite Gmail personal y `@miuandes.cl`, aunque el documento pide únicamente Gmail. Acceso, invitaciones y rechazos reflejan el contrato vigente. No se cambió la política de identidad del backend.
-2. **Permisos de sincronización y tarea de registro.** `personas.py` exige `CURSO_ADMINISTRAR` tanto en `POST /sincronizaciones` como en `POST /registro-github` y `/restaurar`. El documento solicita respectivamente `curso.ver` y `comunicacion.enviar`. Un ayudante con esos permisos recibe `403`; la UI no ofrece una acción que su contrato rechaza.
-3. **Renovar la credencial del mismo curso Canvas.** El backend permite un upsert mediante `POST /vinculacion/canvas`, pero no expone el `canvas_course_id` del curso actual. La lista `POST /canvas/cursos-disponibles` informa `ya_vinculado_a` solamente como nombre, también para el curso propio, sin identificador ni bandera que permita distinguirlo de otro curso. Reproducción: vincular curso, regresar, buscar cursos con nueva credencial; la opción propia se devuelve ocupada. Se conserva deshabilitada para no decidir por coincidencia de nombres ni habilitar otro curso ocupado. Falta un identificador estable de curso ocupante, `es_vinculo_actual`, o el vínculo Canvas actual legible.
-4. **Ajustes generales y datos de perfil.** No hay `PATCH /cursos/{id}` para cambiar nombre/zona/roles Canvas/canal ni endpoint de archivar el curso (sí existen operaciones de archivado por tarea). Tampoco hay lectura/desvinculación de identidades Canvas en Perfil o cierre individual de una sesión: el contrato ofrece cerrar todas las demás. Se muestran únicamente datos y acciones disponibles.
-5. **Historial detallado de mapeos y fusiones Canvas.** `GET /personas` entrega solo el mapeo vigente. No hay endpoint para leer su historial, confirmar `POSIBLE_FUSION_CANVAS` o reenviar directamente la invitación GitHub de un estudiante. La UI conserva las causas recibidas, edición/CSV y navegación a repositorios sin fabricar esas operaciones.
-6. **Hora exacta del siguiente recordatorio.** `POST /pendientes/{id}/recordatorio` devuelve `429` con texto sin `Retry-After`; `GET /pendientes` no entrega `ultimo_recordatorio_en`. El límite implementado es 24 horas desde el último envío. Se explica la espera sin inventar una hora. Este contrato directo no impone el máximo total de tres del SPEC; la regla de recordatorios automáticos tiene su propia política.
-7. **Estado de ejecución.** El checklist devuelve filas por ejecución, sin estado del job/fecha de próximo intento; el frontend muestra avance por ítems y conserva los pendientes tras un tiempo de espera. Las sincronizaciones devuelven `{ok,en_curso}` sin identificador consultable; se sondea la actualización del espejo y no se declara un resultado no confirmado.
-8. **Impacto de retiro incompleto.** `GET /miembros/{id}/impacto-retiro` devuelve `repositorios_perdidos` y `entregas_sin_corrector` como constantes `0`. La confirmación utiliza solo el contador real de sesiones y explica las consecuencias de acceso/credenciales; no presenta esas constantes como un cálculo de correcciones afectadas.
-9. **Marca de vía compartida.** `MiembroSalida`/`ContextoSalida` no incluyen `es_via_compartida`. No puede identificarse visualmente una cuenta compartida de forma fiable hasta que la API exponga esa propiedad.
+La política vigente admite Gmail personal y `miuandes.cl`. Se mantiene esa decisión del proyecto. No están implementados la configuración de roles Canvas adicionales, archivado del curso completo, confirmación de fusiones Canvas ni reenvío manual directo de invitaciones de estudiantes; sus alcances concretos están en [LIMITACIONES.md](LIMITACIONES.md).
+
+Las restricciones anteriores de renovación Canvas, ajustes generales, sesiones/identidades, historial, permisos, cooldown, impacto del retiro, vía compartida y estado de trabajos quedaron corregidas. Las pruebas de esta área usan dobles de proveedores; no certifican OAuth ni envíos externos reales.
 
 ## Validación de esta área
 

@@ -197,6 +197,10 @@ export function Equipo() {
                   <tr key={m.membresia_id}>
                     <td>
                       <strong>{m.nombre}</strong>
+                      {m.es_via_compartida && (
+                        <p className="help">Vía de acceso compartida</p>
+                      )}
+
                       <p className="help">{m.email}</p>
                     </td>
                     <td>{etiqueta(m.rol)}</td>
@@ -280,11 +284,13 @@ export function Equipo() {
                                       (await respuesta.json()) as {
                                         sesiones_a_cerrar: number;
                                         es_profesor: boolean;
+                                        repositorios_perdidos: number;
+                                        entregas_sin_corrector: number;
                                       };
                                     if (
                                       !(await confirmar({
                                         titulo: `Retirar a ${m.nombre}`,
-                                        descripcion: `Perderá el acceso al curso ${curso.nombre}. Se cerrarán ${impacto.sesiones_a_cerrar} sesiones y se solicitará retirar su acceso docente a GitHub.${impacto.es_profesor ? " Sus credenciales de Canvas dejarán de estar disponibles para este curso; revisa que exista otra credencial válida." : ""}`,
+                                        descripcion: `Perderá el acceso al curso ${curso.nombre}. Sus ${impacto.sesiones_a_cerrar} sesiones activas perderán acceso a este curso. Se retirará el acceso docente a ${impacto.repositorios_perdidos} repositorios y ${impacto.entregas_sin_corrector} correcciones quedarán sin corrector; sus borradores se conservan.${impacto.es_profesor ? " Sus credenciales de Canvas dejarán de estar disponibles para este curso; revisa que exista otra credencial válida." : ""}`,
                                         accion: "Retirar del curso",
                                         peligro: true,
                                       }))

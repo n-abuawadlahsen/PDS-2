@@ -284,5 +284,5 @@ test("un ayudante consulta recordatorios pero necesita permiso para cambiarlos",
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Sincronizar con Canvas" }),
-  ).toHaveCount(0);
+  ).toBeEnabled();
 });

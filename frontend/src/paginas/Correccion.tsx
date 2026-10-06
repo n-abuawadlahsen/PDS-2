@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
+  apiFetch,
   obtenerBandejaCorreccion,
   obtenerCorrectores,
   obtenerMatrizCorreccion,
@@ -13,6 +14,7 @@ import {
   repartoCompleto,
   type RepartoEntrada,
 } from "../lib/apiFinal";
+import { comprobar } from "../lib/errores";
 import { useCurso } from "../components/Layout";
 import {
   Aviso,
@@ -28,6 +30,10 @@ import {
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { PublicarSeleccionadas } from "./PublicarSeleccionadas";
+import {
+  AccesosCorreccion,
+  CausasParticipacion,
+} from "../components/EvidenciaParticipacion";
 
 const BANDERA: Record<string, string> = {
   version_desactualizada: "Versión nueva",
@@ -523,6 +529,7 @@ function EstadoEntrega({
                     <tr key={s.sujeto_id}>
                       <td>
                         {s.sujeto}
+                        <AccesosCorreccion accesos={s.accesos} />
                         {!s.activo && (
                           <div className="help">
                             Retirado, historial conservado
@@ -567,6 +574,11 @@ function EstadoEntrega({
                                 {BANDERA[b] ?? "Requiere revisión"}
                               </div>
                             ))}
+                            {celda.banderas.includes("sin_commits") && (
+                              <CausasParticipacion
+                                causas={celda.causas_sin_participacion}
+                              />
+                            )}
                             {!celda.publicable && (
                               <div className="help">
                                 No publicable:{" "}
@@ -628,6 +640,55 @@ function Agregado({
         <p className="help">Todavía no hay correcciones para comparar.</p>
       )}
     </section>
+  );
+}
+
+function PesoCorrector({
+  cursoId,
+  miembro,
+  guardado,
+}: {
+  cursoId: string;
+  miembro: { membresia_id: string; nombre: string; peso: number };
+  guardado: () => void;
+}) {
+  const [peso, setPeso] = useState(String(miembro.peso));
+  const op = useOperacion();
+  return (
+    <form
+      className="actions"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void op.ejecutar(async () => {
+          await comprobar(
+            await apiFetch(
+              `/api/cursos/${cursoId}/correccion/correctores/${miembro.membresia_id}/peso`,
+              {
+                method: "PATCH",
+                body: JSON.stringify({ peso: Number(peso) }),
+              },
+            ),
+          );
+          guardado();
+        }, `Peso de ${miembro.nombre} actualizado.`);
+      }}
+    >
+      <label>
+        Peso de {miembro.nombre}
+        <input
+          type="number"
+          required
+          min={0}
+          max={10}
+          value={peso}
+          onChange={(e) => setPeso(e.target.value)}
+        />
+      </label>
+      <button disabled={op.ocupado || Number(peso) === miembro.peso}>
+        Guardar peso
+      </button>
+      <Mensajes {...op} />
+    </form>
   );
 }
 
@@ -694,6 +755,25 @@ function Repartir({
         borrador de cada entrega y sujeto.
       </p>
       <Mensajes error={op.error} mensaje={op.mensaje} />
+      <details>
+        <summary>Pesos del reparto equitativo</summary>
+        <p className="help">
+          De 0 a 10. Un peso 0 excluye del reparto automático y permite asignar
+          manualmente. Cambiar un peso no mueve las asignaciones existentes;
+          vuelve a previsualizar.
+        </p>
+        {datos.datos.correctores.map((c) => (
+          <PesoCorrector
+            key={`${c.membresia_id}:${c.peso}`}
+            cursoId={cursoId}
+            miembro={c}
+            guardado={() => {
+              editar();
+              datos.recargar();
+            }}
+          />
+        ))}
+      </details>
       <fieldset disabled={op.ocupado}>
         <legend>Configuración del reparto</legend>
         <div className="form-grid">

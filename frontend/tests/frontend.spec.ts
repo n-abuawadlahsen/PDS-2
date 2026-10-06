@@ -159,7 +159,7 @@ test("ayudante conserva lectura y no recibe acciones administrativas", async ({
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Sincronizar con Canvas" }),
-  ).toHaveCount(0);
+  ).toBeEnabled();
   await page.goto("/cursos/curso-1/tareas/tarea-1?vista=repositorios");
   await expect(
     page.getByRole("cell", { name: "Estudiante 000", exact: false }),

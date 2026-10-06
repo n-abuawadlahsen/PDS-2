@@ -14,7 +14,7 @@ import csv
 import io
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -321,8 +321,8 @@ def obtener_cabecera_personas(
 def sincronizar_ahora(
     curso_id: uuid.UUID,
     bd: Session = Depends(obtener_sesion_bd),
-    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
-) -> dict[str, bool]:
+    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
+) -> dict[str, object]:
     """S7.3.1, S9.9: encola los mismos trabajos que el ciclo automatico, nunca
     llama a Canvas dentro de la peticion (Ley 1). Roster antes que grupos, y
     ambos antes que tareas: un grupo referencia estudiantes que deben existir
@@ -347,21 +347,61 @@ def sincronizar_ahora(
         .first()
     )
     if en_vuelo is not None:
-        return {"ok": True, "en_curso": True}
+        return {"ok": True, "en_curso": True, "trabajo_id": str(en_vuelo.id)}
     ahora = ahora_utc()
+    trabajos = []
     for tipo, prefijo in (
         ("sync_roster", "manual_roster"),
         ("sync_grupos", "manual_grupos"),
         ("sync_tareas_y_fechas", "manual_tareas"),
     ):
-        trabajos_repo.encolar(
+        trabajo = trabajos_repo.encolar(
             bd,
             tipo=tipo,
             clave_idempotencia=f"{prefijo}:{curso_id}:{ahora.isoformat()}",
             max_intentos=4,
             curso_id=curso_id,
         )
-    return {"ok": True, "en_curso": False}
+        if trabajo is not None:
+            trabajos.append(str(trabajo.id))
+    return {
+        "ok": True,
+        "en_curso": False,
+        "trabajo_id": trabajos[-1] if trabajos else None,
+        "trabajo_ids": trabajos,
+    }
+
+
+@router.get("/api/cursos/{curso_id}/personas/{estudiante_id}/mapeo/historial")
+def historial_mapeo(
+    curso_id: uuid.UUID,
+    estudiante_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
+) -> list[dict[str, object]]:
+    if bd.query(Estudiante).filter_by(id=estudiante_id, curso_id=curso_id).one_or_none() is None:
+        raise HTTPException(status_code=404)
+    filas = (
+        bd.query(MapeoGithub, CuentaGithub.login)
+        .outerjoin(CuentaGithub, CuentaGithub.id == MapeoGithub.cuenta_github_id)
+        .filter(MapeoGithub.curso_id == curso_id, MapeoGithub.estudiante_id == estudiante_id)
+        .order_by(MapeoGithub.creado_en.desc(), MapeoGithub.id.desc())
+        .all()
+    )
+    return [
+        {
+            "id": str(m.id),
+            "cuenta_login": login,
+            "estado": m.estado,
+            "origen": m.origen,
+            "confianza": m.confianza,
+            "motivo_invalidacion": m.motivo_invalidacion,
+            "creado_en": m.creado_en,
+            "vigente_desde": m.vigente_desde,
+            "vigente_hasta": m.vigente_hasta,
+        }
+        for m, login in filas
+    ]
 
 
 def _detalle_rechazo(exc: RechazoMapeo) -> dict[str, str]:
@@ -572,6 +612,8 @@ def importar_mapeo_csv(
 
 
 class RegistroGithubSalida(BaseModel):
+    trabajo_id: uuid.UUID | None = None
+    motivo: str | None = None
     registro_estado: str
     canvas_assignment_id: int | None
 
@@ -583,9 +625,10 @@ class RegistroGithubSalida(BaseModel):
 )
 def crear_registro_github(
     curso_id: uuid.UUID,
+    response: Response,
     bd: Session = Depends(obtener_sesion_bd),
     settings: Settings = Depends(obtener_configuracion),
-    membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
+    membresia: MembresiaCurso = Depends(requiere(Permiso.COMUNICACION_ENVIAR)),
 ) -> RegistroGithubSalida:
     """S7.4.1, S5.5.1 escritura sincrona #4: crea "Registro de tu cuenta de
     GitHub" en Canvas."""
@@ -604,18 +647,22 @@ def crear_registro_github(
         curso = registro_github_repo.crear_tarea_registro(
             bd, cliente, token, curso=curso, actor_usuario_id=membresia.usuario_id
         )
-    except FalloProveedorCanvas as exc:
-        trabajos_repo.encolar(
+    except FalloProveedorCanvas:
+        trabajo = trabajos_repo.encolar(
             bd,
             tipo="crear_registro_github",
             clave_idempotencia=f"crear_registro:{curso_id}:{ahora_utc().isoformat()}",
             max_intentos=4,
             curso_id=curso_id,
+            payload={"actor_usuario_id": str(membresia.usuario_id), "restaurar": False},
         )
-        raise HTTPException(
-            status_code=202,
-            detail=f"Canvas no respondio a tiempo ({exc}); se reintenta en segundo plano",
-        ) from None
+        response.status_code = 202
+        return RegistroGithubSalida(
+            registro_estado=curso.registro_estado,
+            canvas_assignment_id=curso.canvas_assignment_id_registro,
+            trabajo_id=trabajo.id if trabajo else None,
+            motivo="Canvas no respondió a tiempo. La operación quedó en cola.",
+        )
     return RegistroGithubSalida(
         registro_estado=curso.registro_estado,
         canvas_assignment_id=curso.canvas_assignment_id_registro,
@@ -629,9 +676,10 @@ def crear_registro_github(
 )
 def restaurar_registro_github(
     curso_id: uuid.UUID,
+    response: Response,
     bd: Session = Depends(obtener_sesion_bd),
     settings: Settings = Depends(obtener_configuracion),
-    membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
+    membresia: MembresiaCurso = Depends(requiere(Permiso.COMUNICACION_ENVIAR)),
 ) -> RegistroGithubSalida:
     curso = bd.query(Curso).filter(Curso.id == curso_id).one_or_none()
     if curso is None:
@@ -648,18 +696,22 @@ def restaurar_registro_github(
         curso = registro_github_repo.restaurar_tarea_registro(
             bd, cliente, token, curso=curso, actor_usuario_id=membresia.usuario_id
         )
-    except FalloProveedorCanvas as exc:
-        trabajos_repo.encolar(
+    except FalloProveedorCanvas:
+        trabajo = trabajos_repo.encolar(
             bd,
             tipo="crear_registro_github",
             clave_idempotencia=f"restaurar_registro:{curso_id}:{ahora_utc().isoformat()}",
             max_intentos=4,
             curso_id=curso_id,
+            payload={"actor_usuario_id": str(membresia.usuario_id), "restaurar": True},
         )
-        raise HTTPException(
-            status_code=202,
-            detail=f"Canvas no respondio a tiempo ({exc}); se reintenta en segundo plano",
-        ) from None
+        response.status_code = 202
+        return RegistroGithubSalida(
+            registro_estado=curso.registro_estado,
+            canvas_assignment_id=curso.canvas_assignment_id_registro,
+            trabajo_id=trabajo.id if trabajo else None,
+            motivo="Canvas no respondió a tiempo. La operación quedó en cola.",
+        )
     return RegistroGithubSalida(
         registro_estado=curso.registro_estado,
         canvas_assignment_id=curso.canvas_assignment_id_registro,

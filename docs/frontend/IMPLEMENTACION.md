@@ -24,6 +24,8 @@ Se conserva React 18, Vite y la sesión opaca por cookie/CSRF. La API implementa
 
 Las rutas de autenticación mantienen `/auth`, sin prefijo `/api`. Los contratos completos, métodos, permisos y límites están en [Configuración P1–P6](CONFIGURACION-CONTRATOS.md), [Operación P7–P8/F1–F8](OPERACION.md) e [Informes, comunicaciones y corrección F9–F12](F9-F12.md).
 
+La [revisión de limitaciones de octubre](LIMITACIONES.md) registra las correcciones en frontend y backend: sesiones/identidades propias, renovación Canvas, ajustes, permisos, historial, trabajos, recordatorios, retiro, CSV, pesos, autoría, causas de participación y protección del borrador. Se usan los modelos existentes y no se añadieron migraciones.
+
 La [matriz de trazabilidad](REQUISITOS.md) contiene los **59 requisitos únicos del enunciado**, con pantalla, acción, contrato y límite cuando corresponde. “Conectado” significa que utiliza el contrato disponible; no certifica procesos externos que el frontend no ejecuta.
 
 ## Diseño y herramientas preparadas
@@ -76,27 +78,33 @@ Requiere Docker en ejecución, Python 3.12 preparado en `backend/.venv` y puerto
 ## Validación ejecutada
 
 - `npm run format:check`, `npm run typecheck`, `npm run lint` y `npm run build`.
-- **58 pruebas Playwright pasaron** en la suite completa. Cubren los siete recorridos solicitados, ambos roles, 200 sujetos, CSV con revisión, filtros/paginación, polling, sesión vencida, errores de red, rechazo de permisos, vínculos degradados, trabajos en curso, cooldown, borradores, conflicto y publicación individual/masiva.
+- **68 pruebas Playwright pasaron** en la suite completa (29,7 s, 6 de octubre). Cubren los siete recorridos solicitados, ambos roles, 200 sujetos, CSV con revisión, filtros/paginación, polling, sesión vencida, errores de red, rechazo de permisos, vínculos degradados, trabajos en curso, cooldown, borradores, conflicto y publicación individual/masiva. Incluyen los 10 casos de regresión de `limitaciones.spec.ts`; estos se repitieron tras el último ajuste de finalización simultánea de registro/sincronizaciones y pasaron (4,0 s).
+- **480 pruebas del backend pasaron** sobre PostgreSQL efímero aislado (184,68 s), con **96,32 % de cobertura de `app.dominio`**, por encima del mínimo del 70 %. Ruff, comprobación de formato y mypy pasaron; mypy revisó 154 archivos. Los 23 casos nuevos de contratos comprueban permisos, CSRF, aislamiento entre cuentas/cursos, auditoría e idempotencia del registro en cola.
 - **6 pruebas visuales pasaron** tras los últimos ajustes de composición: Cursos, configuración, Personas/Pendientes, tareas/repositorios, tablero, entregas/timeline, corrección, informes y comunicaciones. Axe no encontró infracciones en los escenarios comprobados. También se verifican contraste de tokens, navegación por teclado, foco al cerrar diálogos y ampliación de texto al 200 %. Esto no equivale a una certificación completa de WCAG.
-- **1 prueba con API real local pasó**: sesión opaca → curso vacío → crear → vincular Canvas → retorno GitHub App → sincronizar Personas → crear tarea de Canvas. Aquí las llamadas a nuestra API no se interceptan; los proveedores externos usan los dobles del backend y se simula únicamente el salto de instalación de GitHub.
+- **1 prueba con API real local pasó** (12,6 s): sesión opaca → curso vacío → crear → vincular Canvas → retorno GitHub App → sincronizar Personas → crear tarea de Canvas. Aquí las llamadas a nuestra API no se interceptan; los proveedores externos usan los dobles del backend y se simula únicamente el salto de instalación de GitHub.
 - La migración `0011` fallaba al duplicar el prefijo de la restricción. Con autorización expresa se aplicó `op.f` a sus cuatro nombres, sin alterar reglas de datos. Pasaron migración desde cero y recorrido `0011 → 0010 → 0011`, exclusivamente sobre la base efímera. Ruff pasó para esa migración y el servidor de prueba Python.
 - Consola sin `pageerror` en los recorridos de evidencia. Los errores HTTP deliberados se verifican como estados de recuperación; no se presentan como resultados exitosos.
 
 ## Evidencia visual inspeccionada
 
-Las [34 capturas](evidencias/) contienen únicamente personas y cursos sintéticos. Se revisaron alineación, jerarquía, contraste, tablas, menús, formularios y anchura del documento. La vista Cursos se comprobó en **1440×900, 1366×768, 768×1024, 390×844 y 360 px**; las demás tienen muestras de escritorio y móvil. Se corrigieron tarjetas desalineadas, grupos de acciones sin separación, radios de rúbrica demasiado próximos y ejes del gráfico poco legibles en móvil.
+Las [39 capturas](evidencias/) contienen únicamente personas y cursos sintéticos. Se revisaron alineación, jerarquía, contraste, tablas, menús, formularios y anchura del documento. La vista Cursos se comprobó en **1440×900, 1366×768, 768×1024, 390×844 y 360 px**; las demás tienen muestras de escritorio y móvil. Se corrigieron tarjetas desalineadas, grupos de acciones sin separación, radios de rúbrica demasiado próximos y ejes del gráfico poco legibles en móvil. Se inspeccionaron las cinco nuevas capturas de Perfil, Ajustes, autoría/comentario de corrección y causas/accesos en la matriz.
 
 Ejemplos: [Cursos](evidencias/cursos-escritorio.png), [Cursos móvil](evidencias/cursos-movil.png), [Vinculación](evidencias/vinculacion-escritorio.png), [Personas](evidencias/personas-movil.png), [Tablero](evidencias/tablero-escritorio.png), [Actividad móvil](evidencias/tablero-actividad-movil.png), [Entregas](evidencias/entregas-movil.png), [Corrección](evidencias/correccion-escritorio.png) y [flujo con API real local](evidencias/api-real-tarea.png).
 
+Regresiones corregidas: [Perfil móvil](evidencias/limitaciones-perfil-movil.png), [Ajustes móvil](evidencias/limitaciones-ajustes-movil.png), [Autoría y comentario](evidencias/limitaciones-correccion-escritorio.png) y [Accesos/causas](evidencias/limitaciones-matriz-escritorio.png).
+
 ## Límites restantes verificables
 
-El detalle y las reproducciones están en los tres anexos de contratos. Los principales son:
+El detalle vigente y la evidencia de cada límite están en [LIMITACIONES.md](LIMITACIONES.md). Continúan pendientes los flujos del servidor para roles Canvas adicionales, archivado del curso completo, fusión de identidades, reenvío manual directo de invitaciones de estudiantes, realineación automática del reparto, aviso desde filas sin corrector y cambio de la opción de notas grupales.
 
-1. **Renovación del vínculo Canvas:** `POST .../canvas/cursos-disponibles` marca también el curso propio como ocupado, pero devuelve solo el nombre del ocupante. Falta `canvas_course_id` actual o un identificador estable/bandera del vínculo propio. La UI no habilita una sustitución basándose en nombres.
-2. **Ajustes generales y datos históricos:** no existe `PATCH /api/cursos/{id}`, cierre individual de sesión ni lectura de historial completo de mapeos. Ajustes muestra la configuración disponible; Perfil permite cerrar las demás sesiones.
-3. **Diferencias de permisos e identidad:** el backend admite Gmail y miuandes.cl; sincronizar Personas y publicar/restaurar el registro requiere `curso.administrar`. Se respeta ese contrato y se documenta su diferencia con el pedido original.
-4. **Corrección:** faltan autor/fecha del borrador previo, comentario final renderizado, causas de ausencia de commits y relación estable de repositorio con sujeto. No se inventan esas evidencias ni se seleccionan automáticamente casos sin entrega. Tampoco hay endpoints para editar pesos o avisar a profesores sin corrector.
-5. **Procesos asíncronos:** algunas respuestas 202 no incluyen un ID consultable ni próxima fecha de intento; se sondea el estado disponible y se indica espera, sin prometer finalización. CSV del tablero acepta período, pero no filtros de sección/estado: se informa su alcance.
-6. **Verificación externa:** no se completó OAuth real de Google ni se crearon repositorios, mensajes o notas en servicios reales. Los tests validan interfaz, contratos y una integración local con los dobles existentes. La protección de borrador ante Atrás/Adelante del navegador tiene la limitación del router actual detallada en F9–F12; los controles de la aplicación y cierre/recarga sí advierten.
+Los borradores antiguos y los históricos de causas/accesos solo pueden mostrar lo que efectivamente se persistió. La nueva auditoría registra autoría/fecha en los siguientes guardados. No se ejecutaron OAuth, correos, repositorios ni notas en proveedores reales; la integración comprobada utiliza sus dobles existentes.
+
+Las limitaciones anteriores de renovación, sesiones, ajustes generales, permisos, historial de mapeo, estado de trabajos, pesos, comentario renderizado, CSV filtrado y navegación Atrás/Adelante quedaron corregidas. Se conserva la política vigente de Gmail/miuandes.cl.
 
 No se realizaron despliegues, push ni cambios de secretos.
+
+Comprobación completa del backend sin utilizar la base del equipo, desde la raíz:
+
+```bash
+backend/.venv/bin/python frontend/tests/serve_backend.py --pytest -q --cov=app.dominio --cov-fail-under=70
+```

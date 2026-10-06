@@ -211,6 +211,7 @@ export function Estructura({
   children?: ReactNode;
 }) {
   const { perfil, cursos, errorActualizacion, recargar } = useSesion();
+  const contextoCurso = useContext(CursoContext);
   const navegar = useNavigate();
   const { pathname } = useLocation();
   const menu = useRef<HTMLDialogElement>(null);
@@ -278,7 +279,12 @@ export function Estructura({
           <span className="avatar" aria-hidden="true">
             {perfil.nombre.trim().slice(0, 1).toUpperCase()}
           </span>
-          <span className="identity-name">{perfil.nombre}</span>
+          <span className="identity-name">
+            {perfil.nombre}
+            {contextoCurso?.contexto.es_via_compartida && (
+              <span className="help"> · Vía de acceso compartida</span>
+            )}
+          </span>
           <ChevronDown size={14} aria-hidden="true" />
           <span className="sr-only"> · Mi perfil</span>
         </Link>

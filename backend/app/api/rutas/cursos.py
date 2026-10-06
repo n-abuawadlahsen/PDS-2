@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.adaptadores import (
@@ -15,13 +16,19 @@ from app.adaptadores import (
     cuenta_repo,
     cursos_repo,
     invitaciones_correo,
+    trabajos_repo,
 )
 from app.adaptadores.base import ahora_utc
+from app.adaptadores.modelos_aprovisionamiento import Repositorio
+from app.adaptadores.modelos_correccion import AsignacionCorreccion, Correccion
 from app.adaptadores.modelos_curso import Curso, InvitacionEquipo, MembresiaCurso
+from app.adaptadores.modelos_github import AccesoDocenteRepositorio
 from app.adaptadores.modelos_identidad import Sesion, Usuario
-from app.adaptadores.modelos_infraestructura import Bitacora
+from app.adaptadores.modelos_infraestructura import Bitacora, Trabajo
 from app.adaptadores.proveedor_correo import motivo_bloqueo
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere, usuario_actual
+from app.api.estado_trabajo import TrabajoSalida, salida_trabajo
+from app.dominio.correccion import TERMINALES
 from app.dominio.estados import RolMembresia
 from app.dominio.identidad import RechazoCorreo, normalizar_correo_google
 from app.dominio.membresia import UltimoProfesorActivo, puede_retirar_o_degradar
@@ -67,6 +74,10 @@ class CursoSalida(BaseModel):
     periodo: str
     slug: str
     zona_horaria: str
+    umbral_dias_sin_actividad: int
+    umbral_desbalance_pct: int
+    canvas_base_url: str | None
+    canvas_course_id: int | None
 
 
 class CursoEntrada(BaseModel):
@@ -75,6 +86,32 @@ class CursoEntrada(BaseModel):
     periodo: str = Field(min_length=6, max_length=6)
     slug: str = Field(min_length=1, max_length=24)
     zona_horaria: str = Field(min_length=1)
+
+
+class CursoAjustesEntrada(BaseModel):
+    nombre: str | None = Field(default=None, min_length=1, max_length=200)
+    zona_horaria: str | None = Field(default=None, min_length=1, max_length=100)
+    umbral_dias_sin_actividad: int | None = Field(default=None, ge=1, le=30)
+    umbral_desbalance_pct: int | None = Field(default=None, ge=50, le=95)
+
+    @field_validator("nombre", "zona_horaria")
+    @classmethod
+    def validar_texto(cls, valor: str | None) -> str | None:
+        if valor is not None and not valor.strip():
+            raise ValueError("El valor no puede estar vacío.")
+        return valor.strip() if valor is not None else None
+
+    @field_validator("zona_horaria")
+    @classmethod
+    def validar_zona(cls, valor: str | None) -> str | None:
+        if valor is not None:
+            try:
+                ZoneInfo(valor)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise ValueError(
+                    "Usa una zona horaria IANA válida, por ejemplo America/Santiago."
+                ) from None
+        return valor
 
 
 class MiembroSalida(BaseModel):
@@ -89,6 +126,7 @@ class MiembroSalida(BaseModel):
     github_login: str | None = None
     github_estado: str | None = None
     github_error: str | None = None
+    es_via_compartida: bool = False
 
 
 class InvitacionEntrada(BaseModel):
@@ -121,6 +159,7 @@ class RolEntrada(BaseModel):
 
 
 class ContextoSalida(BaseModel):
+    es_via_compartida: bool = False
     rol: str
     permisos_efectivos: list[str]
 
@@ -183,6 +222,48 @@ def listar_cursos(
     return cursos_repo.listar_cursos_de_usuario(bd, usuario.id)
 
 
+@router.patch(
+    "/api/cursos/{curso_id}", response_model=CursoSalida, dependencies=[Depends(exigir_csrf)]
+)
+def actualizar_ajustes_curso(
+    curso_id: uuid.UUID,
+    datos: CursoAjustesEntrada,
+    bd: Session = Depends(obtener_sesion_bd),
+    membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
+) -> Curso:
+    curso = bd.query(Curso).filter_by(id=curso_id).with_for_update().one()
+    if curso.estado == "ARCHIVADO":
+        raise HTTPException(status_code=409, detail="El curso está archivado.")
+    cambios = datos.model_dump(exclude_unset=True)
+    if any(valor is None for valor in cambios.values()):
+        raise HTTPException(status_code=422, detail="Los ajustes no admiten valores nulos.")
+    cambios = {k: v for k, v in cambios.items() if getattr(curso, k) != v}
+    if not cambios:
+        return curso
+    antes = {k: getattr(curso, k) for k in cambios}
+    for campo, valor in cambios.items():
+        setattr(curso, campo, valor)
+    curso.actualizado_en = ahora_utc()
+    bitacora_repo.registrar(
+        bd,
+        accion="CURSO_AJUSTES_ACTUALIZADOS",
+        entidad="curso",
+        entidad_id=str(curso_id),
+        actor_usuario_id=membresia.usuario_id,
+        curso_id=curso_id,
+        antes=antes,
+        despues=cambios,
+    )
+    trabajos_repo.encolar(
+        bd,
+        tipo="agregar_metricas",
+        curso_id=curso_id,
+        clave_idempotencia=f"ajustes-metricas:{curso_id}:{uuid.uuid4()}",
+        max_intentos=3,
+    )
+    return curso
+
+
 @router.get("/api/cursos/{curso_id}/contexto", response_model=ContextoSalida)
 def obtener_contexto(
     membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
@@ -190,7 +271,11 @@ def obtener_contexto(
     efectivos = permisos_efectivos(
         rol=membresia.rol, permisos_configurados=frozenset(Permiso(p) for p in membresia.permisos)
     )
-    return ContextoSalida(rol=membresia.rol, permisos_efectivos=sorted(p.value for p in efectivos))
+    return ContextoSalida(
+        rol=membresia.rol,
+        permisos_efectivos=sorted(p.value for p in efectivos),
+        es_via_compartida=membresia.es_via_compartida,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -221,6 +306,7 @@ def listar_equipo(
             github_login=usuarios[f.usuario_id].github_login_declarado,
             github_estado=f.org_github_estado,
             github_error=f.org_github_ultimo_error,
+            es_via_compartida=f.es_via_compartida,
         )
         for f in filas
     ]
@@ -542,18 +628,48 @@ def impacto_retiro(
     bd: Session = Depends(obtener_sesion_bd),
     _membresia: MembresiaCurso = Depends(requiere(Permiso.EQUIPO_ADMINISTRAR)),
 ) -> dict[str, object]:
-    """S2.9.5. Repositorios/entregas sin corrector se computan desde P4/F11 en
-    adelante; hoy siempre son cero porque esas tablas todavia no existen."""
+    """Impacto calculado con las mismas exclusiones del retiro de correcciones."""
     objetivo = _obtener_membresia_o_404(bd, curso_id=curso_id, membresia_id=membresia_id)
     sesiones_activas = (
         bd.query(Sesion)
-        .filter(Sesion.usuario_id == objetivo.usuario_id, Sesion.revocada_en.is_(None))
+        .filter(
+            Sesion.usuario_id == objetivo.usuario_id,
+            Sesion.revocada_en.is_(None),
+            Sesion.expira_en > datetime.now(UTC),
+        )
         .count()
     )
+    acceso_del_miembro = AccesoDocenteRepositorio.membresia_id == objetivo.id
+    if objetivo.org_github_estado == "ACTIVA":
+        acceso_del_miembro |= AccesoDocenteRepositorio.via == "TEAM"
     return {
         "sesiones_a_cerrar": sesiones_activas,
-        "repositorios_perdidos": 0,
-        "entregas_sin_corrector": 0,
+        "repositorios_perdidos": (
+            bd.query(AccesoDocenteRepositorio.repositorio_id)
+            .join(Repositorio, Repositorio.id == AccesoDocenteRepositorio.repositorio_id)
+            .filter(
+                Repositorio.curso_id == curso_id,
+                AccesoDocenteRepositorio.estado == "CONCEDIDO",
+                acceso_del_miembro,
+            )
+            .distinct()
+            .count()
+            if objetivo.estado == "ACTIVA"
+            else 0
+        ),
+        "entregas_sin_corrector": (
+            bd.query(AsignacionCorreccion)
+            .join(
+                Correccion,
+                (Correccion.entrega_id == AsignacionCorreccion.entrega_id)
+                & (Correccion.sujeto_id == AsignacionCorreccion.sujeto_id),
+            )
+            .filter(
+                AsignacionCorreccion.membresia_id == objetivo.id,
+                Correccion.estado.notin_([*TERMINALES, "PUBLICANDO"]),
+            )
+            .count()
+        ),
         "es_profesor": objetivo.rol == RolMembresia.PROFESOR.value,
     }
 
@@ -737,3 +853,16 @@ def aceptar_invitacion_con_sesion(
         curso_id=invitacion.curso_id,
     )
     return {"ok": True}
+
+
+@router.get("/api/cursos/{curso_id}/trabajos/{trabajo_id}", response_model=TrabajoSalida)
+def consultar_trabajo(
+    curso_id: uuid.UUID,
+    trabajo_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
+) -> TrabajoSalida:
+    trabajo = bd.query(Trabajo).filter_by(id=trabajo_id, curso_id=curso_id).one_or_none()
+    if trabajo is None:
+        raise HTTPException(status_code=404)
+    return salida_trabajo(trabajo)

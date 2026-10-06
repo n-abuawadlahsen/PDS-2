@@ -89,7 +89,6 @@ button,
   text-decoration: none;
   text-align: center;
   transition:
-    background-color 150ms,
     border-color 150ms,
     box-shadow 150ms;
 }
@@ -112,6 +111,7 @@ button.primary:hover:not(:disabled),
 .button.primary:hover {
   background: var(--color-primary-hover);
   border-color: var(--color-primary-hover);
+  color: var(--color-on-primary);
 }
 button.primary:active:not(:disabled),
 .button.primary:active {

@@ -232,6 +232,8 @@ export async function preparar(page: Page) {
       estado.perfil.github_login_declarado = body?.login ?? null;
       return responder(estado.perfil);
     }
+    if (path === "/api/perfil/notificaciones") return responder([]);
+    if (path === "/api/perfil/identidades-canvas") return responder([]);
     if (path === "/api/perfil/sesiones")
       return responder(
         method === "GET"
@@ -345,6 +347,15 @@ export async function preparar(page: Page) {
         curso_estado: curso.estado,
       });
     if (path.endsWith("/huerfanas")) return responder([]);
+    if (/\/verificacion\/[^/]+\/estado$/.test(path))
+      return responder({
+        id: "trabajo-1",
+        estado: "PENDIENTE",
+        intentos: 0,
+        max_intentos: 1,
+        proximo_intento_en: null,
+        terminado_en: null,
+      });
     if (path.endsWith("/verificacion/ultima"))
       return responder(
         estado.cursoVacio

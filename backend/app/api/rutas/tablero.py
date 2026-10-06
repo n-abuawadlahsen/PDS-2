@@ -448,19 +448,7 @@ def tablero(
             status_code=422, detail={"motivo": "PERIODO_INVALIDO", "detalle": periodo}
         )
     todas = _filas(bd, curso, tarea, periodo, ahora)
-    filas = [
-        f
-        for f in todas
-        if (seccion is None or f.seccion == seccion)
-        and (grupo_estado is None or f.grupo_estado == grupo_estado)
-        and (not solo_alertas or f.alertas)
-    ]
-    filas.sort(
-        key=lambda f: (
-            -(f.dias_desde_ultimo_commit if f.dias_desde_ultimo_commit is not None else 10**6),
-            f.sujeto,
-        )
-    )
+    filas = _filtrar_filas(todas, seccion, grupo_estado, solo_alertas)
     contadores = _contadores(bd, tarea)
     resumen = aprovisionamiento_repo.resumen_repositorios(bd, tarea_id=tarea.id)
     repos_ids = [f.repositorio_id for f in todas]
@@ -680,11 +668,36 @@ def actualizar_ahora(
 # --- Exportacion CSV (S10.10.5) ---
 
 
+def _filtrar_filas(
+    todas: list[FilaTableroSalida],
+    seccion: str | None,
+    grupo_estado: str | None,
+    solo_alertas: bool,
+) -> list[FilaTableroSalida]:
+    filas = [
+        f
+        for f in todas
+        if (seccion is None or f.seccion == seccion)
+        and (grupo_estado is None or f.grupo_estado == grupo_estado)
+        and (not solo_alertas or f.alertas)
+    ]
+    filas.sort(
+        key=lambda f: (
+            -(f.dias_desde_ultimo_commit if f.dias_desde_ultimo_commit is not None else 10**6),
+            f.sujeto,
+        )
+    )
+    return filas
+
+
 @router.get("/api/cursos/{curso_id}/tareas/{tarea_id}/tablero.csv")
 def exportar(
     curso_id: uuid.UUID,
     tarea_id: uuid.UUID,
     periodo: str | None = None,
+    seccion: str | None = None,
+    grupo_estado: str | None = None,
+    solo_alertas: bool = False,
     bd: Session = Depends(obtener_sesion_bd),
     membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
 ) -> Response:
@@ -693,7 +706,13 @@ def exportar(
     curso, tarea = _tarea(bd, curso_id, tarea_id)
     ahora = ahora_utc()
     periodo = periodo or _periodo_por_defecto(bd, tarea, ahora)
-    filas = _filas(bd, curso, tarea, periodo, ahora)
+    if periodo not in {p.clave for p in _periodos(bd, tarea)}:
+        raise HTTPException(
+            status_code=422, detail={"motivo": "PERIODO_INVALIDO", "detalle": periodo}
+        )
+    filas = _filtrar_filas(
+        _filas(bd, curso, tarea, periodo, ahora), seccion, grupo_estado, solo_alertas
+    )
     salida = io.StringIO()
     salida.write(f"# {DEFINICION_COMMIT_CONTABLE}\n")
     salida.write(f"# Generado el {ahora.isoformat()} · periodo {periodo}\n")
@@ -730,7 +749,13 @@ def exportar(
         entidad_id=str(tarea.id),
         actor_usuario_id=membresia.usuario_id,
         curso_id=curso.id,
-        despues={"periodo": periodo, "filas": len(filas)},
+        despues={
+            "periodo": periodo,
+            "filas": len(filas),
+            "seccion": seccion,
+            "grupo_estado": grupo_estado,
+            "solo_alertas": solo_alertas,
+        },
     )
     return Response(
         salida.getvalue(),

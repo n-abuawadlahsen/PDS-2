@@ -24,6 +24,7 @@ from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere, usuar
 from app.dominio.permisos import Permiso
 from app.dominio.vinculacion_canvas import RechazoVinculacion
 from app.dominio.vinculacion_github import RechazoInstalacion
+from app.infraestructura.cerrojos import bloquear_equipo
 from app.infraestructura.cifrado import Llavero
 from app.infraestructura.config import Settings, obtener_configuracion
 
@@ -94,11 +95,28 @@ def vincular_canvas(
     _membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
 ) -> dict[str, object]:
     usuario, _ = actual
+    bloquear_equipo(bd)
+    bd.refresh(usuario)
+    bd.refresh(_membresia)
+    if not usuario.activo or _membresia.estado != "ACTIVA" or _membresia.rol != "PROFESOR":
+        raise HTTPException(
+            status_code=403, detail="La membresía ya no permite administrar el curso."
+        )
     curso = bd.query(Curso).filter(Curso.id == curso_id).one_or_none()
     if curso is None:
         raise HTTPException(status_code=404)
 
     base_url = canvas_repo.normalizar_canvas_base_url(datos.canvas_base_url)
+    if curso.canvas_course_id is not None and (
+        curso.canvas_base_url != base_url or curso.canvas_course_id != datos.canvas_course_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Renueva la credencial del curso Canvas ya vinculado. "
+                "Para otro curso académico, crea un curso nuevo."
+            ),
+        )
     try:
         canvas_repo.validar_instancia_permitida(
             canvas_base_url=base_url,

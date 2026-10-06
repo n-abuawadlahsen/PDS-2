@@ -64,6 +64,7 @@ def listar_cursos_disponibles(
                 "termino": c.termino,
                 "total_estudiantes": c.total_estudiantes,
                 "ya_vinculado_a": ocupante.nombre if ocupante is not None else None,
+                "ya_vinculado_curso_id": str(ocupante.id) if ocupante is not None else None,
             }
         )
     return resultado
@@ -162,19 +163,26 @@ def vincular_canvas(
         .filter(CredencialCanvas.curso_id == curso.id, CredencialCanvas.usuario_id == usuario.id)
         .one_or_none()
     )
-    hay_operativa_valida = (
-        bd.query(CredencialCanvas)
-        .filter(
-            CredencialCanvas.curso_id == curso.id,
-            CredencialCanvas.orden_respaldo == 0,
-            CredencialCanvas.estado == EstadoCredencialCanvas.VALIDA.value,
-        )
-        .one_or_none()
-        is not None
+    operativa = (
+        bd.query(CredencialCanvas).filter_by(curso_id=curso.id, orden_respaldo=0).one_or_none()
+    )
+    maximo = max(
+        (c.orden_respaldo for c in bd.query(CredencialCanvas).filter_by(curso_id=curso.id).all()),
+        default=0,
+    )
+    hay_operativa_valida = operativa is not None and operativa.estado == "VALIDA"
+    if not hay_operativa_valida and operativa is not None and operativa is not existente:
+        operativa.orden_respaldo = maximo + 1
+        maximo += 1
+        bd.flush()  # libera el índice único antes de promover la nueva credencial
+    orden_respaldo = (
+        (existente.orden_respaldo if existente is not None else maximo + 1)
+        if hay_operativa_valida
+        else 0
     )
 
     if existente is not None:
-        orden_respaldo = existente.orden_respaldo
+        existente.orden_respaldo = orden_respaldo
         existente.token_cifrado = valor_cifrado.texto_cifrado
         existente.nonce = valor_cifrado.nonce
         existente.version_clave = valor_cifrado.version_clave
@@ -182,21 +190,11 @@ def vincular_canvas(
         existente.canvas_user_id = usuario_canvas.canvas_user_id
         existente.estado = EstadoCredencialCanvas.VALIDA.value
         existente.fallos_403_consecutivos = 0
+        existente.ultimo_error = None
+        existente.consentimiento_en = ahora
+        existente.ultimo_chequeo_en = ahora
         credencial = existente
     else:
-        # S5.2.4: sin operativa valida, entra como operativa de inmediato;
-        # con una operativa valida, entra como respaldo (max + 1).
-        if hay_operativa_valida:
-            maximo = (
-                bd.query(CredencialCanvas.orden_respaldo)
-                .filter(CredencialCanvas.curso_id == curso.id)
-                .order_by(CredencialCanvas.orden_respaldo.desc())
-                .limit(1)
-                .scalar()
-            )
-            orden_respaldo = (maximo or 0) + 1
-        else:
-            orden_respaldo = 0
         credencial = CredencialCanvas(
             curso_id=curso.id,
             usuario_id=usuario.id,
@@ -213,7 +211,7 @@ def vincular_canvas(
 
     curso.canvas_base_url = canvas_base_url
     curso.canvas_course_id = canvas_course_id
-    if curso.estado == "BORRADOR":
+    if curso.estado in {"BORRADOR", "CANVAS_DESVINCULADO"}:
         curso.estado = "VINCULANDO"
     curso.actualizado_en = ahora
 

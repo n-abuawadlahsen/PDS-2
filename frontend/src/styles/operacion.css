@@ -506,3 +506,10 @@
     grid-column: 1 / -1;
   }
 }
+
+.comentario-canvas {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  color: var(--color-text);
+}

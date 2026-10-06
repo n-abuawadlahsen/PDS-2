@@ -9,6 +9,7 @@ import {
   reejecutarItem,
   type ItemVerificacion,
 } from "../lib/api";
+import { EstadoTrabajo } from "../components/EstadoTrabajo";
 import { useCurso } from "../components/Layout";
 import {
   Aviso,
@@ -185,6 +186,21 @@ export function Checklist() {
         {administra && <Link to={`/cursos/${curso.id}/ajustes`}>Ajustes</Link>}
       </nav>
       <Mensajes {...op} />
+      {ejecucion && (
+        <EstadoTrabajo
+          key={ejecucion.id}
+          ruta={`/api/cursos/${curso.id}/verificacion/${ejecucion.id}/estado`}
+          zona={curso.zona_horaria}
+          alTerminar={(trabajo) => {
+            if (["REQUIERE_ATENCION", "CANCELADO"].includes(trabajo.estado)) {
+              setEjecucion(null);
+              op.setError(
+                "La verificación no pudo completarse. Los ítems pendientes siguen sin verificar. Revisa las conexiones y solicita una nueva ejecución.",
+              );
+            }
+          }}
+        />
+      )}
       {ultima.error && (
         <ErrorCarga error={ultima.error} reintentar={ultima.recargar} />
       )}

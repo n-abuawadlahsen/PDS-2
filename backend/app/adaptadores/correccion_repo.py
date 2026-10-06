@@ -17,7 +17,12 @@ from sqlalchemy.orm import Session
 
 from app.adaptadores import bitacora_repo, incidencia_repo, versiones_repo
 from app.adaptadores.base import ahora_utc
-from app.adaptadores.modelos_aprovisionamiento import FechaEfectiva, Repositorio, Sujeto
+from app.adaptadores.modelos_aprovisionamiento import (
+    AccesoRepositorio,
+    FechaEfectiva,
+    Repositorio,
+    Sujeto,
+)
 from app.adaptadores.modelos_correccion import (
     AsignacionCorreccion,
     Correccion,
@@ -27,6 +32,7 @@ from app.adaptadores.modelos_correccion import (
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_github import AccesoDocenteRepositorio
 from app.adaptadores.modelos_identidad import Usuario
+from app.adaptadores.modelos_infraestructura import Bitacora, Incidencia
 from app.adaptadores.modelos_padron import Estudiante, Grupo, Matricula, PertenenciaGrupo, Seccion
 from app.adaptadores.modelos_tarea import AssignmentCanvas, Entrega, Tarea
 from app.adaptadores.modelos_version import VersionEntrega
@@ -44,12 +50,14 @@ from app.dominio.correccion import (
     reparto_por_seccion,
     validar_rubrica_local,
 )
+from app.dominio.estado_correccion import pie_comentario
 from app.dominio.estados import (
     CriterioAsignacion,
     EstadoCorreccion,
     EstadoMembresia,
     RolMembresia,
 )
+from app.dominio.fechas import formatear_fecha
 from app.infraestructura.cerrojos import cerrojo_reparto
 
 # Motivos que fija la lectura de Canvas, no la tarea: no se pisan aqui.
@@ -695,7 +703,90 @@ def guardar_borrador(
     c.huella_rubrica = huella_rubrica(criterios, rubrica_de(bd, entrega)[1]) if criterios else None
     c.version += 1
     c.actualizado_en = ahora_utc()
+    autor = bd.get(Usuario, membresia.usuario_id)
+    bitacora_repo.registrar(
+        bd,
+        accion="BORRADOR_GUARDADO",
+        entidad="correccion",
+        entidad_id=str(c.id),
+        actor_usuario_id=membresia.usuario_id,
+        curso_id=entrega.curso_id,
+        despues={
+            "version": c.version,
+            "membresia_id": str(membresia.id),
+            "rol": membresia.rol,
+            "nombre": autor.nombre if autor else "Equipo docente",
+            "es_via_compartida": membresia.es_via_compartida,
+        },
+    )
     bd.flush()
+
+
+def metadatos_borrador(bd: Session, c: Correccion) -> dict[str, Any]:
+    guardado = (
+        bd.query(Bitacora)
+        .filter_by(accion="BORRADOR_GUARDADO", entidad="correccion", entidad_id=str(c.id))
+        .order_by(Bitacora.creado_en.desc(), Bitacora.id.desc())
+        .first()
+    )
+    if guardado is not None:
+        datos = guardado.despues or {}
+        return {
+            "guardado_en": guardado.creado_en.isoformat(),
+            "autor": {
+                "usuario_id": str(guardado.actor_usuario_id),
+                "nombre": datos.get("nombre"),
+                "rol": datos.get("rol"),
+                "es_via_compartida": datos.get("es_via_compartida", False),
+            },
+        }
+    # Borradores anteriores a esta corrección no tienen un instante de guardado auditable.
+    autor = bd.get(Usuario, c.corrector_usuario_id) if c.corrector_usuario_id else None
+    return {
+        "guardado_en": None,
+        "autor": {
+            "usuario_id": str(autor.id),
+            "nombre": autor.nombre,
+            "rol": None,
+            "es_via_compartida": False,
+        }
+        if autor
+        else None,
+    }
+
+
+def comentario_para_canvas(bd: Session, c: Correccion, entrega: Entrega, curso: Curso) -> str:
+    meta = metadatos_borrador(bd, c)
+    autor = meta["autor"] or {}
+    rol = autor.get("rol")
+    if rol is None and c.corrector_usuario_id is not None:
+        miembro = (
+            bd.query(MembresiaCurso)
+            .filter_by(curso_id=curso.id, usuario_id=c.corrector_usuario_id)
+            .one_or_none()
+        )
+        rol = miembro.rol if miembro else None
+    version = bd.get(VersionEntrega, c.version_entrega_id) if c.version_entrega_id else None
+    fecha = (
+        bd.query(FechaEfectiva)
+        .filter_by(entrega_id=entrega.id, sujeto_id=c.sujeto_id)
+        .one_or_none()
+    )
+    return pie_comentario(
+        texto=c.comentario or "",
+        entrega=entrega.nombre,
+        cierre=formatear_fecha(fecha.due_at_utc, curso.zona_horaria)
+        if fecha and fecha.due_at_utc
+        else "sin fecha",
+        sha=version.commit_sha if version and version.estado != "SIN_COMMITS" else None,
+        repositorio_full_name=version.repositorio_full_name if version else None,
+        corrector=autor.get("nombre") or "el equipo docente",
+        rol="profesor"
+        if rol == "PROFESOR"
+        else "ayudante"
+        if rol == "AYUDANTE"
+        else "equipo docente",
+    )
 
 
 def marcar_lista(
@@ -804,6 +895,39 @@ def matriz(bd: Session, curso: Curso, tarea: Tarea) -> dict[str, Any]:
         else {}
     )
     publicaciones = ultima_publicacion_por_estudiante(bd, [c.id for c, _, _ in filas])
+    repositorios: dict[uuid.UUID, Repositorio] = {}
+    for repo in (
+        bd.query(Repositorio)
+        .filter(Repositorio.tarea_id == tarea.id, Repositorio.github_repo_id.isnot(None))
+        .order_by(Repositorio.creado_en.desc())
+    ):
+        repositorios.setdefault(repo.sujeto_id, repo)
+    accesos = {
+        (acceso.repositorio_id, acceso.estudiante_id): acceso
+        for acceso in bd.query(AccesoRepositorio).filter(
+            AccesoRepositorio.repositorio_id.in_([r.id for r in repositorios.values()])
+        )
+    }
+    causas: dict[tuple[str, str, str], Incidencia] = {}
+    for incidencia in bd.query(Incidencia).filter(
+        Incidencia.curso_id == curso.id,
+        Incidencia.tipo == "SIN_PARTICIPACION",
+        Incidencia.abierta.is_(True),
+    ):
+        detalle = incidencia.detalle
+        if detalle.get("tarea_id") != str(tarea.id) or detalle.get("causa") not in {
+            "SIN_ACCESO",
+            "SIN_ATRIBUIR",
+            "SIN_COMMITS",
+        }:
+            continue
+        causas[
+            (
+                str(detalle.get("repositorio_id")),
+                str(detalle.get("estudiante_id")),
+                str(detalle.get("entrega_id")),
+            )
+        ] = incidencia
     sujetos: dict[uuid.UUID, dict[str, Any]] = {}
     por_corrector: dict[str, dict[str, int]] = {}
     por_entrega: dict[str, dict[str, int]] = {}
@@ -816,6 +940,7 @@ def matriz(bd: Session, curso: Curso, tarea: Tarea) -> dict[str, Any]:
     for c, a, s in filas:
         nombre, ordenable = nombre_de_sujeto(bd, s)
         miembros = integrantes(bd, s)
+        repositorio = repositorios.get(s.id)
         filas_canvas = [espejo.get((c.entrega_id, m.id)) for m in miembros]
         contraste = contraste_canvas(
             [publicaciones.get((c.id, m.id)) for m in miembros],
@@ -833,6 +958,19 @@ def matriz(bd: Session, curso: Curso, tarea: Tarea) -> dict[str, Any]:
                 "orden": ordenable.lower(),
                 "activo": s.activo,
                 "seccion": nombres_seccion.get(seccion_ids[0]) if seccion_ids else None,
+                "repositorio_id": str(repositorio.id) if repositorio else None,
+                "accesos": [
+                    {
+                        "estudiante_id": str(m.id),
+                        "nombre": m.nombre,
+                        "estado": acceso.estado if acceso else None,
+                        "verificado_en": acceso.verificado_en.isoformat()
+                        if acceso and acceso.verificado_en
+                        else None,
+                    }
+                    for m in miembros
+                    for acceso in [accesos.get((repositorio.id, m.id)) if repositorio else None]
+                ],
                 "celdas": {},
             },
         )
@@ -856,6 +994,19 @@ def matriz(bd: Session, curso: Curso, tarea: Tarea) -> dict[str, Any]:
                 if v
             ],
             "contraste": contraste,
+            "causas_sin_participacion": [
+                {
+                    "estudiante_id": str(m.id),
+                    "nombre": m.nombre,
+                    "causa": incidencia.detalle["causa"],
+                    "registrada_en": incidencia.creado_en.isoformat(),
+                }
+                for m in miembros
+                for incidencia in [causas.get((str(repositorio.id), str(m.id), str(c.entrega_id)))]
+                if repositorio and incidencia is not None
+            ]
+            if repositorio
+            else [],
         }
         total += 1
         if c.estado in TERMINALES:

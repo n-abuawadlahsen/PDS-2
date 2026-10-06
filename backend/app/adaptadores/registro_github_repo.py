@@ -54,7 +54,7 @@ def crear_tarea_registro(
     actor_usuario_id: uuid.UUID,
     descripcion_html: str | None = None,
 ) -> Curso:
-    """S7.1 correccion: exige `curso.administrar` (lo comprueba el llamador).
+    """S7.1 correccion: exige `comunicacion.enviar` (lo comprueba el llamador).
     Lectura antes del efecto: si ya esta `ACTIVA`, no hace nada (idempotente,
     S4.5.5 mismo patron)."""
     assert curso.canvas_course_id is not None

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { enviarRecordatorio, obtenerPendientes } from "../lib/api";
 import { comprobar } from "../lib/errores";
-import { textoEstadoAcceso } from "../lib/textosTarea";
+import { fechaLegible, textoEstadoAcceso } from "../lib/textosTarea";
 import { useCurso } from "../components/Layout";
 import {
   Cabecera,
@@ -14,15 +14,22 @@ import {
   etiqueta,
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
-function Recordatorio({ id }: { id: string }) {
+function Recordatorio({
+  id,
+  proximo,
+}: {
+  id: string;
+  proximo?: string | null;
+}) {
   const { curso } = useCurso();
   const op = useOperacion();
   const [solicitado, setSolicitado] = useState(false);
   const [espera, setEspera] = useState<string | null>(null);
+  const esperando = proximo && new Date(proximo).getTime() > Date.now();
   return (
     <div>
       <button
-        disabled={op.ocupado || solicitado}
+        disabled={op.ocupado || solicitado || Boolean(esperando)}
         onClick={() =>
           void op.ejecutar(async () => {
             const r = await enviarRecordatorio(curso.id, id);
@@ -54,6 +61,11 @@ function Recordatorio({ id }: { id: string }) {
             ? "Recordatorio solicitado"
             : "Enviar recordatorio"}
       </button>
+      {esperando && (
+        <p className="help">
+          Disponible desde {fechaLegible(proximo, curso.zona_horaria)}
+        </p>
+      )}
       <Mensajes {...op} />
       {espera && <p className="help">{espera}</p>}
     </div>
@@ -103,7 +115,10 @@ export function Pendientes() {
                         <Estado valor={f.estado_mapeo} />
                       </div>
                       {puede("comunicacion.enviar") && (
-                        <Recordatorio id={f.estudiante_id} />
+                        <Recordatorio
+                          id={f.estudiante_id}
+                          proximo={f.proximo_recordatorio_en}
+                        />
                       )}
                     </div>
                     {puede("mapeo.editar") && (

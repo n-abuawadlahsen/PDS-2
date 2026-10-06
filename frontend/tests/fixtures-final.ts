@@ -267,7 +267,17 @@ export async function prepararFinal(page: Page) {
       });
     if (path.endsWith("/comprobar")) {
       estado.comprobado = new Date().toISOString();
-      return responder({ encolada: true }, 202);
+      return responder({ encolada: true, trabajo_id: "comprobar-1" }, 202);
+    }
+    if (path.endsWith("/trabajos/comprobar-1")) {
+      return responder({
+        id: "comprobar-1",
+        estado: "OK",
+        intentos: 1,
+        max_intentos: 4,
+        proximo_intento_en: null,
+        terminado_en: estado.comprobado,
+      });
     }
     const cor = path.match(/\/correccion\/entrega-1\/(sujeto-\d+)(?:\/(.+))?$/);
     if (cor) {
