@@ -6,6 +6,8 @@ App web que coordina Canvas y GitHub para el equipo docente de un curso de progr
 
 El frontend implementa los recorridos docentes de **P1–P8 y F1–F12** sobre los contratos disponibles, con diseño inspirado en Canvas, navegación adaptable y permisos por curso. La [guía de implementación](docs/frontend/IMPLEMENTACION.md) contiene los comandos de revisión, evidencias y límites concretos; la [matriz](docs/frontend/REQUISITOS.md) vincula los 59 requisitos con pantallas y contratos.
 
+**Guía de uso paso a paso para la corrección:** [`docs/GUIA-USO-CORRECTOR.pdf`](docs/GUIA-USO-CORRECTOR.pdf) (fuente LaTeX en [`docs/GUIA-USO-CORRECTOR.tex`](docs/GUIA-USO-CORRECTOR.tex)). Recorre toda la aplicación en el orden de uso real, desde el acceso hasta publicar una nota en Canvas, e incluye un recorrido rápido de 30 minutos.
+
 Para revisar la entrega, seguir la [guía de pruebas manuales](docs/frontend/PRUEBAS-MANUALES.md). El [guion del video](docs/frontend/GUION-VIDEO.md) organiza una demostración sin narración de 2:50 finales.
 
 Historial de la entrega parcial del backend:
