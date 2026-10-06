@@ -25,7 +25,7 @@ from sqlalchemy import (
     Text,
     text,
 )
-from sqlalchemy.dialects.postgresql import CITEXT, UUID
+from sqlalchemy.dialects.postgresql import CITEXT, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adaptadores.base import Base, ConId
@@ -89,6 +89,7 @@ class Curso(Base, ConId):
         CheckConstraint("length(codigo) <= 12", name="codigo_longitud_maxima"),
         CheckConstraint("length(periodo) = 6", name="periodo_longitud_exacta"),
         CheckConstraint("length(slug) <= 24", name="slug_longitud_maxima"),
+        CheckConstraint("jsonb_typeof(roles_estudiante_extra) = 'array'", name="roles_extra_lista"),
         Index("uq_curso_github_org_id", "github_org_id", unique=True),
         Index("uq_curso_github_installation_id", "github_installation_id", unique=True),
         CheckConstraint(
@@ -125,6 +126,9 @@ class Curso(Base, ConId):
     zona_horaria: Mapped[str] = mapped_column(Text, nullable=False)
     umbral_dias_sin_actividad: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     umbral_desbalance_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=70)
+    roles_estudiante_extra: Mapped[list[int]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
     # S10.2.6 (F5): desde cuando el espejo de actividad es fiable, escrito al
     # terminar el relleno hacia atras de todos los repositorios del curso.
     ingesta_actividad_desde: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)

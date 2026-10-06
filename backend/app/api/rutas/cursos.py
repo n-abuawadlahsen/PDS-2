@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator
 from sqlalchemy.orm import Session
 
 from app.adaptadores import (
@@ -76,6 +79,7 @@ class CursoSalida(BaseModel):
     zona_horaria: str
     umbral_dias_sin_actividad: int
     umbral_desbalance_pct: int
+    roles_estudiante_extra: list[int]
     canvas_base_url: str | None
     canvas_course_id: int | None
 
@@ -93,6 +97,14 @@ class CursoAjustesEntrada(BaseModel):
     zona_horaria: str | None = Field(default=None, min_length=1, max_length=100)
     umbral_dias_sin_actividad: int | None = Field(default=None, ge=1, le=30)
     umbral_desbalance_pct: int | None = Field(default=None, ge=50, le=95)
+    roles_estudiante_extra: list[Annotated[StrictInt, Field(gt=0)]] | None = Field(
+        default=None, max_length=30
+    )
+
+    @field_validator("roles_estudiante_extra")
+    @classmethod
+    def validar_roles(cls, valor: list[int] | None) -> list[int] | None:
+        return sorted(set(valor)) if valor is not None else None
 
     @field_validator("nombre", "zona_horaria")
     @classmethod
@@ -261,16 +273,120 @@ def actualizar_ajustes_curso(
         clave_idempotencia=f"ajustes-metricas:{curso_id}:{uuid.uuid4()}",
         max_intentos=3,
     )
+    if "roles_estudiante_extra" in cambios:
+        trabajos_repo.encolar(
+            bd,
+            tipo="sync_roster",
+            curso_id=curso_id,
+            clave_idempotencia=f"ajustes-roster:{curso_id}:{uuid.uuid4()}",
+            max_intentos=3,
+        )
     return curso
+
+
+class ConfirmacionCurso(BaseModel):
+    confirmar: bool
+    slug: str | None = None
+    archivar_repositorios: bool = False
+
+
+@router.get("/api/cursos/{curso_id}/archivo/inventario.csv")
+def inventario_archivo(
+    curso_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    _m: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
+) -> Response:
+    curso = bd.get(Curso, curso_id)
+    assert curso is not None
+    salida = io.StringIO()
+    writer = csv.writer(salida)
+    writer.writerow(
+        ["repositorio_id", "tarea_id", "sujeto_id", "nombre", "estado", "github_repo_id", "url"]
+    )
+    for r in bd.query(Repositorio).filter_by(curso_id=curso_id).order_by(Repositorio.nombre):
+        writer.writerow(
+            [
+                str(r.id),
+                str(r.tarea_id),
+                str(r.sujeto_id),
+                r.nombre,
+                r.estado,
+                r.github_repo_id,
+                r.url_html,
+            ]
+        )
+    return Response(
+        content=salida.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="inventario-{curso.slug}.csv"'},
+    )
+
+
+@router.get("/api/cursos/{curso_id}/archivo/previsualizar")
+def previsualizar_archivo(
+    curso_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    _m: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
+) -> dict[str, Any]:
+    from app.adaptadores.ciclo_curso_repo import previsualizar
+
+    return previsualizar(bd, curso_id)
+
+
+@router.post(
+    "/api/cursos/{curso_id}/archivar",
+    response_model=CursoSalida,
+    dependencies=[Depends(exigir_csrf)],
+)
+def archivar_curso(
+    curso_id: uuid.UUID,
+    datos: ConfirmacionCurso,
+    bd: Session = Depends(obtener_sesion_bd),
+    actor: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
+) -> Curso:
+    from app.adaptadores.ciclo_curso_repo import archivar
+
+    if not datos.confirmar:
+        raise HTTPException(status_code=422, detail="Confirma el archivado del curso.")
+    curso = bd.get(Curso, curso_id)
+    if curso is None or datos.slug != curso.slug:
+        raise HTTPException(
+            status_code=422, detail="Escribe el identificador del curso para confirmar."
+        )
+    return archivar(
+        bd, curso_id=curso_id, actor=actor, archivar_repositorios=datos.archivar_repositorios
+    )
+
+
+@router.post(
+    "/api/cursos/{curso_id}/desarchivar",
+    response_model=CursoSalida,
+    dependencies=[Depends(exigir_csrf)],
+)
+def desarchivar_curso(
+    curso_id: uuid.UUID,
+    datos: ConfirmacionCurso,
+    bd: Session = Depends(obtener_sesion_bd),
+    actor: MembresiaCurso = Depends(requiere(Permiso.CURSO_ADMINISTRAR)),
+) -> Curso:
+    from app.adaptadores.ciclo_curso_repo import desarchivar
+
+    if not datos.confirmar:
+        raise HTTPException(status_code=422, detail="Confirma la reactivación del curso.")
+    return desarchivar(bd, curso_id=curso_id, actor=actor)
 
 
 @router.get("/api/cursos/{curso_id}/contexto", response_model=ContextoSalida)
 def obtener_contexto(
     membresia: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
+    bd: Session = Depends(obtener_sesion_bd),
 ) -> ContextoSalida:
     efectivos = permisos_efectivos(
         rol=membresia.rol, permisos_configurados=frozenset(Permiso(p) for p in membresia.permisos)
     )
+    curso = bd.get(Curso, membresia.curso_id)
+    if curso and curso.estado == "ARCHIVADO":
+        efectivos = efectivos & {Permiso.CURSO_VER, Permiso.CURSO_ADMINISTRAR}
     return ContextoSalida(
         rol=membresia.rol,
         permisos_efectivos=sorted(p.value for p in efectivos),

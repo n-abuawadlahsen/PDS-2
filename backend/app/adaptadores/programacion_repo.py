@@ -16,6 +16,7 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from app.adaptadores.base import ahora_utc
+from app.adaptadores.modelos_curso import Curso
 from app.adaptadores.modelos_infraestructura import TrabajoPeriodico
 from app.dominio.estados import EstadoTarea
 
@@ -70,6 +71,9 @@ def _asegurar(bd: Session, *, tipo: str, curso_id: uuid.UUID | None, cadencia: i
 
 
 def asegurar_periodicos_de_curso(bd: Session, curso_id: uuid.UUID) -> None:
+    curso = bd.get(Curso, curso_id)
+    if curso and curso.estado == "ARCHIVADO":
+        return
     for tipo, cadencia in PERIODICOS_DE_CURSO:
         _asegurar(bd, tipo=tipo, curso_id=curso_id, cadencia=cadencia)
     bd.flush()
@@ -81,7 +85,10 @@ def asegurar_periodicos_de_cursos_activos(bd: Session) -> None:
     from app.adaptadores.modelos_tarea import Tarea
 
     for (curso_id,) in (
-        bd.query(Tarea.curso_id).filter(Tarea.estado == EstadoTarea.ACTIVA.value).distinct()
+        bd.query(Tarea.curso_id)
+        .join(Curso, Curso.id == Tarea.curso_id)
+        .filter(Tarea.estado == EstadoTarea.ACTIVA.value, Curso.estado != "ARCHIVADO")
+        .distinct()
     ):
         asegurar_periodicos_de_curso(bd, curso_id)
 

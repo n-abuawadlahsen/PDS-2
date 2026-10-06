@@ -20,10 +20,12 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.adaptadores import programacion_repo, trabajos_repo
+from app.adaptadores import ciclo_curso_repo, programacion_repo, trabajos_repo
 from app.adaptadores.base import ahora_utc
+from app.adaptadores.modelos_curso import Curso
 from app.dominio.estados import FamiliaError
 from app.dominio.reintentos import proximo_intento_en
+from app.infraestructura.cerrojos import bloquear_ciclo_curso
 from app.infraestructura.config import obtener_configuracion
 from app.infraestructura.db import crear_engine, crear_fabrica_sesiones
 from app.infraestructura.logs import configurar_logs, obtener_logger
@@ -79,6 +81,16 @@ def _procesar_un_trabajo(sesion: Session, *, tomado_por: str) -> bool:
     if trabajo is None:
         return False
     sesion.commit()
+
+    if trabajo.curso_id is not None:
+        bloquear_ciclo_curso(sesion, trabajo.curso_id)
+        curso = sesion.query(Curso).populate_existing().filter_by(id=trabajo.curso_id).one()
+        if curso.estado == "ARCHIVADO" and not ciclo_curso_repo.permite_trabajo_archivado(
+            sesion, curso, trabajo
+        ):
+            trabajos_repo.cancelar(sesion, trabajo, motivo="CURSO_ARCHIVADO")
+            sesion.commit()
+            return True
 
     manejador = registro.obtener_manejador(trabajo.tipo)
     if manejador is None:

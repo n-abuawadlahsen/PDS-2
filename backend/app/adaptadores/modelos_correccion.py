@@ -87,6 +87,7 @@ class AsignacionCorreccion(Base, ConId):
     criterio_seccion_id: Mapped[uuid.UUID | None] = mapped_column(
         _UUID, ForeignKey("seccion.id", ondelete="RESTRICT"), nullable=True
     )
+    criterio_contexto: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     desalineada_motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
     desalineada_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
 

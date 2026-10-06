@@ -89,5 +89,100 @@ test("API real local: sesión opaca → crear curso → Canvas → GitHub App �
     path: "../docs/frontend/evidencias/api-real-tarea.png",
     fullPage: true,
   });
+  await page.goto(`/cursos/${cursoId}/ajustes`);
+  await page
+    .getByRole("textbox", { name: /^Roles Canvas adicionales de estudiante/ })
+    .fill("42, 43");
+  await page
+    .getByRole("button", { name: "Guardar ajustes", exact: true })
+    .click();
+  await expect(
+    page.getByText("Ajustes guardados.", { exact: false }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("textbox", {
+      name: /^Roles Canvas adicionales de estudiante/,
+    }),
+  ).toHaveValue("42, 43");
   expect(errores).toEqual([]);
+});
+
+test("API real local: archivo y restauración conservan el curso y bloquean escrituras", async ({
+  page,
+  context,
+}) => {
+  const estado = JSON.parse(readFileSync(".backend-test-state.json", "utf8"));
+  await context.addCookies([
+    {
+      name: "sesion",
+      value: estado.sesion,
+      domain: "127.0.0.1",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+    {
+      name: "csrf_token",
+      value: estado.csrf,
+      domain: "127.0.0.1",
+      path: "/",
+      sameSite: "Lax",
+    },
+  ]);
+  const creado = await context.request.post("/api/cursos", {
+    headers: { "X-CSRF-Token": estado.csrf },
+    data: {
+      nombre: "Curso para archivo",
+      codigo: "ICC4202",
+      periodo: "2026-2",
+      slug: "archivo-local",
+      zona_horaria: "America/Santiago",
+    },
+  });
+  expect(creado.ok(), await creado.text()).toBe(true);
+  const curso = await creado.json();
+  await page.goto(`/cursos/${curso.id}/ajustes`);
+  await page.getByRole("button", { name: "Revisar archivado" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("textbox").fill(curso.slug);
+  await dialog.getByRole("button", { name: "Archivar", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Curso archivado" }),
+  ).toBeVisible();
+  const intento = await context.request.patch(`/api/cursos/${curso.id}`, {
+    headers: { "X-CSRF-Token": estado.csrf },
+    data: { nombre: "Cambio prohibido" },
+  });
+  expect(intento.status()).toBe(409);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const reactivar = page.getByRole("button", {
+    name: "Reactivar curso",
+    exact: true,
+  });
+  await reactivar.focus();
+  await expect(reactivar).toBeFocused();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await page.screenshot({
+    path: "../docs/frontend/evidencias/api-real-archivo.png",
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Reactivar curso", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Reactivar", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Ajustes del curso" }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Nombre del curso", { exact: true }),
+  ).toHaveValue("Curso para archivo");
+  const cursos = await (await context.request.get("/api/cursos")).json();
+  expect(cursos.find((c: { id: string }) => c.id === curso.id).estado).toBe(
+    "BORRADOR",
+  );
 });

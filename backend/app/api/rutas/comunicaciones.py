@@ -15,6 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adaptadores import comunicaciones_repo
@@ -72,6 +73,9 @@ ETIQUETA_MOTIVO = {
     "TAREA_ARCHIVADA": "la tarea se archivó",
     "ENTREGA_ELIMINADA": "la entrega se eliminó en Canvas",
     "ACCION_DOCENTE": "lo canceló el equipo docente",
+    "AVISO_YA_NO_APLICA": "ya no hay entregas pendientes o el destinatario dejó el equipo",
+    "SIMULADO_LOCAL": "el proveedor local simuló el envío; no salió un correo real",
+    "ENVIO_INCIERTO": "no se pudo confirmar el envío; revisa antes de solicitar otro aviso",
 }
 TITULO_EVENTO = {
     "repositorio_disponible": "Repositorio disponible",
@@ -139,7 +143,9 @@ class BandejaSalida(BaseModel):
 def _salida(m: MensajeSaliente) -> MensajeSalida:
     enlace = m.canvas_html_url
     motivo_sin_enlace = None
-    if enlace is None:
+    if m.canal == "CORREO":
+        motivo_sin_enlace = "Este aviso se envía por correo; no tiene enlace en Canvas."
+    elif enlace is None:
         motivo_sin_enlace = (
             "Canvas no devolvió un enlace para este envío."
             if m.estado == "ENVIADO"
@@ -184,7 +190,8 @@ def bandeja(
 ) -> BandejaSalida:
     curso = _curso(bd, curso_id)
     consulta = bd.query(MensajeSaliente).filter(
-        MensajeSaliente.curso_id == curso_id, MensajeSaliente.canal != "CORREO"
+        MensajeSaliente.curso_id == curso_id,
+        or_(MensajeSaliente.canal != "CORREO", MensajeSaliente.evento == "aviso_sin_corrector"),
     )
     for campo, valor in (
         (MensajeSaliente.canal, canal),
@@ -226,6 +233,10 @@ def accion_sobre_mensaje(
     membresia: MembresiaCurso = Depends(requiere(Permiso.COMUNICACION_ENVIAR)),
 ) -> MensajeSalida:
     mensaje = _mensaje(bd, curso_id, mensaje_id)
+    if mensaje.canal == "CORREO" and accion != "cancelar":
+        raise HTTPException(
+            status_code=409, detail="Solicita un nuevo aviso desde Corrección cuando corresponda."
+        )
     try:
         if accion == "reintentar":
             comunicaciones_repo.reintentar(bd, mensaje)

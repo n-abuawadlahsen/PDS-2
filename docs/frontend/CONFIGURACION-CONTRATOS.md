@@ -1,6 +1,6 @@
 # Configuración, acceso y personas (P1–P6)
 
-Revisión realizada contra las rutas de `backend/app/api/rutas/{auth,perfil,cursos,vinculacion,verificacion,personas,pendientes,comunicaciones}.py`. Se completaron los contratos que impedían los flujos de esta área, usando los modelos existentes. La revisión de octubre está en [LIMITACIONES.md](LIMITACIONES.md).
+Revisión realizada contra las rutas de `backend/app/api/rutas/{auth,perfil,cursos,vinculacion,verificacion,personas,pendientes,comunicaciones}.py`. Se completaron los contratos que impedían los flujos de esta área. La migración `0012` persiste roles adicionales y alias de identidades fusionadas. La revisión de octubre está en [LIMITACIONES.md](LIMITACIONES.md).
 
 ## Pantalla → acción → contrato → permiso
 
@@ -11,7 +11,8 @@ Todas las rutas de esta tabla llevan prefijo `/api`, salvo las rutas `/auth`. `{
 | Acceso / Confirmar | `POST /auth/google/inicio`, `POST /auth/confirmar`; cookie opaca y formulario de navegación | Pública | Conserva destino interno permitido; rechazos de Google y confirmación existente. No guarda credenciales. |
 | Perfil | `GET/PATCH/DELETE /perfil`, `GET /perfil/cierre` | Sesión propia | Nombre editable, correo de identidad, cierre confirmado y cursos que bloquean el cierre. |
 | Perfil | `GET/DELETE /perfil/sesiones`, `DELETE /perfil/sesiones/{id}`, `GET /perfil/identidades-canvas`, `DELETE .../{id}`, `PUT/DELETE /perfil/cuenta-github` | Sesión propia | Cierre individual/de las demás, identidades Canvas propias con retiro confirmado de credenciales y cuenta docente GitHub. |
-| Ajustes | `PATCH /cursos/{c}` | `curso.administrar` | Nombre, zona IANA y umbrales; errores junto al campo, auditoría y recálculo en cola. |
+| Ajustes | `PATCH /cursos/{c}` | `curso.administrar` | Nombre, zona IANA, umbrales y `roles_estudiante_extra` (hasta 30 IDs positivos); auditoría, recálculo y sincronización del padrón en cola. |
+| Archivo del curso | `GET /cursos/{c}/archivo/previsualizar`, `/archivo/inventario.csv`; `POST .../archivar`, `.../desarchivar` | `curso.administrar` | Archivar requiere `{confirmar:true,slug,archivar_repositorios}`. Previsualiza guardas/capturas, pausa procesos, conserva historia y entrega IDs de trabajos remotos. Reactivar requiere `{confirmar:true}`, restaura configuración previa y cancela archivos remotos pendientes. |
 | Cursos | `GET/POST /cursos`, `GET /cursos/{c}/contexto` | Sesión / membresía activa | Curso nuevo y contexto de permisos reales; implementación general en shell/Cursos. |
 | Equipo | `GET /cursos/{c}/equipo`, `GET /cursos/{c}/equipo/historial` | `curso.ver` | Lista legible e historial bajo demanda. Todos los profesores tienen nueve permisos. |
 | Equipo | `POST/GET /cursos/{c}/equipo/invitaciones`, `POST .../{invitacion}/reenviar`, `DELETE .../{invitacion}` | `equipo.administrar` | Emisión, enlace nominal, estado del correo, reenvío y revocación. Formulario con cinco permisos concedibles, dos implícitos y dos exclusivos de profesor explicados. |
@@ -25,6 +26,8 @@ Todas las rutas de esta tabla llevan prefijo `/api`, salvo las rutas `/auth`. `{
 | Personas | `POST /cursos/{c}/sincronizaciones`, `POST .../registro-github`, `POST .../registro-github/restaurar`, `GET .../trabajos/{id}` | Sincronizar `curso.ver`; registro `comunicacion.enviar` | IDs consultables en URL y estado real de cada trabajo, incluido el registro en cola; no anuncia publicación anticipada. |
 | Personas | `POST /cursos/{c}/personas/{e}/mapeo`, `POST .../mapeo/importar-csv` | `mapeo.editar` | Validación docente y archivo/textarea CSV, previsualización fila a fila y aplicación de la revisión vigente. Cambiar el CSV invalida la revisión. |
 | Personas | `GET /cursos/{c}/personas/{e}/mapeo/historial` | `curso.ver` | Historial bajo demanda por IDs estables y fecha, sin evidencia sensible del proveedor. |
+| Personas | `GET /cursos/{c}/personas/fusiones-canvas`; `POST .../fusiones-canvas/{incidencia}/confirmar` | Profesor + `mapeo.editar` | Evidencia e historial; confirma `{anterior_id,confirmar:true}`. Conserva UUID/historia; rechaza identidades nuevas con evidencia productiva. |
+| Personas | `GET /cursos/{c}/personas/{e}/invitaciones-github`; `POST .../invitaciones-github/{acceso}/reenviar` | Lectura `curso.ver`, reenvío `mapeo.editar` | Estado, contador/cooldown y `202` con trabajo consultable. Revalida permisos y estado real; tres reenvíos, intervalo 24 h. |
 | Pendientes | `GET /cursos/{c}/pendientes`, `POST .../pendientes/{e}/recordatorio` | Lectura `curso.ver`, envío `comunicacion.enviar` | Cuatro grupos, causa y persona por ID; último/próximo envío y `Retry-After` en `429`. |
 | Personas | `GET/PUT /cursos/{c}/comunicaciones-curso/recordatorio-mapeo` | Lectura `curso.ver`, cambio `comunicacion.enviar` | Regla automática, vista previa, carga/error recuperable, permiso explícito y bloqueo de doble envío. Respeta capacidad `comunicaciones_automaticas`. |
 
@@ -50,7 +53,9 @@ Todas las rutas de esta tabla llevan prefijo `/api`, salvo las rutas `/auth`. `{
 
 ## Límites que siguen vigentes
 
-La política vigente admite Gmail personal y `miuandes.cl`. Se mantiene esa decisión del proyecto. No están implementados la configuración de roles Canvas adicionales, archivado del curso completo, confirmación de fusiones Canvas ni reenvío manual directo de invitaciones de estudiantes; sus alcances concretos están en [LIMITACIONES.md](LIMITACIONES.md).
+La política vigente admite Gmail personal y `miuandes.cl`. Se mantiene esa decisión del proyecto. Roles adicionales, archivo/restauración, confirmación de fusiones y reenvío manual están conectados. Los límites restantes de historia ausente, fusiones con evidencia en ambas identidades y proveedores externos están en [LIMITACIONES.md](LIMITACIONES.md).
+
+Canvas conserva el tipo base del rol. La sincronización combina `type[]=StudentEnrollment` y `role_id[]`, con paginación y deduplicación, y descarta tipos docentes. Referencias oficiales: [Enrollments API](https://developerdocs.instructure.com/services/canvas/resources/enrollments) y [filtro `role_id` del controlador Canvas](https://github.com/instructure/canvas-lms/blob/master/app/controllers/enrollments_api_controller.rb).
 
 Las restricciones anteriores de renovación Canvas, ajustes generales, sesiones/identidades, historial, permisos, cooldown, impacto del retiro, vía compartida y estado de trabajos quedaron corregidas. Las pruebas de esta área usan dobles de proveedores; no certifican OAuth ni envíos externos reales.
 

@@ -28,6 +28,8 @@ import {
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
 import { RecordatorioMapeo } from "./RecordatorioMapeo";
+import { InvitacionesEstudiante } from "../components/InvitacionesEstudiante";
+import { FusionesCanvas } from "../components/FusionesCanvas";
 
 function HistorialMapeo({ estudianteId }: { estudianteId: string }) {
   const { curso } = useCurso();
@@ -414,6 +416,7 @@ export function Personas() {
         }
       />
       <Mensajes {...op} />
+      <FusionesCanvas alCambiar={consulta.recargar} />
       {(params.get("sincronizacion")?.split(",") ?? [])
         .filter((id) => /^[a-zA-Z0-9-]{1,80}$/.test(id))
         .map((id) => (
@@ -682,6 +685,7 @@ export function Personas() {
                             </p>
                           )}
                           <HistorialMapeo estudianteId={e.id} />
+                          <InvitacionesEstudiante estudianteId={e.id} />
                           {puede("mapeo.editar") && (
                             <EditorMapeo
                               estudianteId={e.id}

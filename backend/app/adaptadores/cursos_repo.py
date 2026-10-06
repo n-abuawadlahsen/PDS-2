@@ -302,6 +302,12 @@ def aceptar_invitacion(
     bd: Session, invitacion: InvitacionEquipo, *, usuario: Usuario
 ) -> MembresiaCurso:
     """S2.5.5: en una sola transaccion, crea o reactiva la membresia."""
+    from app.infraestructura.cerrojos import bloquear_ciclo_curso
+
+    bloquear_ciclo_curso(bd, invitacion.curso_id)
+    curso = bd.query(Curso).populate_existing().filter_by(id=invitacion.curso_id).one()
+    if curso.estado == "ARCHIVADO":
+        raise InvitacionNoAceptable("CURSO_ARCHIVADO")
     bloquear_equipo(bd)
     bd.refresh(invitacion)
     bd.refresh(usuario)

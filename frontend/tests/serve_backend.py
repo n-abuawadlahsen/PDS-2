@@ -11,13 +11,13 @@ import atexit
 import base64
 import json
 import os
-from pathlib import Path
 import secrets
 import signal
 import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 FRONTEND = Path(__file__).resolve().parents[1]
 BACKEND = FRONTEND.parent / "backend"
@@ -150,7 +150,13 @@ if PYTEST:
     cobertura = any(arg.startswith("--cov") for arg in args)
     sys.exit(
         subprocess.run(
-            [sys.executable, "-m", "pytest", *([] if cobertura else ["--no-cov"]), *args]
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                *([] if cobertura else ["--no-cov"]),
+                *args,
+            ]
         ).returncode
     )
 
@@ -159,7 +165,9 @@ from tests.api.test_cursos import _crear_usuario_con_sesion  # noqa: E402
 _, token = _crear_usuario_con_sesion(
     email="revision.frontend@gmail.com", nombre="Docente de ensayo"
 )
-with os.fdopen(os.open(STATE, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), "w") as file:
+with os.fdopen(
+    os.open(STATE, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), "w"
+) as file:
     json.dump({"sesion": token, "csrf": secrets.token_urlsafe(24)}, file)
 children.append(
     subprocess.Popen(

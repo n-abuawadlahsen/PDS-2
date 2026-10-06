@@ -1,6 +1,6 @@
 # Operación docente: tareas, entregas y seguimiento
 
-Las pantallas reutilizan los contratos de `backend/app/api/rutas/{tareas,repositorios,versiones,tablero,timeline,identidades,archivado}.py`. Se completaron los contratos de conjunto Canvas, relación sujeto/repositorio y CSV filtrado; no se añadieron migraciones. El tablero queda como primera pestaña cuando `GET /api/capacidades` incluye `tablero_actividad`; en este backend una bandera presente **habilita** la capacidad, incluso con perfil parcial.
+Las pantallas reutilizan los contratos de `backend/app/api/rutas/{tareas,repositorios,versiones,tablero,timeline,identidades,archivado}.py`. Se completaron los contratos de conjunto Canvas, relación sujeto/repositorio y CSV filtrado. La revisión posterior guía la configuración individual de notas grupales en Canvas y conecta la quinta guarda del archivo con las correcciones reales; el archivo del curso se documenta en [Configuración](CONFIGURACION-CONTRATOS.md). El tablero queda como primera pestaña cuando `GET /api/capacidades` incluye `tablero_actividad`; en este backend una bandera presente **habilita** la capacidad, incluso con perfil parcial.
 
 | Requisitos / etapa | Pantalla y acción | Contrato real | Permiso | Estado |
 | --- | --- | --- | --- | --- |
@@ -22,6 +22,7 @@ Los endpoints se muestran relativos a `/api/cursos/{curso_id}` cuando correspond
 - `AssignmentCanvasSalida` entrega `es_grupal`, `group_category_id_canvas` y el nombre del conjunto cuando está disponible en el espejo. La creación muestra esos datos; cambiar el conjunto sigue siendo una operación de Canvas.
 - `tablero.csv` aplica período, sección, estado y alertas con el mismo filtro que la tabla. Exporta todo el resultado filtrado, sin limitarse a la página de 50 filas; el servidor valida el período y audita los filtros.
 - La captura manual permite introducir un instante ISO 8601 con zona/desplazamiento explícito. Evita interpretar fechas en la zona del navegador; al confirmar se envía UTC y al mostrar se utiliza la zona del curso.
+- Entregas ofrece el enlace a la configuración individual en Canvas y confirma el ajuste al completar una sincronización; no modifica el assignment vinculado (RG-082). El cierre cuenta las correcciones no terminales, respetando exclusiones; reevalúa las cinco guardas antes de cada archivo remoto.
 - La validación automatizada usa `tests/fixtures-operacion.ts`, aislada de producción y de proveedores. No acredita OAuth, envío real de Canvas, creación real en GitHub ni trabajo real del scheduler.
 
 ## Verificación

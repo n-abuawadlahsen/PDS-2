@@ -184,7 +184,9 @@ def candidatos(bd: Session, *, ahora: datetime, limite: int = 500) -> list[Fecha
         bd.query(FechaEfectiva)
         .join(Entrega, Entrega.id == FechaEfectiva.entrega_id)
         .join(Tarea, Tarea.id == Entrega.tarea_id)
+        .join(Curso, Curso.id == Tarea.curso_id)
         .filter(
+            Curso.estado != "ARCHIVADO",
             FechaEfectiva.estado == EstadoFechaEfectiva.VIGENTE.value,
             FechaEfectiva.due_at_utc.isnot(None),
             FechaEfectiva.due_at_utc <= ahora - GRACIA,
@@ -251,7 +253,9 @@ def encolar_precierres(bd: Session, *, ahora: datetime) -> int:
     for fecha, repositorio in (
         bd.query(FechaEfectiva, Repositorio)
         .join(Repositorio, Repositorio.sujeto_id == FechaEfectiva.sujeto_id)
+        .join(Curso, Curso.id == Repositorio.curso_id)
         .filter(
+            Curso.estado != "ARCHIVADO",
             FechaEfectiva.estado == EstadoFechaEfectiva.VIGENTE.value,
             FechaEfectiva.due_at_utc > ahora,
             FechaEfectiva.due_at_utc <= ahora + VENTANA_PRECIERRE,

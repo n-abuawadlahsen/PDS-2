@@ -16,10 +16,12 @@ from sqlalchemy.orm import Session
 from app.adaptadores import incidencia_repo, mapeo_github_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.cliente_github import crear_cliente_github_desde_config
+from app.adaptadores.modelos_curso import Curso
 from app.adaptadores.modelos_infraestructura import Trabajo
 from app.adaptadores.modelos_mapeo import CuentaGithub, MapeoGithub
 from app.adaptadores.modelos_padron import Estudiante
 from app.dominio.estados import EstadoEstudiante, EstadoMapeoGithub, MotivoInvalidacionMapeo
+from app.infraestructura.cerrojos import bloquear_ciclo_curso
 from app.infraestructura.config import obtener_configuracion
 from app.trabajos.registro import registrar
 
@@ -28,11 +30,20 @@ from app.trabajos.registro import registrar
 def ejecutar(sesion: Session, _trabajo: Trabajo) -> None:
     settings = obtener_configuracion()
     cliente_github = crear_cliente_github_desde_config(settings)
+    cursos = sesion.query(Curso.id).filter(Curso.estado != "ARCHIVADO")
+    if _trabajo.curso_id is not None:
+        cursos = cursos.filter(Curso.id == _trabajo.curso_id)
+    ids = []
+    for (cid,) in cursos.order_by(Curso.id):
+        bloquear_ciclo_curso(sesion, cid)
+        if sesion.query(Curso).populate_existing().filter_by(id=cid).one().estado != "ARCHIVADO":
+            ids.append(cid)
 
     cuentas_vigentes = (
         sesion.query(CuentaGithub)
         .join(MapeoGithub, MapeoGithub.cuenta_github_id == CuentaGithub.id)
         .filter(MapeoGithub.estado == EstadoMapeoGithub.VIGENTE.value)
+        .filter(MapeoGithub.curso_id.in_(ids))
         .distinct()
         .all()
     )
@@ -43,6 +54,7 @@ def ejecutar(sesion: Session, _trabajo: Trabajo) -> None:
             .filter(
                 MapeoGithub.cuenta_github_id == cuenta.id,
                 MapeoGithub.estado == EstadoMapeoGithub.VIGENTE.value,
+                MapeoGithub.curso_id.in_(ids),
             )
             .all()
         )
@@ -103,6 +115,7 @@ def ejecutar(sesion: Session, _trabajo: Trabajo) -> None:
         .join(Estudiante, Estudiante.id == MapeoGithub.estudiante_id)
         .filter(
             MapeoGithub.estado == EstadoMapeoGithub.INVALIDADO.value,
+            MapeoGithub.curso_id.in_(ids),
             MapeoGithub.motivo_invalidacion == MotivoInvalidacionMapeo.ESTUDIANTE_RETIRADO.value,
             Estudiante.estado.in_([EstadoEstudiante.ACTIVO.value, EstadoEstudiante.INVITADO.value]),
         )

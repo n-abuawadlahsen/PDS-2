@@ -515,6 +515,12 @@ def procesar_evento(bd: Session, cliente: ClienteGitHub, *, evento: EventoWebhoo
         espera = next((t for t in REINTENTOS_SIN_DESTINO if t > transcurrido), timedelta(hours=1))
         raise SinDestinoTodavia(evento.recibido_en + espera)
     evento.repositorio_id = repositorio.id
+    from app.infraestructura.cerrojos import bloquear_ciclo_curso
+
+    bloquear_ciclo_curso(bd, repositorio.curso_id)
+    curso = bd.query(Curso).populate_existing().filter_by(id=repositorio.curso_id).one()
+    if curso.estado == "ARCHIVADO":
+        raise SinDestinoTodavia(ahora + timedelta(minutes=30))
     if evento.evento == "push":
         _procesar_push(bd, cliente, repositorio=repositorio, evento=evento)
     elif evento.evento == "repository":

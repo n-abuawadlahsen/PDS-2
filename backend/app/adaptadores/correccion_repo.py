@@ -448,6 +448,7 @@ def aplicar(
     incluir_no_calificables: bool = False,
     manual: dict[uuid.UUID, uuid.UUID | None] | None = None,
     por_seccion: dict[uuid.UUID, uuid.UUID] | None = None,
+    realinear: bool = False,
 ) -> int:
     """En una transaccion con cerrojo por entrega: una segunda ejecucion
     concurrente ve el resultado de la primera y no asigna nada dos veces."""
@@ -461,11 +462,13 @@ def aplicar(
         manual=manual,
         por_seccion=por_seccion,
     )
+    if realinear:
+        from app.adaptadores import realineacion_repo
+
+        propuesta = realineacion_repo.previsualizar(bd, entrega)
     ahora = ahora_utc()
     cambios = 0
     for fila in propuesta.filas:
-        if fila.propuesto == fila.actual:
-            continue
         a = (
             bd.query(AsignacionCorreccion)
             .filter(
@@ -481,10 +484,46 @@ def aplicar(
         )
         if c.estado in _NO_REASIGNABLES or c.estado in TERMINALES:
             continue
+        escogida = (
+            fila.propuesto != fila.actual
+            or realinear
+            or (reasignar and fila.propuesto is not None and criterio != CriterioAsignacion.MANUAL)
+            or (criterio == CriterioAsignacion.MANUAL and fila.sujeto_id in (manual or {}))
+        )
+        if not escogida:
+            continue
+        sujeto = bd.get(Sujeto, fila.sujeto_id)
+        assert sujeto is not None
+        contexto = a.criterio_contexto if realinear else None
+        criterio_fila = CriterioAsignacion(a.criterio) if realinear else criterio
+        from app.adaptadores.realineacion_repo import guardar_contexto
+
+        guardar_contexto(
+            bd,
+            a,
+            sujeto,
+            criterio=criterio_fila,
+            por_seccion=(contexto or {}).get("por_seccion", {})
+            if realinear
+            else {str(k): str(v) for k, v in (por_seccion or {}).items()},
+        )
+        if fila.propuesto == fila.actual:
+            if realinear:
+                bitacora_repo.registrar(
+                    bd,
+                    accion="CORRECCION_REALINEADA",
+                    entidad="asignacion_correccion",
+                    entidad_id=str(a.id),
+                    actor_usuario_id=actor.usuario_id,
+                    curso_id=entrega.curso_id,
+                    despues={"criterio": criterio_fila.value, "contexto": a.criterio_contexto},
+                )
+                cambios += 1
+            continue
         a.membresia_id = fila.propuesto
         a.asignada_por = actor.id
         a.asignada_en = ahora
-        a.criterio = criterio.value
+        a.criterio = criterio_fila.value
         if fila.propuesto is None:
             transicionar(
                 bd,
@@ -513,7 +552,8 @@ def aplicar(
             antes={"membresia_id": str(fila.actual) if fila.actual else None},
             despues={
                 "membresia_id": str(fila.propuesto) if fila.propuesto else None,
-                "criterio": criterio.value,
+                "criterio": criterio_fila.value,
+                "contexto": a.criterio_contexto,
             },
         )
         cambios += 1

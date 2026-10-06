@@ -95,9 +95,17 @@ def sincronizar_roster(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
                 seccion_existente.estado = EstadoSeccion.ELIMINADA.value
     bd.flush()
 
-    resultado_roster = cliente.obtener_roster_paginado(token, curso.canvas_course_id)
+    resultado_roster = (
+        cliente.obtener_roster_paginado(
+            token, curso.canvas_course_id, roles_extra=curso.roles_estudiante_extra
+        )
+        if curso.roles_estudiante_extra
+        else cliente.obtener_roster_paginado(token, curso.canvas_course_id)
+    )
     matriculas_por_usuario: dict[int, list[Any]] = {}
     for m in resultado_roster.items:
+        if m.tipo != "StudentEnrollment":
+            continue
         matriculas_por_usuario.setdefault(m.canvas_user_id, []).append(m)
 
     cantidad_anterior = (
@@ -176,6 +184,8 @@ def sincronizar_roster(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
                 bd, curso_id=curso.id, estudiante_id=estudiante.id
             )
         else:
+            if estudiante.fusionada_en_id is not None:
+                continue
             estudiante.nombre = primera.nombre
             estudiante.nombre_ordenable = primera.nombre_ordenable
             estudiante.login_id = primera.login_id or estudiante.login_id
@@ -253,6 +263,9 @@ def sincronizar_roster(bd: Session, cliente: ClienteCanvas, *, curso: Curso, tok
         if resultado_roster.truncado
         else ResultadoSincronizacion.OK.value
     )
+    from app.adaptadores import fusion_canvas_repo
+
+    fusion_canvas_repo.detectar(bd, curso)
     if resultado_roster.truncado:
         incidencia_repo.abrir_o_actualizar(
             bd,

@@ -428,6 +428,12 @@ export function LayoutCurso() {
   if (consulta.error || !consulta.datos)
     return (
       <Estructura curso={curso}>
+        {curso.estado === "ARCHIVADO" && (
+          <Aviso tipo="warning">
+            Curso archivado: sólo lectura. Los procesos y comunicaciones están
+            pausados.
+          </Aviso>
+        )}
         {consulta.error ? (
           <ErrorCarga error={consulta.error} reintentar={consulta.recargar} />
         ) : (
@@ -450,6 +456,12 @@ export function LayoutCurso() {
     >
       <Estructura curso={curso}>
         {revalidando && <Aviso>Actualizando tus permisos…</Aviso>}
+        {curso.estado === "ARCHIVADO" && (
+          <Aviso tipo="warning">
+            Curso archivado: sólo lectura. Los procesos y comunicaciones están
+            pausados.
+          </Aviso>
+        )}
         <Outlet key={cursoId} />
       </Estructura>
     </CursoContext.Provider>

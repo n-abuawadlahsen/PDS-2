@@ -129,6 +129,7 @@ export function Correccion() {
             <Aviso>
               {bandeja.sin_corrector} entregas sin corrector. El equipo con
               permiso para repartir puede asignarlas.
+              <AvisarProfesores cursoId={cursoId} />
             </Aviso>
           )}
           {pestana === "mias" && (
@@ -184,6 +185,41 @@ export function Correccion() {
             ))}
         </>
       )}
+    </>
+  );
+}
+
+function AvisarProfesores({ cursoId }: { cursoId: string }) {
+  const { curso } = useCurso();
+  const op = useOperacion();
+  const confirmar = useConfirmar();
+  return (
+    <>
+      <button
+        disabled={op.ocupado || curso.estado === "ARCHIVADO"}
+        onClick={() => {
+          void op.ejecutar(async () => {
+            if (
+              !(await confirmar({
+                titulo: "Avisar a los profesores",
+                descripcion:
+                  "Se solicitará un correo a los profesores activos del curso para revisar las entregas sin corrector. Se permite un aviso cada 24 horas.",
+                accion: "Solicitar aviso",
+              }))
+            )
+              return;
+            await comprobar(
+              await apiFetch(
+                `/api/cursos/${cursoId}/correccion/avisar-profesores`,
+                { method: "POST" },
+              ),
+            );
+          }, "Aviso solicitado. Puedes consultar su estado en Comunicaciones.");
+        }}
+      >
+        Avisar a los profesores
+      </button>
+      <Mensajes {...op} />
     </>
   );
 }
@@ -706,6 +742,7 @@ function Repartir({
   const [entregaId, setEntregaId] = useState(entregas[0]?.id ?? "");
   const [criterio, setCriterio] = useState("EQUITATIVO");
   const [reasignar, setReasignar] = useState(false);
+  const [realinear, setRealinear] = useState(false);
   const [incluir, setIncluir] = useState(false);
   const [manual, setManual] = useState<Record<string, string | null>>({});
   const [porSeccion, setPorSeccion] = useState<Record<string, string>>({});
@@ -723,6 +760,7 @@ function Repartir({
   const op = useOperacion();
   const confirmar = useConfirmar();
   const cuerpo: RepartoEntrada = {
+    realinear,
     criterio,
     reasignar,
     incluir_no_calificables: incluir,
@@ -776,6 +814,24 @@ function Repartir({
       </details>
       <fieldset disabled={op.ocupado}>
         <legend>Configuración del reparto</legend>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={realinear}
+            onChange={(e) => {
+              setRealinear(e.target.checked);
+              editar();
+            }}
+          />
+          Realinear sólo las asignaciones que requieren revisión
+        </label>
+        {realinear && (
+          <Aviso>
+            Se usará el criterio original de cada fila marcada por un cambio de
+            sección o integrantes. El resto del reparto y todos los borradores
+            se conservan. Las filas ambiguas requieren una decisión manual.
+          </Aviso>
+        )}
         <div className="form-grid">
           <label>
             Entrega
@@ -799,6 +855,8 @@ function Repartir({
             Criterio
             <select
               value={criterio}
+              aria-label="Criterio"
+              disabled={realinear}
               onChange={(e) => {
                 setCriterio(e.target.value);
                 editar();
@@ -817,6 +875,7 @@ function Repartir({
           <input
             type="checkbox"
             checked={reasignar}
+            disabled={realinear}
             onChange={(e) => {
               setReasignar(e.target.checked);
               editar();
@@ -845,7 +904,7 @@ function Repartir({
             )
             .join(" / ")}
         </p>
-        {criterio === "SECCION" && (
+        {criterio === "SECCION" && !realinear && (
           <>
             <p className="help">
               Un sujeto con dos secciones activas requiere decisión manual. En
@@ -876,7 +935,7 @@ function Repartir({
             ))}
           </>
         )}
-        {criterio === "MANUAL" && (
+        {criterio === "MANUAL" && !realinear && (
           <>
             <div className="actions">
               <label>

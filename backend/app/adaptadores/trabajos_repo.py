@@ -75,6 +75,15 @@ def tomar_siguiente(
     return trabajo
 
 
+def cancelar(sesion: Session, trabajo: Trabajo, *, motivo: str) -> None:
+    trabajo.estado = "CANCELADO"
+    trabajo.motivo_cancelacion = motivo
+    trabajo.terminado_en = ahora_utc()
+    trabajo.tomado_por = None
+    trabajo.tomado_en = None
+    sesion.flush()
+
+
 def marcar_ok(sesion: Session, trabajo: Trabajo) -> None:
     trabajo.estado = EstadoTrabajo.OK.value
     trabajo.terminado_en = ahora_utc()

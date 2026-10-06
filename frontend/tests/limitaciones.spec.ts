@@ -193,6 +193,9 @@ test("Ajustes guarda nombre, zona y umbrales y conserva el formulario ante error
   await page.getByRole("textbox", { name: /^Zona horaria/ }).fill("UTC");
   await page.getByLabel("Días sin actividad", { exact: true }).fill("12");
   await page
+    .getByRole("textbox", { name: /^Roles Canvas adicionales de estudiante/ })
+    .fill("42, 43");
+  await page
     .getByRole("button", { name: "Guardar ajustes", exact: true })
     .click();
   await expect(
@@ -227,6 +230,7 @@ test("Ajustes guarda nombre, zona y umbrales y conserva el formulario ante error
     zona_horaria: "UTC",
     umbral_dias_sin_actividad: 12,
     umbral_desbalance_pct: 70,
+    roles_estudiante_extra: [42, 43],
   });
 });
 

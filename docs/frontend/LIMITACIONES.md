@@ -1,6 +1,6 @@
 # Revisión de limitaciones · 6 de octubre de 2026
 
-La petición de corregir las limitaciones permitió completar contratos concretos del backend usando las tablas y procesos existentes. Esta revisión no añade migraciones, sustituye la autenticación ni cambia la política vigente de Gmail/miuandes.cl. Las escrituras siguen requiriendo sesión, CSRF y permisos del curso.
+La petición de corregir las limitaciones permitió completar contratos del backend y sus pantallas. La migración `0012` añade los roles Canvas adicionales, el contexto original del reparto y los alias de identidades fusionadas; se verificó únicamente en PostgreSQL local aislado. Se conserva la autenticación y la política vigente de Gmail/miuandes.cl. Las escrituras siguen requiriendo sesión, CSRF y permisos del curso.
 
 ## Limitaciones corregidas
 
@@ -20,17 +20,24 @@ La petición de corregir las limitaciones permitió completar contratos concreto
 | Borradores | Cada guardado registra autor, rol, vía compartida y fecha del servidor. La pantalla muestra esos datos y el comentario completo que publicará el backend; el pie conserva al autor de la corrección aunque publique otra persona. |
 | Evidencia de participación | La matriz relaciona sujeto/repositorio por UUID, muestra accesos comprobados y causas de las incidencias de la entrega: sin acceso, sin atribuir o sin commits. No convierte la ausencia de incidencias en una causa ni en cero. La selección para preparar notas por falta de entrega sigue siendo explícita. |
 | Navegación | El data router protege el borrador ante Atrás/Adelante, enlaces y navegación programática; la recarga/cierre usa la advertencia del navegador. Cancelar conserva el formulario. |
+| Roles Canvas | Ajustes persiste IDs adicionales derivados de `StudentEnrollment`, con validación, auditoría y sincronización en cola. Se combinan los resultados paginados del padrón estándar y de los roles seleccionados, sin duplicar inscripciones ni incorporar docentes. |
+| Archivo del curso | Confirmación escrita del slug, inventario CSV y lista de cierres sin captura. Pausa trabajos, ingesta y comunicaciones; bloquea escrituras y conserva versiones/borradores. La opción de archivar también GitHub está marcada por defecto y exige las cinco guardas. Sólo los trabajos de esa tanda consentida pueden completar el archivo remoto; reevalúan las guardas. Reactivar restaura las pausas previas y cancela archivos remotos todavía pendientes. Los repositorios ya archivados se reactivan desde el cierre de su tarea. |
+| Fusión Canvas | Personas detecta coincidencias exactas de login/SIS entre una identidad retirada y otra nueva, muestra evidencia e historial y exige confirmación de profesor. Conserva el UUID con historia, repositorios, mapeos y versiones inmutables; la fila nueva queda como alias retirado. No fusiona automáticamente por nombres. |
+| Invitaciones del estudiante | Personas permite comprobar y solicitar reenvío por estudiante/repositorio. El trabajo consulta el estado real antes de reenviar, revalida permisos y limita a tres reenvíos con 24 horas de separación. Un doble clic devuelve el mismo trabajo; otros accesos se conservan. |
+| Realineación | Los repartos nuevos guardan su criterio, secciones, integrantes y mapa de correctores. La sincronización marca cambios sin reasignar ni borrar borradores. Repartir permite previsualizar y aplicar sólo las filas desalineadas según el criterio original; los casos ambiguos exigen decisión docente. |
+| Aviso a profesores | Un ayudante puede solicitar un aviso por entregas sin corrector. El outbox revalida destinatarios y necesidad, registra el estado real, evita duplicados durante 24 horas y comparte la reserva diaria de correo con las invitaciones. |
+| Notas grupales | Entregas muestra el ajuste del espejo, explica su efecto y ofrece al profesor un enlace profundo a la configuración en Canvas, antes de cualquier intento de publicación. Después del cambio externo, permite sincronizar y actualiza el ajuste sólo al terminar el trabajo. No modifica el assignment vinculado, conforme a RG-082. |
+| Guarda de correcciones | El cierre de repositorios cuenta las correcciones no terminales, exceptuando entregas/sujetos excluidos y casos no calificables. Se comprueba al solicitar y antes de cada archivo remoto. |
 
 ## Límites que siguen vigentes
 
 | Límite | Evidencia y alcance pendiente |
 | --- | --- |
+| Configuración de tareas en Canvas | [SPEC 12, §12.1.4](../SPEC/12-correccion.md) establece que la aplicación no modifica campos de un assignment vinculado (RG-082), prevaleciendo sobre §12.10.3. La opción individual se cambia en Canvas y se consulta mediante sincronización. |
 | Integraciones externas | La prueba local utiliza FastAPI, PostgreSQL y trabajador reales, con dobles de Google/Canvas/GitHub. OAuth real, correos, repositorios y publicación de notas en proveedores reales requieren sus credenciales/configuración y un curso de ensayo. No quedan certificados por estas pruebas. |
-| Ajustes que no están modelados | `modelos_curso.py` no persiste una configuración de roles Canvas adicionales. Tampoco existe un flujo de archivado del curso completo que coordine tareas, ingesta, correcciones y comunicaciones; el cierre/archivado por tarea sí está conectado. Implementarlos requiere completar esos flujos del servidor, además de la pantalla. |
-| Fusión de identidades Canvas | No hay operación de confirmación de `POSIBLE_FUSION_CANVAS` ni algoritmo que conserve sus relaciones históricas. Mapeo manual/CSV e historial están conectados; una fusión no se simula por coincidencia de nombres. |
-| Reenvío manual de invitación del estudiante | Existe el proceso automático de invitaciones/accesos; no hay un contrato de reenvío directo desde Personas para un estudiante concreto. Se conserva la consulta y comprobación de accesos. |
-| Realineación del reparto | Existen `criterio_seccion_id` y `desalineada_motivo`, pero el reparto actual no guarda/recalcula ese criterio ante cambios de sección. No existe una acción de realineación automática. Se puede previsualizar/aplicar un nuevo reparto o reasignar manualmente. |
-| Aviso por falta de corrector y opción de notas grupales | Se mantienen la incidencia y la bandeja de filas sin corrector, pero no hay acción de notificar a profesores desde esa fila. `grade_group_students_individually` se lee de Canvas y se respeta al publicar; no hay escritura de esa opción desde la app. |
+| Fusiones con dos historiales productivos | Se rechazan si la identidad nueva ya tiene repositorios creados/en creación, versiones, correcciones iniciadas o cuenta GitHub declarada. Hace falta resolver qué evidencia corresponde a cada identidad; una coincidencia de login/SIS no autoriza a sobrescribir esas relaciones. La pantalla muestra el motivo. |
+| Repartos anteriores | No se reconstruye el criterio detallado de asignaciones que nunca guardaron su contexto. Se mantienen y pueden repartirse explícitamente para registrar un nuevo criterio. |
+| Cursos archivados anteriores | Sin una auditoría del estado previo no se inventa una configuración de restauración. La reactivación responde con un motivo concreto; los nuevos archivos sí conservan su configuración. |
 | Borradores anteriores a la auditoría | Conservan su contenido y el autor persistido, pero no se puede recuperar con precisión la fecha y el rol histórico de guardado que nunca se registraron. La API devuelve fecha/rol desconocidos; un nuevo guardado registra ambos. |
 | Histórico de causas y accesos | La matriz muestra las incidencias abiertas registradas para la entrega y el acceso actual del espejo, con sus fechas. No reconstruye retrospectivamente causas o accesos que no se persistieron. Si falta una causa, pide revisar la evidencia. |
 
@@ -42,5 +49,7 @@ La privacidad de los borradores sigue la función `es_propietario`: los profesor
 
 - `frontend/tests/limitaciones.spec.ts`: 10 recorridos de regresión de sesiones/Canvas, validación, historial de navegación, fallos de trabajos, autoría, pesos, causas y finalización simultánea de sincronizaciones.
 - `backend/tests/api/test_limitaciones_frontend.py`: 23 casos con PostgreSQL aislado; comprueban CSRF, pertenencia, permisos, índices de credenciales, auditoría, cooldown, datos históricos, CSV filtrado, autoría y ejecución del registro en cola.
+- `frontend/tests/pendientes-restantes.spec.ts`: siete recorridos de archivo/restauración, guardas, fusión, reenvío, realineación, aviso y configuración grupal.
+- `backend/tests/api/test_pendientes_restantes.py`: 17 casos de permisos, consentimiento, conservación de versiones, alias, auditoría, cuotas, idempotencia, revalidación de guardas y bloqueo de trabajos/comunicaciones al archivar.
 - `frontend/tests/serve_backend.py --pytest` prepara un contenedor PostgreSQL propio, aplica las migraciones y ejecuta pytest sin usar la base del equipo. Si se solicita `--cov`, conserva esa opción; de lo contrario usa `--no-cov`.
 - Resultados globales, comandos y capturas: [IMPLEMENTACION.md](IMPLEMENTACION.md).

@@ -246,7 +246,7 @@ class ClienteCanvas(Protocol):
         ...
 
     def obtener_roster_paginado(
-        self, token: str, canvas_course_id: int
+        self, token: str, canvas_course_id: int, *, roles_extra: list[int] | None = None
     ) -> ResultadoPaginado[MatriculaCruda]:
         """S7.3.1: roster completo, todos los `workflow_state` relevantes
         para derivar `estudiante.estado` (S7.2.1), no solo `active`."""
@@ -705,7 +705,7 @@ class ClienteCanvasReal:
         return items, per_page_medido, truncado
 
     def obtener_roster_paginado(
-        self, token: str, canvas_course_id: int
+        self, token: str, canvas_course_id: int, *, roles_extra: list[int] | None = None
     ) -> ResultadoPaginado[MatriculaCruda]:
         items, per_page, truncado = self._paginas(
             "/api/v1/courses/{course_id}/enrollments",
@@ -717,8 +717,25 @@ class ClienteCanvasReal:
                 "per_page": 100,
             },
         )
+        if roles_extra:
+            adicionales, pagina_extra, truncado_extra = self._paginas(
+                "/api/v1/courses/{course_id}/enrollments",
+                f"/api/v1/courses/{canvas_course_id}/enrollments",
+                token=token,
+                params={
+                    "role_id[]": roles_extra,
+                    "state[]": ["active", "invited", "inactive", "completed"],
+                    "per_page": 100,
+                },
+            )
+            items = list({e["id"]: e for e in [*items, *adicionales]}.values())
+            per_page = min(per_page, pagina_extra) if pagina_extra else per_page
+            truncado = truncado or truncado_extra
         matriculas = []
         for e in items:
+            # Un role_id configurado nunca convierte a un docente en estudiante.
+            if e.get("type", "StudentEnrollment") != "StudentEnrollment":
+                continue
             usuario = e.get("user") or {}
             matriculas.append(
                 MatriculaCruda(
@@ -1222,7 +1239,7 @@ class ClienteCanvasDoble:
     _GRUPOS_PADRON = ((601, "Grupo 1", (2001, 2002)), (602, "Grupo 2", (2003, 2004)))
 
     def obtener_roster_paginado(
-        self, token: str, canvas_course_id: int
+        self, token: str, canvas_course_id: int, *, roles_extra: list[int] | None = None
     ) -> ResultadoPaginado[MatriculaCruda]:
         if token != "valido" or canvas_course_id != self._CURSOS[0].canvas_course_id:
             return ResultadoPaginado(items=[], per_page_medido=0, truncado=False)

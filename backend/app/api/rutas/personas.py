@@ -13,6 +13,8 @@ from __future__ import annotations
 import csv
 import io
 import uuid
+from datetime import timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
@@ -36,13 +38,169 @@ from app.adaptadores.modelos_padron import (
     Seccion,
 )
 from app.api.dependencias import exigir_csrf, obtener_sesion_bd, requiere
-from app.dominio.estados import EstadoEstudiante, EstadoMapeoGithub, EstadoTrabajo
+from app.dominio.estados import EstadoEstudiante, EstadoMapeoGithub, EstadoTrabajo, RolMembresia
 from app.dominio.mapeo_github import RechazoMapeo
 from app.dominio.permisos import Permiso, permisos_efectivos
 from app.infraestructura.cifrado import Llavero
 from app.infraestructura.config import Settings, obtener_configuracion
 
 router = APIRouter(tags=["personas"])
+
+
+@router.get("/api/cursos/{curso_id}/personas/fusiones-canvas")
+def listar_fusiones_canvas(
+    curso_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    _m: MembresiaCurso = Depends(requiere(Permiso.MAPEO_EDITAR, rol_minimo=RolMembresia.PROFESOR)),
+) -> dict[str, Any]:
+    from app.adaptadores import fusion_canvas_repo
+
+    return {
+        "pendientes": fusion_canvas_repo.listar(bd, curso_id),
+        "historial": fusion_canvas_repo.historial(bd, curso_id),
+    }
+
+
+class ConfirmacionFusion(BaseModel):
+    anterior_id: uuid.UUID
+    confirmar: bool
+
+
+@router.post(
+    "/api/cursos/{curso_id}/personas/fusiones-canvas/{incidencia_id}/confirmar",
+    dependencies=[Depends(exigir_csrf)],
+)
+def confirmar_fusion_canvas(
+    curso_id: uuid.UUID,
+    incidencia_id: uuid.UUID,
+    datos: ConfirmacionFusion,
+    bd: Session = Depends(obtener_sesion_bd),
+    actor: MembresiaCurso = Depends(
+        requiere(Permiso.MAPEO_EDITAR, rol_minimo=RolMembresia.PROFESOR)
+    ),
+) -> dict[str, Any]:
+    from app.adaptadores import fusion_canvas_repo
+    from app.adaptadores.correccion_repo import RechazoCorreccion
+
+    if not datos.confirmar:
+        raise HTTPException(status_code=422, detail="Confirma las identidades que se fusionarán.")
+    try:
+        estudiante = fusion_canvas_repo.confirmar(
+            bd,
+            curso_id=curso_id,
+            incidencia_id=incidencia_id,
+            anterior_id=datos.anterior_id,
+            actor=actor,
+        )
+    except RechazoCorreccion as exc:
+        raise HTTPException(status_code=exc.codigo, detail=exc.motivo) from exc
+    return {"estudiante_id": str(estudiante.id), "canvas_user_id": estudiante.canvas_user_id}
+
+
+@router.get("/api/cursos/{curso_id}/personas/{estudiante_id}/invitaciones-github")
+def invitaciones_estudiante(
+    curso_id: uuid.UUID,
+    estudiante_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    _m: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
+) -> list[dict[str, Any]]:
+    from app.adaptadores.modelos_aprovisionamiento import AccesoRepositorio, Repositorio, Sujeto
+    from app.adaptadores.modelos_tarea import Tarea
+
+    estudiante = bd.get(Estudiante, estudiante_id)
+    if not estudiante or estudiante.curso_id != curso_id:
+        raise HTTPException(status_code=404)
+    return [
+        {
+            "acceso_id": str(a.id),
+            "repositorio": r.nombre,
+            "estado": a.estado,
+            "reenvios": a.reenvios,
+            "ultimo_reenvio_en": a.ultimo_reenvio_en,
+            "proximo_reenvio_en": a.ultimo_reenvio_en + timedelta(hours=24)
+            if a.ultimo_reenvio_en
+            else None,
+            "puede_solicitar": t.estado == "ACTIVA"
+            and s.activo
+            and r.estado in ("OPERATIVO", "DEGRADADO")
+            and estudiante.estado == "ACTIVO"
+            and a.estado in ("INVITADO", "EXPIRADA", "DESAPARECIDA")
+            and a.reenvios < 3,
+        }
+        for a, r, s, t in bd.query(AccesoRepositorio, Repositorio, Sujeto, Tarea)
+        .join(Repositorio, Repositorio.id == AccesoRepositorio.repositorio_id)
+        .join(Sujeto, Sujeto.id == Repositorio.sujeto_id)
+        .join(Tarea, Tarea.id == Repositorio.tarea_id)
+        .filter(Repositorio.curso_id == curso_id, AccesoRepositorio.estudiante_id == estudiante_id)
+        .order_by(Repositorio.nombre)
+    ]
+
+
+@router.post(
+    "/api/cursos/{curso_id}/personas/{estudiante_id}/invitaciones-github/{acceso_id}/reenviar",
+    dependencies=[Depends(exigir_csrf)],
+    status_code=202,
+)
+def reenviar_invitacion_estudiante(
+    curso_id: uuid.UUID,
+    estudiante_id: uuid.UUID,
+    acceso_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    actor: MembresiaCurso = Depends(requiere(Permiso.MAPEO_EDITAR)),
+) -> dict[str, Any]:
+    from app.adaptadores.modelos_aprovisionamiento import AccesoRepositorio
+
+    filas = invitaciones_estudiante(curso_id, estudiante_id, bd, actor)
+    fila = next((f for f in filas if f["acceso_id"] == str(acceso_id)), None)
+    if fila is None:
+        raise HTTPException(status_code=404)
+    acceso = bd.query(AccesoRepositorio).filter_by(id=acceso_id).with_for_update().one()
+    if not fila["puede_solicitar"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Esta invitación ya no admite reenvíos. Revisa el acceso o el mapeo.",
+        )
+    if acceso.ultimo_reenvio_en and ahora_utc() < acceso.ultimo_reenvio_en + timedelta(hours=24):
+        segundos = max(
+            1, int((acceso.ultimo_reenvio_en + timedelta(hours=24) - ahora_utc()).total_seconds())
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Espera 24 horas entre reenvíos.",
+            headers={"Retry-After": str(segundos)},
+        )
+    trabajo = trabajos_repo.encolar(
+        bd,
+        tipo="reconciliar_accesos",
+        curso_id=curso_id,
+        clave_idempotencia=f"reenviar-estudiante:{acceso.id}",
+        max_intentos=4,
+        payload={
+            "repositorio_id": str(acceso.repositorio_id),
+            "estudiante_id": str(estudiante_id),
+            "actor_membresia_id": str(actor.id),
+        },
+    )
+    if trabajo is None:
+        from app.adaptadores.modelos_infraestructura import Trabajo
+
+        trabajo = (
+            bd.query(Trabajo)
+            .filter(
+                Trabajo.clave_idempotencia == f"reenviar-estudiante:{acceso.id}",
+                Trabajo.estado.notin_(("OK", "CANCELADO")),
+            )
+            .one()
+        )
+    registrar_bitacora(
+        bd,
+        accion="REENVIO_INVITACION_ESTUDIANTE_SOLICITADO",
+        entidad="acceso_repositorio",
+        entidad_id=str(acceso.id),
+        curso_id=curso_id,
+        actor_usuario_id=actor.usuario_id,
+    )
+    return {"trabajo_id": str(trabajo.id)}
 
 
 def _llavero(settings: Settings) -> Llavero:

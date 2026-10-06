@@ -21,6 +21,7 @@ import {
 } from "../lib/textosTarea";
 import { CierreTarea } from "./CierreTarea";
 import { LineaFechas } from "./RepositoriosTarea";
+import { CalificacionGrupal } from "../components/CalificacionGrupal";
 
 import { consultarOperacion } from "../lib/apiOperacion";
 import { useCurso, useSesion } from "../components/Layout";
@@ -151,6 +152,9 @@ export function EntregasTarea() {
       />
       <p style={ESTILO_MOTIVO}>{REGLA_DE_CORTE}</p>
       <Mensajes {...op} />
+      {tarea.modalidad === "GRUPAL" && entregaId && (
+        <CalificacionGrupal key={entregaId} entregaId={entregaId} />
+      )}
       {captura.error && (
         <ErrorCarga error={captura.error} reintentar={captura.recargar} />
       )}

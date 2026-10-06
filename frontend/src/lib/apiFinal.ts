@@ -11,6 +11,7 @@ export async function consultarFinal<T>(
   return respuesta.json() as Promise<T>;
 }
 export interface RepartoEntrada {
+  realinear?: boolean;
   criterio: string;
   reasignar: boolean;
   incluir_no_calificables: boolean;

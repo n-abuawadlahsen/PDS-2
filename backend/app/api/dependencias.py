@@ -16,11 +16,11 @@ from fastapi import Cookie, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adaptadores.base import ahora_utc
-from app.adaptadores.modelos_curso import MembresiaCurso
+from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_identidad import Sesion, SesionMembresia, Usuario
 from app.dominio.estados import EstadoMembresia, RolMembresia
 from app.dominio.permisos import Permiso, permisos_efectivos
-from app.infraestructura.cerrojos import bloquear_equipo
+from app.infraestructura.cerrojos import bloquear_ciclo_curso, bloquear_equipo
 from app.infraestructura.config import Settings, obtener_configuracion
 
 NOMBRE_COOKIE_SESION = "sesion"
@@ -122,6 +122,15 @@ def requiere(
         bd: Session = Depends(obtener_sesion_bd),
     ) -> MembresiaCurso:
         usuario, sesion = actual
+        ciclo = request.url.path in {
+            f"/api/cursos/{curso_id}/archivar",
+            f"/api/cursos/{curso_id}/desarchivar",
+        }
+        fusion = "/personas/fusiones-canvas/" in request.url.path and request.url.path.endswith(
+            "/confirmar"
+        )
+        if request.method not in {"GET", "HEAD"}:
+            bloquear_ciclo_curso(bd, curso_id, exclusivo=ciclo or fusion)
         if permiso == Permiso.EQUIPO_ADMINISTRAR and request.method not in {"GET", "HEAD"}:
             bloquear_equipo(bd)
             bd.refresh(usuario)
@@ -176,6 +185,13 @@ def requiere(
         )
         if permiso not in efectivos:
             raise HTTPException(status_code=403, detail={"codigo": "PERMISO_INSUFICIENTE"})
+
+        if request.method not in {"GET", "HEAD"}:
+            curso = bd.query(Curso).populate_existing().filter_by(id=curso_id).one()
+            if curso.estado == "ARCHIVADO" and not ciclo:
+                raise HTTPException(
+                    status_code=409, detail="El curso está archivado y sólo permite lectura."
+                )
 
         return membresia
 

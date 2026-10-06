@@ -1233,6 +1233,8 @@ def reconciliar_accesos(
     curso: Curso,
     tarea_id: uuid.UUID | None = None,
     periodico: bool = False,
+    repositorio_id: uuid.UUID | None = None,
+    estudiante_id: uuid.UUID | None = None,
 ) -> int:
     """Pendientes cada minuto, resto cada 15 min; primero los pendientes mas antiguos.
 
@@ -1259,6 +1261,8 @@ def reconciliar_accesos(
     ahora = ahora_utc()
     if tarea_id is not None:
         consulta = consulta.filter(Repositorio.tarea_id == tarea_id)
+    if repositorio_id is not None:
+        consulta = consulta.filter(Repositorio.id == repositorio_id)
     if periodico:
         consulta = consulta.filter(
             or_(
@@ -1289,7 +1293,7 @@ def reconciliar_accesos(
         assert sujeto is not None and tarea is not None
         c = _contexto(bd, curso=curso, tarea=tarea, sujeto=sujeto, token=token)
         try:
-            _reconciliar_repositorio(bd, cliente, c, repositorio)
+            _reconciliar_repositorio(bd, cliente, c, repositorio, estudiante_id=estudiante_id)
         except RechazoProveedorGithub as exc:
             fallidos += 1
             repositorio.error_mensaje_literal = (
@@ -1311,8 +1315,15 @@ def reconciliar_accesos(
 
 
 def _reconciliar_repositorio(
-    bd: Session, cliente: ClienteGitHub, c: _Contexto, repositorio: Repositorio
+    bd: Session,
+    cliente: ClienteGitHub,
+    c: _Contexto,
+    repositorio: Repositorio,
+    *,
+    estudiante_id: uuid.UUID | None = None,
 ) -> None:
+    if estudiante_id is not None and estudiante_id not in {e.id for e in c.integrantes}:
+        return
     ahora = ahora_utc()
     _proponer_revocaciones(bd, c, repositorio)
     accesos = (
@@ -1320,6 +1331,8 @@ def _reconciliar_repositorio(
     )
     invitaciones = None
     for acceso in accesos:
+        if estudiante_id is not None and acceso.estudiante_id != estudiante_id:
+            continue
         cuenta = bd.get(CuentaGithub, acceso.cuenta_github_id) if acceso.cuenta_github_id else None
         if acceso.estado == EstadoAccesoRepositorio.INVITADO.value and cuenta is not None:
             colaborador = cliente.es_colaborador(c.org, repositorio.nombre, cuenta.login, c.token)
@@ -1353,10 +1366,13 @@ def _reconciliar_repositorio(
     # SIN_MAPEO que ahora tiene mapeo vigente, POR_INVITAR y los avisos que aun
     # no salieron: el mismo camino que la creacion, con sus lecturas previas.
     for estudiante in c.integrantes:
+        if estudiante_id is not None and estudiante.id != estudiante_id:
+            continue
         _asegurar_acceso_estudiante(
             bd, cliente, c, repositorio, estudiante=estudiante, trabajo_id=None
         )
-    _asegurar_acceso_docente(bd, cliente, c, repositorio)
+    if estudiante_id is None:
+        _asegurar_acceso_docente(bd, cliente, c, repositorio)
     if repositorio.estado != EstadoRepositorio.FUERA_DE_ALCANCE.value:
         _evaluar_predicado(bd, c, repositorio)
 

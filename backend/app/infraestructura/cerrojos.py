@@ -33,6 +33,16 @@ _ESPACIO_REPOSITORIO = 3
 _ESPACIO_REPARTO = 4
 
 
+def bloquear_ciclo_curso(sesion: Session, curso_id: uuid.UUID, *, exclusivo: bool = False) -> None:
+    """El archivo espera las escrituras en curso; una escritura espera el archivo.
+
+    Espacio independiente de Canvas/GitHub, tomado antes de sus cerrojos.
+    La exclusión dura hasta COMMIT/ROLLBACK, también para el outbox global.
+    """
+    funcion = "pg_advisory_xact_lock" if exclusivo else "pg_advisory_xact_lock_shared"
+    sesion.execute(text(f"SELECT {funcion}(5, hashtext(:curso_id))"), {"curso_id": str(curso_id)})
+
+
 def bloquear_equipo(sesion: Session) -> None:
     """Serializa cambios de identidad/membresias hasta COMMIT o ROLLBACK.
 

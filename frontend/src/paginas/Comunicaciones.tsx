@@ -32,12 +32,15 @@ const EVENTO: Record<string, string> = {
   proximidad_cierre: "Cierre próximo",
   cambio_de_fecha: "Cambio de fecha",
   correccion_publicada: "Nota publicada",
+  aviso_sin_corrector: "Aviso a profesores por falta de corrector",
+  invitacion_equipo: "Invitación al equipo docente",
   MANUAL: "Mensaje manual",
 };
 const CANAL: Record<string, string> = {
   CANVAS_CONVERSACION: "Conversación de Canvas",
   CANVAS_COMENTARIO: "Comentario en la entrega",
   CANVAS_ANUNCIO: "Anuncio de Canvas",
+  CORREO: "Correo",
 };
 
 export function Comunicaciones() {
@@ -102,7 +105,7 @@ export function Comunicaciones() {
     <>
       <Cabecera
         titulo="Comunicaciones"
-        descripcion="Mensajes, anuncios y avisos del curso enviados a través de Canvas."
+        descripcion="Mensajes y anuncios de Canvas, y avisos al equipo docente por correo."
         acciones={
           <button disabled={consulta.cargando} onClick={consulta.recargar}>
             Actualizar historial
@@ -392,15 +395,16 @@ function FilaMensaje({
             )}
             {puedeEnviar && (
               <>
-                {["FALLIDO", "CADUCADO"].includes(m.estado) && (
-                  <button
-                    disabled={ocupado}
-                    onClick={() => onAccion("reintentar")}
-                  >
-                    Reintentar
-                  </button>
-                )}
-                {m.estado === "ENVIADO" && (
+                {m.canal !== "CORREO" &&
+                  ["FALLIDO", "CADUCADO"].includes(m.estado) && (
+                    <button
+                      disabled={ocupado}
+                      onClick={() => onAccion("reintentar")}
+                    >
+                      Reintentar
+                    </button>
+                  )}
+                {m.canal !== "CORREO" && m.estado === "ENVIADO" && (
                   <button
                     disabled={ocupado}
                     onClick={() =>
@@ -443,7 +447,7 @@ function FilaMensaje({
             )}
             {m.ultimo_error && (
               <Aviso tipo="warning">
-                Respuesta de Canvas: {m.ultimo_error}
+                Respuesta del proveedor: {m.ultimo_error}
               </Aviso>
             )}
           </td>

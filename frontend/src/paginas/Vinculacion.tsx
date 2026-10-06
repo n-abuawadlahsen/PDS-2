@@ -10,6 +10,7 @@ import {
   obtenerEstadoVinculacionCanvas,
   obtenerEstadoVinculacionGithub,
   vincularCanvas,
+  urlApi,
   type CursoCanvasDisponible,
 } from "../lib/api";
 import { comprobar } from "../lib/errores";
@@ -26,9 +27,13 @@ import {
 } from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import { fechaLegible } from "../lib/textosTarea";
+import { EstadoTrabajo } from "../components/EstadoTrabajo";
 function AjustesGenerales() {
   const { curso, recargar } = useCurso();
   const [nombre, setNombre] = useState(curso.nombre);
+  const [roles, setRoles] = useState(
+    (curso.roles_estudiante_extra ?? []).join(", "),
+  );
   const [zona, setZona] = useState(curso.zona_horaria);
   const [inactividad, setInactividad] = useState(
     curso.umbral_dias_sin_actividad ?? 7,
@@ -39,6 +44,7 @@ function AjustesGenerales() {
   const op = useOperacion();
   useEffect(() => {
     setNombre(curso.nombre);
+    setRoles((curso.roles_estudiante_extra ?? []).join(", "));
     setZona(curso.zona_horaria);
     setInactividad(curso.umbral_dias_sin_actividad ?? 7);
     setDesbalance(curso.umbral_desbalance_pct ?? 70);
@@ -57,6 +63,9 @@ function AjustesGenerales() {
                 zona_horaria: zona,
                 umbral_dias_sin_actividad: inactividad,
                 umbral_desbalance_pct: desbalance,
+                roles_estudiante_extra: roles.trim()
+                  ? roles.split(",").map((r) => Number(r.trim()))
+                  : [],
               }),
             }),
           );
@@ -129,6 +138,27 @@ function AjustesGenerales() {
         </label>
       </div>
       <div>
+        <label>
+          Roles Canvas adicionales de estudiante
+          <input
+            value={roles}
+            onChange={(e) => setRoles(e.target.value)}
+            pattern="[0-9 ,]*"
+            aria-invalid={Boolean(op.campos.roles_estudiante_extra)}
+          />
+          <span className="help">
+            IDs de roles derivados de StudentEnrollment, separados por comas.
+            Vacío conserva el padrón estándar. Guardar solicita una nueva
+            sincronización.
+          </span>
+          {op.campos.roles_estudiante_extra && (
+            <span className="field-error">
+              {op.campos.roles_estudiante_extra}
+            </span>
+          )}
+        </label>
+      </div>
+      <div>
         <button
           className="primary"
           disabled={op.ocupado || curso.estado === "ARCHIVADO"}
@@ -137,6 +167,154 @@ function AjustesGenerales() {
         </button>
       </div>
     </form>
+  );
+}
+
+interface VistaArchivo {
+  repositorios: number;
+  sin_capturar: number;
+  capturas_pendientes?: {
+    entrega_id: string;
+    entrega: string;
+    sujeto_id: string;
+    cierre: string | null;
+  }[];
+  repositorios_por_archivar?: number;
+  bloqueos?: { tarea_id: string; tarea: string; motivo: string }[];
+  trabajos_archivado?: string[];
+}
+function ArchivoCurso() {
+  const { curso, recargar } = useCurso();
+  const op = useOperacion();
+  const confirmar = useConfirmar();
+  const archivado = curso.estado === "ARCHIVADO";
+  const [archivarRepos, setArchivarRepos] = useState(true);
+  const [vista, setVista] = useState<VistaArchivo | null>(null);
+  const archivo = useConsulta(
+    archivado ? `archivo:${curso.id}` : "",
+    async (signal) => {
+      if (!archivado) return null;
+      const r = await apiFetch(
+        `/api/cursos/${curso.id}/archivo/previsualizar`,
+        { signal },
+      );
+      await comprobar(r);
+      return r.json() as Promise<VistaArchivo>;
+    },
+  );
+  return (
+    <section className="panel">
+      <h2>{archivado ? "Reactivar el curso" : "Archivar el curso"}</h2>
+      <p>
+        El archivo conserva tareas, repositorios, versiones y borradores. Pausa
+        los procesos y las comunicaciones del curso. Puedes archivar también los
+        repositorios en GitHub si cumplen las cinco guardas del cierre.
+      </p>
+      <Mensajes {...op} />
+      {!archivado && (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={archivarRepos}
+            onChange={(e) => setArchivarRepos(e.target.checked)}
+          />
+          Archivar también los repositorios en GitHub
+        </label>
+      )}
+      {vista?.bloqueos?.map((b) => (
+        <Aviso tipo="warning" key={b.tarea_id}>
+          {b.tarea}: {b.motivo}{" "}
+          <Link to={`/cursos/${curso.id}/tareas/${b.tarea_id}/entregas`}>
+            Revisar cierre
+          </Link>
+        </Aviso>
+      ))}
+      {vista?.capturas_pendientes && vista.capturas_pendientes.length > 0 && (
+        <details>
+          <summary>
+            Cierres sin versión capturada ({vista.sin_capturar})
+          </summary>
+          <ul>
+            {vista.capturas_pendientes.map((c) => (
+              <li key={`${c.entrega_id}:${c.sujeto_id}`}>
+                {c.entrega} · sujeto {c.sujeto_id} ·{" "}
+                {fechaLegible(c.cierre, curso.zona_horaria)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {archivado && archivo.error && (
+        <ErrorCarga error={archivo.error} reintentar={archivo.recargar} />
+      )}
+      {archivado &&
+        archivo.datos?.trabajos_archivado?.map((id) => (
+          <EstadoTrabajo
+            key={id}
+            ruta={`/api/cursos/${curso.id}/trabajos/${id}`}
+            zona={curso.zona_horaria}
+          />
+        ))}
+      <div className="actions">
+        <a
+          className="button"
+          href={urlApi(`/api/cursos/${curso.id}/archivo/inventario.csv`)}
+        >
+          Descargar inventario CSV
+        </a>
+        <button
+          disabled={op.ocupado}
+          onClick={() => {
+            void op.ejecutar(async () => {
+              let descripcion =
+                "Se restaurarán el estado, el modo de escritura y los procesos que estaban activos antes del archivo. Los archivos de repositorios pendientes se cancelarán; los ya archivados se reactivan desde el cierre de su tarea.";
+              if (!archivado) {
+                const r = await apiFetch(
+                  `/api/cursos/${curso.id}/archivo/previsualizar`,
+                );
+                await comprobar(r);
+                const vista = (await r.json()) as VistaArchivo;
+                setVista(vista);
+                if (archivarRepos && vista.bloqueos?.length)
+                  throw new Error(
+                    "Revisa los bloqueos del cierre o desmarca el archivo de repositorios para pausar solamente el curso.",
+                  );
+                const capturas = (vista.capturas_pendientes ?? [])
+                  .map((c) => `${c.entrega} (sujeto ${c.sujeto_id})`)
+                  .join("; ");
+                descripcion = `${vista.repositorios} repositorios conservados; ${vista.sin_capturar} cierres todavía sin versión capturada.${capturas ? ` Pendientes: ${capturas}.` : ""} ${archivarRepos ? `Se solicitará el archivo de ${vista.repositorios_por_archivar ?? vista.repositorios} repositorios en GitHub, con las cinco guardas.` : "Los repositorios mantendrán su estado en GitHub."} Los procesos se detendrán y el curso quedará sólo en lectura. Desinstalar la GitHub App desde GitHub revoca todos sus accesos.`;
+              }
+              if (
+                !(await confirmar({
+                  titulo: archivado ? "Reactivar curso" : "Archivar curso",
+                  descripcion,
+                  accion: archivado ? "Reactivar" : "Archivar",
+                  escribir: archivado ? undefined : curso.slug,
+                  peligro: !archivado,
+                }))
+              )
+                return;
+              await comprobar(
+                await apiFetch(
+                  `/api/cursos/${curso.id}/${archivado ? "desarchivar" : "archivar"}`,
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      confirmar: true,
+                      slug: curso.slug,
+                      archivar_repositorios: !archivado && archivarRepos,
+                    }),
+                  },
+                ),
+              );
+              recargar();
+            });
+          }}
+        >
+          {archivado ? "Reactivar curso" : "Revisar archivado"}
+        </button>
+      </div>
+    </section>
   );
 }
 export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
@@ -165,6 +343,16 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
         : Promise.resolve([]),
   );
   const elegida = instancia || instancias.datos?.[0]?.base_url || "";
+  if (curso.estado === "ARCHIVADO")
+    return (
+      <>
+        <Cabecera titulo="Curso archivado" />
+        <Aviso>
+          La configuración está en lectura mientras el curso está archivado.
+        </Aviso>
+        {administra && <ArchivoCurso />}
+      </>
+    );
   return (
     <>
       <Cabecera
@@ -222,9 +410,10 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
               </Link>
             </Aviso>
           )}
-          <AjustesGenerales />
+          {administra && <AjustesGenerales />}
         </section>
       )}
+      {ajustes && administra && <ArchivoCurso />}
       {!administra && (
         <Aviso>
           Solo un profesor puede modificar las conexiones. Puedes consultar sus

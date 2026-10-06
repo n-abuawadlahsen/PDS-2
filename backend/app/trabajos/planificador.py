@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adaptadores.base import ahora_utc
+from app.adaptadores.modelos_curso import Curso
 from app.adaptadores.modelos_infraestructura import Trabajo, TrabajoPeriodico
 from app.adaptadores.trabajos_repo import encolar
 from app.infraestructura.cerrojos import cerrojo_global
@@ -41,6 +42,10 @@ def tick(sesion: Session) -> int:
 
         encolados = 0
         for periodico in vencidos:
+            if periodico.curso_id is not None:
+                curso = sesion.get(Curso, periodico.curso_id)
+                if curso and curso.estado == "ARCHIVADO":
+                    continue
             # Nota de lectura S14.7.4 #3: un trabajo cuya bandera de alcance no
             # esta retirada no se encola. Aqui la version simplificada de
             # Etapa 0 es: solo se encola si hay un manejador implementado.

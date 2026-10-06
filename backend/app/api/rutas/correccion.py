@@ -121,8 +121,8 @@ def bandeja(
         },
         "nuevas": nuevas,
         "sin_corrector": sin_corrector,
-        "puede_repartir": Permiso.CORRECCION_ASIGNAR in permisos,
-        "puede_publicar": Permiso.NOTA_PUBLICAR in permisos,
+        "puede_repartir": curso.estado != "ARCHIVADO" and Permiso.CORRECCION_ASIGNAR in permisos,
+        "puede_publicar": curso.estado != "ARCHIVADO" and Permiso.NOTA_PUBLICAR in permisos,
         "es_profesor": membresia.rol == "PROFESOR",
         "tareas": [
             {
@@ -531,12 +531,48 @@ def cerrar_reclamo(
 # --- Reparto (S12.5) ---
 
 
+@router.post(
+    "/api/cursos/{curso_id}/correccion/avisar-profesores",
+    dependencies=[Depends(exigir_csrf)],
+    status_code=202,
+)
+def avisar_profesores(
+    curso_id: uuid.UUID,
+    bd: Session = Depends(obtener_sesion_bd),
+    actor: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
+) -> dict[str, Any]:
+    from app.adaptadores import aviso_correctores_repo
+
+    try:
+        cantidad = aviso_correctores_repo.encolar(
+            bd, _curso(bd, curso_id), actor, ahora=ahora_utc()
+        )
+    except correccion_repo.RechazoCorreccion as exc:
+        raise _rechazo(exc) from exc
+    return {"encolados": cantidad}
+
+
+@router.get("/api/cursos/{curso_id}/entregas/{entrega_id}/calificacion-individual")
+def previsualizar_calificacion_individual(
+    curso_id: uuid.UUID,
+    entrega_id: uuid.UUID,
+    response: Response,
+    bd: Session = Depends(obtener_sesion_bd),
+    _m: MembresiaCurso = Depends(requiere(Permiso.CURSO_VER)),
+) -> dict[str, Any]:
+    from app.adaptadores import calificacion_grupal_repo
+
+    response.headers["X-Llamadas-Externas"] = "0"
+    return calificacion_grupal_repo.previsualizar(bd, _entrega(bd, curso_id, entrega_id))
+
+
 class RepartoEntrada(BaseModel):
     criterio: CriterioAsignacion
     reasignar: bool = False
     incluir_no_calificables: bool = False
     manual: dict[uuid.UUID, uuid.UUID | None] = {}
     por_seccion: dict[uuid.UUID, uuid.UUID] = {}
+    realinear: bool = False
 
 
 def _propuesta_salida(
@@ -644,6 +680,10 @@ def previsualizar_reparto(
         manual=datos.manual,
         por_seccion=datos.por_seccion,
     )
+    if datos.realinear:
+        from app.adaptadores import realineacion_repo
+
+        propuesta = realineacion_repo.previsualizar(bd, entrega)
     return _propuesta_salida(bd, propuesta, curso_id)
 
 
@@ -668,6 +708,7 @@ def aplicar_reparto(
         incluir_no_calificables=datos.incluir_no_calificables,
         manual=datos.manual,
         por_seccion=datos.por_seccion,
+        realinear=datos.realinear,
     )
     return {"cambios": cambios}
 

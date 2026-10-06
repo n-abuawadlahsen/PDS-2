@@ -34,3 +34,6 @@ def ejecutar(sesion: Session, trabajo: Trabajo) -> None:
         ):
             if correccion_repo.hay_filas(sesion, entrega.id):
                 correccion_repo.asegurar_filas(sesion, entrega)
+                from app.adaptadores import realineacion_repo
+
+                realineacion_repo.revisar(sesion, entrega)

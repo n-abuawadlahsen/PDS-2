@@ -43,6 +43,7 @@ def encolar(
         curso_id=i.curso_id,
         canal="CORREO",
         evento=EVENTO,
+        reserva="MARGEN",
         clave_idempotencia=f"invitacion:{i.id}",
         generacion=1,
         referencia={
@@ -132,7 +133,14 @@ def despachar(bd: Session, m: MensajeSaliente, *, ahora: datetime) -> None:
     )
     if m.referencia.get("cuota_fecha") != fecha and (
         reservados.count() >= 100
-        or reservados.filter(MensajeSaliente.evento == EVENTO).count() >= 10
+        or reservados.filter(
+            or_(
+                MensajeSaliente.evento == EVENTO,
+                MensajeSaliente.reserva == "MARGEN",
+                MensajeSaliente.referencia["reserva"].astext == "MARGEN",
+            )
+        ).count()
+        >= 10
     ):
         m.estado = "DIFERIDO"
         m.motivo_estado = "CUOTA_AGOTADA"

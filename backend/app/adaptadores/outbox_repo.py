@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.orm import Session
 
 from app.adaptadores import canvas_repo, invitaciones_correo
@@ -253,19 +253,48 @@ def despachar_pendientes(
     antes de cada intento, no al encolar (S11.2.3). Dentro de la pasada sale
     primero lo de mayor prioridad (S11.6.5)."""
     from app.dominio.comunicaciones import orden_de_prioridad
+    from app.infraestructura.cerrojos import bloquear_ciclo_curso
 
     ahora = ahora or ahora_utc()
+    # Fijar el lote y tomar todos sus cursos antes de cuotas/proveedores evita
+    # invertir el orden de cerrojos al despachar mensajes de varios cursos.
+    candidatos = (
+        bd.query(MensajeSaliente.id, MensajeSaliente.curso_id)
+        .filter(
+            MensajeSaliente.estado.in_(_ESTADOS_A_TOMAR),
+            (MensajeSaliente.programado_para.is_(None))
+            | (MensajeSaliente.programado_para <= ahora),
+        )
+        .order_by(MensajeSaliente.creado_en)
+        .limit(limite)
+        .all()
+    )
+    retractaciones = (
+        bd.query(MensajeSaliente.curso_id)
+        .filter(
+            MensajeSaliente.retraccion_solicitada.is_(True),
+            MensajeSaliente.estado == EstadoMensaje.ENVIADO.value,
+            MensajeSaliente.canal == CanalMensaje.CANVAS_ANUNCIO.value,
+        )
+        .limit(20)
+        .all()
+    )
+    cursos = {cid for _, cid in candidatos} | {cid for (cid,) in retractaciones}
+    for cid in sorted(cursos):
+        bloquear_ciclo_curso(bd, cid)
     mensajes = (
         bd.execute(
             select(MensajeSaliente)
             .where(
                 MensajeSaliente.estado.in_(_ESTADOS_A_TOMAR),
+                MensajeSaliente.id.in_([mid for mid, _ in candidatos]),
                 (MensajeSaliente.programado_para.is_(None))
                 | (MensajeSaliente.programado_para <= ahora),
             )
             .order_by(MensajeSaliente.creado_en)
             .limit(limite)
             .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
         )
         .scalars()
         .all()
@@ -274,7 +303,7 @@ def despachar_pendientes(
     for mensaje in sorted(mensajes, key=lambda m: (orden_de_prioridad(m.evento), m.creado_en)):
         _despachar_uno(bd, mensaje, tomado_por=tomado_por, ahora=ahora)
         despachados += 1
-    _retractar_pendientes(bd, ahora=ahora)
+    _retractar_pendientes(bd, ahora=ahora, cursos=cursos)
     return despachados
 
 
@@ -318,14 +347,27 @@ def _despachar_uno(
         exento_de_franja,
         siguiente_apertura,
     )
+    from app.infraestructura.cerrojos import bloquear_ciclo_curso
 
+    bloquear_ciclo_curso(bd, mensaje.curso_id)
+    curso = bd.query(Curso).populate_existing().filter_by(id=mensaje.curso_id).one()
+    if curso.estado == "ARCHIVADO":
+        mensaje.estado = EstadoMensaje.DIFERIDO.value
+        mensaje.motivo_estado = "CURSO_ARCHIVADO"
+        mensaje.programado_para = ahora + _ESPERA_DIFERIDO
+        bd.flush()
+        return
     if mensaje.canal == CanalMensaje.CORREO.value and mensaje.evento != "INFORME_DIARIO":
+        if mensaje.evento == "aviso_sin_corrector":
+            from app.adaptadores import aviso_correctores_repo
+
+            aviso_correctores_repo.despachar(bd, mensaje, ahora=ahora)
+            bd.flush()
+            return
         # Invitaciones al equipo docente (entrega parcial): su propio despacho.
         invitaciones_correo.despachar(bd, mensaje, ahora=ahora)
         bd.flush()
         return
-    curso = bd.get(Curso, mensaje.curso_id)
-    assert curso is not None
     if mensaje.canal == CanalMensaje.CORREO.value:
         _despachar_correo(bd, mensaje, curso, tomado_por=tomado_por, ahora=ahora)
         return
@@ -535,7 +577,9 @@ def _despachar_anuncio(
     bd.flush()
 
 
-def _retractar_pendientes(bd: Session, *, ahora: datetime) -> None:
+def _retractar_pendientes(
+    bd: Session, *, ahora: datetime, cursos: set[uuid.UUID] | None = None
+) -> None:
     """S11.8.8: solo los anuncios se retractan (DELETE), a pedido docente."""
     for mensaje in (
         bd.query(MensajeSaliente)
@@ -543,10 +587,16 @@ def _retractar_pendientes(bd: Session, *, ahora: datetime) -> None:
             MensajeSaliente.retraccion_solicitada.is_(True),
             MensajeSaliente.estado == EstadoMensaje.ENVIADO.value,
             MensajeSaliente.canal == CanalMensaje.CANVAS_ANUNCIO.value,
+            MensajeSaliente.curso_id.in_(cursos) if cursos is not None else true(),
         )
         .limit(20)
     ):
-        curso = bd.get(Curso, mensaje.curso_id)
+        from app.infraestructura.cerrojos import bloquear_ciclo_curso
+
+        bloquear_ciclo_curso(bd, mensaje.curso_id)
+        curso = bd.query(Curso).populate_existing().filter_by(id=mensaje.curso_id).one_or_none()
+        if curso and curso.estado == "ARCHIVADO":
+            continue
         topic = (mensaje.canvas_id_resultante or {}).get("discussion_topic_id")
         credencial = canvas_repo.obtener_credencial_operativa(bd, mensaje.curso_id)
         if curso is None or topic is None or credencial is None or curso.canvas_course_id is None:

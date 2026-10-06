@@ -87,6 +87,7 @@ export async function obtenerCapacidades(
 // --- Etapa P2: curso, equipo, invitaciones (SPEC 02 S2.4, S2.5) ---
 
 export interface Curso {
+  roles_estudiante_extra?: number[];
   umbral_dias_sin_actividad?: number;
   umbral_desbalance_pct?: number;
   canvas_base_url?: string | null;

@@ -29,6 +29,7 @@ from app.adaptadores.modelos_aprovisionamiento import (
     MensajeSaliente,
     Repositorio,
 )
+from app.adaptadores.modelos_correccion import Correccion
 from app.adaptadores.modelos_curso import Curso
 from app.adaptadores.modelos_github import AccesoDocenteRepositorio
 from app.adaptadores.modelos_infraestructura import Bitacora, Trabajo
@@ -41,6 +42,7 @@ from app.dominio.archivado import (
     ResultadoArchivado,
     puede_archivar,
 )
+from app.dominio.correccion import TERMINALES as CORRECCIONES_TERMINALES
 from app.dominio.estados import (
     CanalComunicacionActivo,
     EstadoAccesoRepositorio,
@@ -197,7 +199,16 @@ def evaluar(
     return puede_archivar(
         repositorios=[_hechos_de_repositorio(bd, r, entregas) for r in repos],
         aviso=aviso_previo(bd, curso, tarea, repos),
-        correcciones_abiertas=None,  # el modulo de correcciones aun no existe
+        correcciones_abiertas=bd.query(Correccion.id)
+        .join(Entrega, Entrega.id == Correccion.entrega_id)
+        .filter(
+            Entrega.tarea_id == tarea.id,
+            Entrega.estado_validacion != "EXCLUIDA",
+            Correccion.estado.notin_(CORRECCIONES_TERMINALES),
+            Correccion.motivo_no_publicable.is_distinct_from("NO_GRADEABLE"),
+            Correccion.motivo_no_publicable.is_distinct_from("SUJETO_EXCLUIDO"),
+        )
+        .count(),
         ahora=ahora,
         confirmacion_sin_captura=confirmacion_sin_captura,
         confirmacion_sin_aviso=confirmacion_sin_aviso,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from uuid import UUID as UuidValor
 
 from sqlalchemy import (
     BigInteger,
@@ -93,6 +94,9 @@ class Estudiante(Base, ConId):
     primera_vista_en: Mapped[datetime] = mapped_column(_TZ, nullable=False)
     ultima_vista_en: Mapped[datetime] = mapped_column(_TZ, nullable=False)
     retirado_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
+    fusionada_en_id: Mapped[UuidValor | None] = mapped_column(
+        _UUID, ForeignKey("estudiante.id", ondelete="RESTRICT"), nullable=True
+    )
     # Columna de Etapa P6 (recordatorio manual de Pendientes, "tope 1/dia").
     ultimo_recordatorio_en: Mapped[datetime | None] = mapped_column(_TZ, nullable=True)
 
