@@ -1,7 +1,12 @@
-"""Correo transaccional por HTTPS; fuera de produccion nunca envia a terceros."""
+"""Correo transaccional por HTTPS (Resend) o SMTP; fuera de produccion nunca
+envia a terceros."""
 
+import smtplib
+import ssl
 from collections import deque
 from dataclasses import dataclass, field
+from email.message import EmailMessage
+from email.utils import formataddr, make_msgid
 from typing import Protocol
 
 import httpx
@@ -127,6 +132,65 @@ class CorreoResend:
         return ResultadoCorreo(id=identificador)
 
 
+class CorreoSmtp:
+    """SMTP con STARTTLS, para enviar sin dominio propio (p. ej. una cuenta de
+    Gmail con contrasena de aplicacion). SMTP no tiene clave de idempotencia:
+    el outbox ya evita reenviar un mensaje confirmado."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    def enviar(
+        self,
+        *,
+        destinatario: str,
+        asunto: str,
+        html: str,
+        texto: str,
+        clave_idempotencia: str,
+        reserva: str,
+        cabeceras: dict[str, str] | None = None,
+    ) -> ResultadoCorreo:
+        s = self.settings
+        mensaje = EmailMessage()
+        mensaje["Subject"] = asunto
+        mensaje["From"] = formataddr((s.email_from_nombre, s.email_from))
+        mensaje["To"] = destinatario
+        mensaje["Reply-To"] = s.email_reply_to
+        mensaje["Message-ID"] = make_msgid(domain=s.email_from.partition("@")[2] or None)
+        for nombre, valor in (cabeceras or {}).items():
+            mensaje[nombre] = valor
+        mensaje.set_content(texto)
+        mensaje.add_alternative(html, subtype="html")
+        try:
+            with smtplib.SMTP(s.smtp_host, s.smtp_puerto, timeout=20) as conexion:
+                conexion.starttls(context=ssl.create_default_context())
+                conexion.login(s.smtp_usuario or "", s.smtp_contrasena or "")
+                conexion.send_message(mensaje)
+        # La respuesta del servidor puede repetir el usuario: nunca se propaga.
+        except smtplib.SMTPAuthenticationError as exc:
+            raise FalloCorreo(
+                "El servidor de correo rechazó el usuario o la contraseña.",
+                reintentable=False,
+                status=exc.smtp_code,
+            ) from None
+        except smtplib.SMTPRecipientsRefused:
+            raise FalloCorreo(
+                "El servidor de correo rechazó al destinatario.", reintentable=False
+            ) from None
+        except smtplib.SMTPResponseException as exc:
+            raise FalloCorreo(
+                f"El servidor de correo respondió {exc.smtp_code}.",
+                reintentable=400 <= exc.smtp_code < 500,
+                status=exc.smtp_code,
+            ) from None
+        except (smtplib.SMTPException, OSError):
+            raise FalloCorreo(
+                "No se pudo contactar con el servidor de correo.", reintentable=True
+            ) from None
+        return ResultadoCorreo(id=str(mensaje["Message-ID"]))
+
+
 def motivo_bloqueo(settings: Settings, destinatario: str) -> str | None:
     if settings.comunicaciones_salientes != "activadas":
         return "COMUNICACIONES_PAUSADAS"
@@ -136,12 +200,18 @@ def motivo_bloqueo(settings: Settings, destinatario: str) -> str | None:
     if permitidos and destinatario.lower() not in permitidos:
         return "DESTINATARIO_NO_PERMITIDO"
     if settings.entorno == "produccion":
-        if settings.email_proveedor != "resend":
+        if settings.email_proveedor == "resend":
+            credenciales = bool(settings.email_provider_api_key.strip())
+        elif settings.email_proveedor == "smtp":
+            credenciales = bool(
+                (settings.smtp_usuario or "").strip() and (settings.smtp_contrasena or "").strip()
+            )
+        else:
             return "CORREO_SIN_CONFIGURAR"
         dominio = settings.email_from.partition("@")[2].lower()
         verificado = settings.email_dominio_verificado.strip().lower()
         if (
-            not settings.email_provider_api_key.strip()
+            not credenciales
             or not dominio
             or not verificado
             or not (dominio == verificado or dominio.endswith("." + verificado))
@@ -152,4 +222,6 @@ def motivo_bloqueo(settings: Settings, destinatario: str) -> str | None:
 
 
 def crear_proveedor_correo(settings: Settings) -> ProveedorCorreo:
-    return CorreoResend(settings) if settings.entorno == "produccion" else CorreoConsola()
+    if settings.entorno != "produccion":
+        return CorreoConsola()
+    return CorreoSmtp(settings) if settings.email_proveedor == "smtp" else CorreoResend(settings)

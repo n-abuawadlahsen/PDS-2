@@ -55,9 +55,14 @@ class Settings(BaseSettings):
     email_from_nombre: str = Field(alias="EMAIL_FROM_NOMBRE")
     email_reply_to: str = Field(alias="EMAIL_REPLY_TO")
     email_dominio_verificado: str = Field(alias="EMAIL_DOMINIO_VERIFICADO")
-    email_proveedor: Literal["sin_configurar", "resend"] = Field(
+    email_proveedor: Literal["sin_configurar", "resend", "smtp"] = Field(
         default="sin_configurar", alias="EMAIL_PROVEEDOR"
     )
+    # Alternativa sin dominio propio: SMTP con STARTTLS (por defecto Gmail con
+    # una contrasena de aplicacion). Solo se usa con EMAIL_PROVEEDOR=smtp.
+    smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")
+    smtp_puerto: int = Field(default=587, alias="SMTP_PUERTO")
+    smtp_usuario: str | None = Field(default=None, alias="SMTP_USUARIO")
     vite_api_base_url: str = Field(alias="VITE_API_BASE_URL")
     # Mecanismo propio para que la cookie csrf_token (no HttpOnly) sea legible
     # por JS en app.<dominio> aunque la emita api.<dominio> (S2.2.6): en
@@ -87,6 +92,7 @@ class Settings(BaseSettings):
         default=None, alias="GITHUB_WEBHOOK_SECRET_ANTERIOR"
     )
     email_provider_api_key: str = Field(alias="EMAIL_PROVIDER_API_KEY")
+    smtp_contrasena: str | None = Field(default=None, alias="SMTP_CONTRASENA")
     signing_key: str = Field(alias="SIGNING_KEY")
     signing_key_anterior: str | None = Field(default=None, alias="SIGNING_KEY_ANTERIOR")
     github_ensayo_app_id: str | None = Field(default=None, alias="GITHUB_ENSAYO_APP_ID")
