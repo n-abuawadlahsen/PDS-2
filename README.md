@@ -6,6 +6,8 @@ App web que coordina Canvas y GitHub para el equipo docente de un curso de progr
 
 El frontend implementa los recorridos docentes de **P1–P8 y F1–F12** sobre los contratos disponibles, con diseño inspirado en Canvas, navegación adaptable y permisos por curso. La [guía de implementación](docs/frontend/IMPLEMENTACION.md) contiene los comandos de revisión, evidencias y límites concretos; la [matriz](docs/frontend/REQUISITOS.md) vincula los 59 requisitos con pantallas y contratos.
 
+Para revisar la entrega, seguir la [guía de pruebas manuales](docs/frontend/PRUEBAS-MANUALES.md). El [guion del video](docs/frontend/GUION-VIDEO.md) organiza una demostración sin narración de 2:50 finales.
+
 Historial de la entrega parcial del backend:
 
 Backend de la entrega parcial (`PERFIL_ALCANCE=parcial`) implementado, de la **Etapa 0** a la **Etapa P8**:
@@ -40,9 +42,9 @@ docker compose -f infra/docker-compose.local.yml up -d
 
 ```bash
 cd backend
-pip install uv
-uv sync --dev
-cp .env.example .env   # completar con valores locales (ver más abajo)
+# Instalar uv una vez: en macOS con Homebrew, brew install uv.
+uv sync --frozen --dev
+cp -n .env.example .env   # crear sólo si no existe; completar los valores locales
 uv run alembic upgrade head          # lee DATABASE_URL del entorno o del .env
 uv run uvicorn app.main:app --reload --port 8000
 uv run python -m app.trabajos.ejecutor   # en otra terminal: sin él no corre ningún trabajo

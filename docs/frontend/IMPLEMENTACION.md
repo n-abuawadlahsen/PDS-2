@@ -28,6 +28,8 @@ La [revisión de limitaciones de octubre](LIMITACIONES.md) registra las correcci
 
 La [matriz de trazabilidad](REQUISITOS.md) contiene los **59 requisitos únicos del enunciado**, con pantalla, acción, contrato y límite cuando corresponde. “Conectado” significa que utiliza el contrato disponible; no certifica procesos externos que el frontend no ejecuta.
 
+La [guía de pruebas manuales](PRUEBAS-MANUALES.md) propone 48 casos con pasos, resultados esperados y registro de evidencia. El [guion del video](GUION-VIDEO.md) organiza la demostración sin narración en 2:50 finales. Son planes de revisión y grabación; no se presentan como pruebas manuales ya ejecutadas.
+
 ## Diseño y herramientas preparadas
 
 - Node **22.22.1** instalado y fijado en `.node-version`; `.nvmrc` conserva la línea 22.x. Dependencias y lockfile actualizados mediante npm.
