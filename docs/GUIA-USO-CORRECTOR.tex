@@ -1,0 +1,566 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------- Codificación y tipografía ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[spanish,es-noshorthands]{babel}
+\usepackage{microtype}
+
+% ---------- Página ----------
+\usepackage[margin=2.3cm,headheight=14pt]{geometry}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{xcolor}
+\usepackage{graphicx}
+
+% ---------- Tablas y listas ----------
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{framed}
+
+% ---------- Enlaces ----------
+\usepackage[colorlinks=true,linkcolor=azul,urlcolor=azul,citecolor=azul]{hyperref}
+
+\definecolor{azul}{HTML}{1F4E79}
+\definecolor{grisclaro}{HTML}{F2F2F2}
+\definecolor{ambar}{HTML}{8A5A00}
+\definecolor{ambarfondo}{HTML}{FFF4D6}
+\definecolor{verde}{HTML}{1E6B3A}
+\definecolor{verdefondo}{HTML}{E6F4EA}
+
+\setlist[itemize]{leftmargin=*,itemsep=2pt,topsep=3pt}
+\setlist[enumerate]{leftmargin=*,itemsep=3pt,topsep=3pt}
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+% ---------- Cajas ----------
+\newenvironment{nota}
+  {\def\FrameCommand{\fcolorbox{ambar}{ambarfondo}}\MakeFramed{\advance\hsize-\width\FrameRestore}\noindent\textbf{\textcolor{ambar}{Nota.}} }
+  {\endMakeFramed}
+\newenvironment{comprobar}
+  {\def\FrameCommand{\fcolorbox{verde}{verdefondo}}\MakeFramed{\advance\hsize-\width\FrameRestore}\noindent\textbf{\textcolor{verde}{Qué comprobar.}} }
+  {\endMakeFramed}
+
+\newcommand{\ui}[1]{\textbf{«#1»}}        % etiqueta de botón / pestaña
+\newcommand{\ruta}[1]{\texttt{#1}}        % ruta o URL
+
+% ---------- Encabezado ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Proyecto 2 · ICC4201 · Guía de uso para la corrección}
+\fancyhead[R]{\small Página \thepage\ de \pageref{LastPage}}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{\vspace{-1cm}\textbf{Guía de uso paso a paso}\\[4pt]
+\large Aplicación web de coordinación Canvas + GitHub para el equipo docente\\[2pt]
+\normalsize Proyecto 2 · Proceso de Desarrollo de Software (ICC4201)}
+\author{Documento para la persona que corrige la entrega final}
+\date{6 de octubre de 2026}
+
+\begin{document}
+\maketitle
+\thispagestyle{fancy}
+
+\begin{nota}
+Esta guía está pensada para recorrer la aplicación en el orden en que un profesor la usaría de verdad: desde entrar por primera vez hasta publicar una nota en Canvas. Cada sección indica dónde hacer clic, qué debería verse y qué conviene verificar. La sección~\ref{sec:rapido} resume un recorrido de unos 30~minutos para quien tenga poco tiempo.
+\end{nota}
+
+\tableofcontents
+\newpage
+
+% =====================================================================
+\section{Qué es la aplicación y qué resuelve}
+% =====================================================================
+
+La aplicación es un espacio web para el \emph{equipo docente} de un curso de programación. Toma como fuente de verdad a Canvas (estudiantes, secciones, grupos, tareas, fechas y rúbricas) y a GitHub (repositorios y actividad), y coordina lo que normalmente se hace a mano:
+
+\begin{itemize}
+  \item crear un curso local y vincularlo a un curso de Canvas y a una organización de GitHub;
+  \item sincronizar el padrón y resolver qué cuenta de GitHub tiene cada estudiante;
+  \item crear automáticamente un repositorio por estudiante o por grupo para cada tarea, con un repositorio base opcional;
+  \item congelar la versión entregada (el commit exacto) al cierre de cada entrega, respetando fechas por sección y extensiones individuales;
+  \item mostrar la actividad de los repositorios para detectar grupos inactivos o desbalanceados;
+  \item repartir las correcciones entre profesores y ayudantes, calificar con la rúbrica de Canvas y publicar la nota en Canvas con verificación;
+  \item generar un informe diario y enviar mensajes o anuncios dirigidos.
+\end{itemize}
+
+\textbf{Los estudiantes no usan esta aplicación.} Solo trabajan en Canvas y GitHub. Toda la interacción de la guía se hace con cuentas docentes.
+
+\subsection{Roles y permisos}
+
+\noindent\begin{tabularx}{\textwidth}{L{3.2cm} X}
+\toprule
+\textbf{Rol} & \textbf{Qué puede hacer} \\
+\midrule
+Profesor & Todo: administrar el curso y el equipo, vincular Canvas/GitHub, administrar tareas, editar mapeos, enviar comunicaciones, asignar y hacer correcciones, publicar notas. Son nueve permisos, iguales para todos los profesores del curso. \\
+Ayudante & Siempre tiene \texttt{curso.ver} y \texttt{correccion.corregir}. Un profesor puede concederle por separado: administrar tareas, editar mapeos, enviar comunicaciones, asignar correcciones y publicar notas. Nunca administra el curso ni el equipo. \\
+\bottomrule
+\end{tabularx}
+
+\vspace{4pt}
+Los permisos se aplican en el servidor. Si se revoca un permiso, la siguiente acción de la pestaña abierta falla aunque el botón siga visible, y la pantalla muestra «Actualizando tus permisos…» y se reacomoda.
+
+% =====================================================================
+\section{Antes de empezar}
+% =====================================================================
+
+\subsection{Dirección de la aplicación}
+
+La instancia desplegada para la evaluación es:
+
+\begin{center}
+\large\url{https://pds-2-alpha.vercel.app}
+\end{center}
+
+El frontend está en Vercel, la API y el trabajador de fondo en Render, y la base de datos en Supabase. Si el servicio de Render estuvo dormido, la primera carga puede tardar hasta un minuto. Basta esperar o recargar.
+
+Para levantar la aplicación en local, el procedimiento completo está en el \texttt{README.md} del repositorio (Docker para PostgreSQL, \texttt{uv} para el backend, \texttt{npm} para el frontend).
+
+\subsection{Cuentas necesarias}
+
+\begin{enumerate}
+  \item \textbf{Una cuenta de Google} admitida: \texttt{@miuandes.cl} o una cuenta personal \texttt{@gmail.com}. Se usa para entrar. Otros dominios reciben una explicación y no crean sesión.
+  \item \textbf{Un token de acceso de Canvas} de la instancia de prueba de la universidad, generado en Canvas desde \emph{Cuenta}, \emph{Configuración}, \emph{Nuevo token de acceso}. La instancia es \texttt{uandes.test.instructure.com}. Debe pertenecer a un profesor del curso de Canvas que se va a vincular.
+  \item \textbf{Permisos de administración en una organización de GitHub} donde se pueda instalar una GitHub App. La app no pide OAuth de GitHub a estudiantes: usa una instalación de GitHub App sobre la organización.
+  \item Opcionalmente, una \textbf{segunda cuenta de Google} para probar la incorporación de un ayudante y los permisos.
+\end{enumerate}
+
+\begin{nota}
+Un curso de Canvas solo puede estar vinculado a un curso local a la vez, y una identidad de Canvas (el titular del token) solo puede estar ligada a una cuenta de la aplicación. Si aparece «identidad ya vinculada a otro usuario», no es un fallo: es la regla de diseño.
+\end{nota}
+
+\subsection{Cómo se organiza la pantalla}
+
+Tras entrar, la aplicación tiene tres zonas fijas:
+
+\begin{itemize}
+  \item \textbf{Barra global} (izquierda, estrecha): \ui{Cursos}, \ui{Cuenta} y \ui{Cerrar sesión}.
+  \item \textbf{Cabecera}: migas de pan (Cursos › código del curso › sección) y el nombre de quien entró, que lleva al perfil.
+  \item \textbf{Menú del curso} (solo dentro de un curso): Inicio del curso, Configuración, Personas, Pendientes, Tareas, Seguimiento, Corrección, Comunicaciones, Informe diario, Mis notificaciones, Equipo docente y Ajustes. \emph{Configuración} y \emph{Ajustes} solo aparecen a profesores. También muestra la zona horaria con la que se presentan todas las fechas del curso.
+\end{itemize}
+
+En pantallas angostas el menú del curso se pliega en un botón de navegación arriba a la izquierda.
+
+Muchas acciones (sincronizar, crear repositorios, ejecutar el checklist, publicar) se \textbf{encolan como trabajos} que ejecuta un proceso de fondo. La interfaz muestra el estado del trabajo (en cola, ejecutando, intentos, próximo reintento) y lo sondea sola hasta terminar en \texttt{OK}, \texttt{CANCELADO} o \texttt{REQUIERE\_ATENCION}. Recargar la página no pierde el trabajo: su identificador va en la URL y se retoma.
+
+% =====================================================================
+\section{Paso 1 · Entrar y crear el curso}
+% =====================================================================
+
+\subsection{Acceso}
+
+\begin{enumerate}
+  \item Abrir \url{https://pds-2-alpha.vercel.app}. Redirige a \ruta{/acceso}, con el título «Tus cursos, conectados».
+  \item Pulsar \ui{Entrar con Google} y elegir la cuenta admitida.
+  \item Al volver, se llega a \ui{Mis cursos}. Una cuenta nueva ve un estado vacío con la invitación a crear su primer curso.
+\end{enumerate}
+
+\begin{comprobar}
+Si se abre primero una URL interna (por ejemplo \ruta{/cursos/\ldots/tareas}) sin sesión, la app pide acceso y, tras entrar, vuelve a esa misma dirección.
+\end{comprobar}
+
+\subsection{Mi perfil}
+
+Desde \ui{Cuenta} o el nombre de la cabecera se abre \ui{Mi perfil}, con cinco bloques: \emph{Identidad} (nombre editable, correo fijo), \emph{Apariencia} (tres paletas claras), \emph{Mi cuenta de GitHub}, \emph{Mis identidades de Canvas} (con desvinculación confirmada) y \emph{Sesiones abiertas}, donde se puede cerrar una sesión concreta sin afectar a las demás. Al final está \ui{Cerrar mi cuenta}; se bloquea si la persona es el único profesor de algún curso y se indica cuál.
+
+\subsection{Crear un curso}
+
+\begin{enumerate}
+  \item En \ui{Mis cursos}, pulsar \ui{Crear curso}.
+  \item Completar \emph{Nombre del curso}, \emph{Código}, \emph{Período}, \emph{Identificador corto} (slug, único) y \emph{Zona horaria} IANA, por ejemplo \texttt{America/Santiago}.
+  \item Pulsar \ui{Crear y configurar}. Se crea el curso y se abre su Configuración.
+\end{enumerate}
+
+\begin{comprobar}
+Un campo requerido vacío o un slug repetido muestran el error en el campo y conservan lo escrito. La tarjeta del curso aparece en \ui{Mis cursos} y se puede filtrar con \ui{Buscar cursos}.
+\end{comprobar}
+
+\subsection{Inicio del curso}
+
+La primera pantalla de un curso es un panel de progreso con tres bloques: \emph{Preparación del curso} (Canvas, GitHub, verificación), \emph{Personas y tareas} y \emph{El proceso continúa solo} (los procesos automáticos). Cada paso enlaza a la pantalla donde se completa, por lo que sirve como lista de control durante toda la guía.
+
+% =====================================================================
+\section{Paso 2 · Vincular Canvas y GitHub}
+% =====================================================================
+
+Menú del curso → \ui{Configuración} (solo profesores). La pantalla tiene tres paneles: \emph{Información del curso}, \emph{Canvas} y \emph{GitHub}, y un cuarto de \emph{Comprueba las conexiones}.
+
+\subsection{Canvas}
+
+\begin{enumerate}
+  \item En el panel \emph{Canvas}, pulsar \ui{Añadir mi credencial}, elegir la instancia (Canvas UAndes test) y pegar el token. Aceptar los consentimientos que se muestran (lectura del padrón, escritura de notas y mensajes).
+  \item Pulsar \ui{Buscar cursos}. Aparece \emph{Cursos de Canvas disponibles}, con nombre e ID de cada curso al que el token tiene acceso como docente. Los cursos ya usados por otro curso local aparecen ocupados.
+  \item Elegir el curso y pulsar \ui{Vincular al curso}.
+\end{enumerate}
+
+Una vez vinculado se muestran el nombre e ID del curso de Canvas y el titular de la credencial. \ui{Renovar mi credencial} permite reemplazar el token conservando tareas, personas e historia.
+
+\begin{comprobar}
+Un token inválido muestra un error claro, no un éxito. Desde un segundo curso local, el mismo curso de Canvas aparece como ocupado y no puede vincularse.
+\end{comprobar}
+
+\subsection{GitHub}
+
+\begin{enumerate}
+  \item En el panel \emph{GitHub}, pulsar \ui{Instalar en mi organización}. Se abre GitHub para elegir la organización y los repositorios a los que la GitHub App tendrá acceso (conviene «todos los repositorios» para que pueda crear los nuevos).
+  \item GitHub devuelve a la app (\ruta{/vinculacion/github/retorno}), que valida el retorno y muestra la organización vinculada.
+  \item Si la App ya estaba instalada, usar \ui{Vincular una instalación existente}.
+\end{enumerate}
+
+\begin{comprobar}
+Cancelar el flujo en GitHub no deja una instalación aparentemente operativa. La app nunca pide OAuth de GitHub a estudiantes.
+\end{comprobar}
+
+\subsection{Verificación de conexiones}
+
+Desde \emph{Comprueba las conexiones} se abre \ui{Verificación} (ruta \ruta{/verificacion}).
+
+\begin{enumerate}
+  \item Pulsar \ui{Ejecutar checklist completo}. Se encola un trabajo y la pantalla muestra su avance.
+  \item Al terminar se listan 19 comprobaciones agrupadas (Conexiones, Comprobaciones del curso), cada una con resultado y \ui{Ver motivo y detalles} cuando falla.
+  \item El bloque \emph{Pruebas opcionales de escritura} (publicar un anuncio y un comentario de prueba en Canvas) solo se ejecuta tras un consentimiento explícito.
+\end{enumerate}
+
+\begin{comprobar}
+Recargar durante la ejecución retoma el mismo trabajo. Los ítems no resueltos quedan en pendiente o fallido, nunca en verde por defecto. Algunos permisos de Canvas de la instancia de prueba (por ejemplo \texttt{manage\_assignments}, que Canvas dividió en tres) pueden aparecer como no verificables; la app lo informa con su motivo.
+\end{comprobar}
+
+\subsection{Ajustes del curso}
+
+Menú → \ui{Ajustes} (solo profesores). Permite editar nombre, zona horaria y los umbrales de inactividad y desbalance que usa el tablero; configurar IDs de roles adicionales de Canvas derivados de estudiante; y, al final, \ui{Archivar el curso} (ver sección~\ref{sec:cierre}).
+
+% =====================================================================
+\section{Paso 3 · Equipo docente}
+% =====================================================================
+
+Menú → \ui{Equipo docente}. Tiene dos listas: \emph{Integrantes} e \emph{Invitaciones}.
+
+\begin{enumerate}
+  \item Pulsar \ui{Incorporar integrante}, indicar el correo de la persona y el rol (profesor o ayudante). Se genera una invitación nominal.
+  \item La persona invitada entra con Google con \emph{esa} cuenta y abre el enlace \ruta{/invitaciones/<token>}; pulsa \ui{Confirmar y entrar}. Con otra cuenta la invitación se rechaza.
+  \item Mientras está pendiente, el profesor puede usar \ui{Revocar invitación}.
+  \item Sobre un ayudante ya incorporado, el panel \emph{Acceso de \ldots} muestra sus permisos: los dos implícitos y los cinco editables, con \ui{Guardar acceso}.
+  \item \ui{Retirar del curso} muestra antes el impacto real (repositorios con acceso concedido y correcciones que quedarán sin corrector) y pide confirmación. \ui{Reincorporar} restaura la membresía.
+\end{enumerate}
+
+\begin{comprobar}
+No se puede retirar al último profesor. Los cambios de permisos afectan la siguiente acción del ayudante, incluso si tiene una pestaña abierta.
+\end{comprobar}
+
+% =====================================================================
+\section{Paso 4 · Personas y pendientes}
+% =====================================================================
+
+\subsection{Sincronizar el padrón}
+
+Menú → \ui{Personas}.
+
+\begin{enumerate}
+  \item Pulsar \ui{Sincronizar con Canvas}. Se encola un trabajo; la tabla anterior sigue legible mientras se actualiza.
+  \item Al terminar, la tabla \emph{Estudiantes} muestra nombre, sección, estado de inscripción, grupo (conjunto y grupo de Canvas) y cuenta de GitHub, con la fecha de la última sincronización.
+  \item Filtrar por sección, estado o texto. Los filtros se conservan al volver desde Pendientes.
+\end{enumerate}
+
+\subsection{Resolver la cuenta de GitHub de cada estudiante}
+
+La app ofrece tres caminos, y los tres terminan en la misma columna de la tabla:
+
+\begin{description}[style=nextline,leftmargin=0.6cm]
+  \item[Asociación manual] En la fila del estudiante, pulsar \ui{Asociar cuenta}, escribir el login de GitHub y pulsar \ui{Validar y guardar}. La app comprueba que el usuario existe en GitHub antes de guardar. Se abre el historial de mapeos del estudiante.
+  \item[Importación CSV] Pegar o subir un CSV con identificador del estudiante y login. La app muestra una \emph{previsualización} que distingue filas válidas, desconocidas e inválidas, y solo escribe al pulsar \ui{Confirmar y aplicar}. Cambiar el CSV invalida la revisión anterior.
+  \item[Registro desde Canvas] En el panel \emph{Registro de cuentas de GitHub}, pulsar \ui{Crear tarea de registro en Canvas} y confirmar. La app crea en Canvas una tarea en la que cada estudiante declara su cuenta; un trabajo periódico recoge las respuestas sin que el estudiante entre a esta app. \ui{Publicar registro} la publica en Canvas.
+\end{description}
+
+Junto a cada estudiante con repositorios, \ui{Comprobar y reenviar invitación} consulta el estado real de sus invitaciones de GitHub y reenvía las pendientes (máximo tres reenvíos, con 24~horas entre uno y otro).
+
+\subsection{Pendientes}
+
+Menú → \ui{Pendientes}. Agrupa lo que impide avanzar, con su causa:
+
+\begin{itemize}
+  \item \emph{Sin cuenta de GitHub}: estudiantes sin mapeo. Cada fila enlaza a Personas y permite \ui{Enviar recordatorio} por Canvas. Muestra el último envío y la próxima fecha permitida (intervalo de 24~h).
+  \item \emph{Cuentas en conflicto}: dos estudiantes declararon el mismo login u otra incompatibilidad.
+  \item \emph{Grupos incompletos}: grupos de Canvas con integrantes faltantes.
+\end{itemize}
+
+\begin{comprobar}
+Un segundo recordatorio dentro de 24~h se rechaza sin duplicarse. Un login inexistente en GitHub conserva lo escrito y muestra el error.
+\end{comprobar}
+
+% =====================================================================
+\section{Paso 5 · Crear una tarea y sus repositorios}
+% =====================================================================
+
+Menú → \ui{Tareas}. La lista \emph{Tareas del curso} muestra las tareas locales con su estado (borrador, activa, cerrada) y modalidad.
+
+\subsection{Crear el borrador desde Canvas}
+
+\begin{enumerate}
+  \item Pulsar \ui{Crear tarea desde Canvas}. Si la lista está vacía, \ui{Sincronizar tareas de Canvas}.
+  \item Elegir la \emph{Tarea de Canvas}. La app indica si es individual o grupal y, si es grupal, el conjunto de grupos de Canvas (nombre e ID).
+  \item Pulsar \ui{Crear borrador}. Se abre la tarea local con la pestaña \ui{Configuración}.
+\end{enumerate}
+
+La página de una tarea tiene pestañas: \ui{Tablero} (cuando ya hay actividad), \ui{Configuración}, \ui{Entregas}, \ui{Repositorio base}, \ui{Repositorios} y \ui{Comunicaciones}.
+
+\subsection{Configuración de la tarea}
+
+En \ui{Configuración} se ven \emph{Información académica} (nombre, modalidad, puntos, secciones) y \emph{Entregas y fechas}. Una tarea puede tener \textbf{varias entregas que comparten el mismo repositorio}: por ejemplo una entrega parcial y una final, cada una ligada a un assignment distinto de Canvas del mismo conjunto de grupos.
+
+\begin{itemize}
+  \item \ui{Vincular otra entrega}: elegir otro assignment de Canvas compatible (misma modalidad, mismo conjunto) y marcar cuál es la final.
+  \item \ui{Desvincular entrega}: solo si no tiene versiones capturadas. Si ya hay evidencia, se ofrece excluirla sin borrar nada.
+\end{itemize}
+
+También se muestra una \emph{vista previa de los nombres} que recibirán los repositorios.
+
+\subsection{Repositorio base (opcional)}
+
+Pestaña \ui{Repositorio base}, antes de activar:
+
+\begin{enumerate}
+  \item Pulsar \ui{Crear repositorio base}. Se crea en la organización de GitHub.
+  \item \ui{Añadir archivo} para subir, por ejemplo, un \texttt{README.md} y un archivo inicial. Cada archivo listado permite previsualizar, reemplazar, renombrar y borrar.
+\end{enumerate}
+
+Su contenido se copiará a cada repositorio de estudiante o grupo al activar. Crear la tarea sin base también es válido.
+
+\subsection{Activar y observar la creación}
+
+\begin{enumerate}
+  \item En \ui{Configuración}, pulsar \ui{Activar tarea} y confirmar.
+  \item Ir a \ui{Repositorios}. La tabla \emph{Repositorios de estudiantes} muestra una fila por estudiante o grupo con el nombre del repositorio, su estado (pendiente, creando, listo, fallido) y el acceso de cada integrante (invitación enviada, acceso aceptado con fecha de comprobación, sin cuenta).
+  \item Un sujeto sin cuenta de GitHub \textbf{no bloquea al resto}: queda pendiente y su repositorio se crea solo cuando se complete el mapeo en Personas. Las filas fallidas ofrecen \ui{Reintentar}; \ui{Sustituir repositorio} permite apuntar a otro repositorio existente confirmando su nombre exacto. \ui{Solicitar comprobación} refresca los accesos contra GitHub.
+\end{enumerate}
+
+Al crear cada repositorio la app envía al estudiante un mensaje por Canvas con el enlace; ese envío se ve en la pestaña \ui{Comunicaciones} de la tarea y en Comunicaciones del curso.
+
+\begin{comprobar}
+En GitHub aparecen repositorios con los nombres previstos, el contenido de la base y los colaboradores correctos. Repetir la activación o recargar no duplica repositorios.
+\end{comprobar}
+
+% =====================================================================
+\section{Paso 6 · Fechas, cierre y versión entregada}
+% =====================================================================
+
+Pestaña \ui{Entregas} de la tarea (título \emph{Entregas y versiones}). Si hay varias entregas, un selector permite alternar entre parcial y final; la selección queda en la URL.
+
+\subsection{Fechas de cierre}
+
+El bloque \emph{Fechas de cierre} muestra, para cada estudiante o grupo, la fecha efectiva de cierre y su \textbf{origen}: fecha base del assignment, fecha de la sección (override) o extensión individual/grupal. Todo se lee de Canvas y se muestra en la zona horaria del curso. Si Canvas no define fecha o hay ambigüedad, se dice explícitamente; no se inventa una.
+
+\ui{Sincronizar con Canvas} trae cambios de fecha y conserva un historial consultable por entrega.
+
+\subsection{Versiones registradas}
+
+Al llegar la fecha de cierre de cada sujeto, un proceso automático registra el commit (SHA) vigente en ese instante y, cuando puede, crea una etiqueta Git. El bloque \emph{Versiones registradas} muestra la versión vigente y las anteriores, con un enlace \ui{Ver el código de esta versión} que abre GitHub en ese commit exacto.
+
+Acciones manuales para profesores:
+
+\begin{itemize}
+  \item \ui{Capturar ahora}: registra el commit actual antes del cierre.
+  \item \ui{Recapturar con otra fecha de corte}: pide una fecha con zona horaria explícita y un motivo.
+  \item \ui{Fijar en un commit concreto}: fija un SHA válido del repositorio, con motivo.
+\end{itemize}
+
+\begin{comprobar}
+Un commit hecho después del cierre no cambia el SHA registrado. Las versiones anteriores siguen visibles y los motivos quedan guardados. Recapturar no publica ni altera una nota ya publicada. Si la entrega es grupal y en Canvas se marcó «calificar individualmente», el bloque lo indica y ofrece el enlace a la configuración en Canvas; la app no modifica el assignment.
+\end{comprobar}
+
+% =====================================================================
+\section{Paso 7 · Seguimiento de la actividad}
+% =====================================================================
+
+\subsection{Tablero de la tarea}
+
+Pestaña \ui{Tablero} de la tarea, o menú → \ui{Seguimiento} para ver todas las tareas activas del curso. El tablero tiene cinco bloques:
+
+\begin{enumerate}
+  \item \emph{Atención}: alertas de inactividad, desbalance de participación, repositorios sin acceso o sin commits, según los umbrales de Ajustes.
+  \item \emph{Entregas}: fecha y estado de cada entrega.
+  \item \emph{Estado de los repositorios}: cuántos están listos, pendientes o fallidos.
+  \item \emph{Actividad en el tiempo}: gráfico diario de commits, desplazable con flechas.
+  \item \emph{Detalle por repositorio}: tabla paginada (50 filas) con commits, líneas, días activos y participación por integrante.
+\end{enumerate}
+
+Filtros: período (parcial o final), sección, estado del grupo y «solo alertas». \ui{Exportar CSV} descarga todas las filas que coinciden con los filtros, no solo la página visible. \ui{Actualizar} fuerza una recogida de GitHub, con un tiempo mínimo entre actualizaciones que la pantalla indica.
+
+\begin{comprobar}
+La app distingue cuatro situaciones: cero commits reales, dato ausente, dato antiguo y fallo al actualizar. «Sin atribuir» (commits cuyo autor no coincide con ningún estudiante) y «sin acceso» no se presentan como cero participación.
+\end{comprobar}
+
+\subsection{Timeline de un repositorio}
+
+Desde \emph{Detalle por repositorio}, abrir un repositorio. La línea de tiempo muestra cuatro capas: \emph{Historia} (commits), \emph{Composición del grupo} (altas y bajas), \emph{Entregas} (marcas de cierre y versión) y \emph{Ciclo de vida} (creación, archivo). Se filtra por \emph{Rama}, \emph{Estudiante} y período, y conserva los filtros del tablero al volver.
+
+\begin{itemize}
+  \item \ui{Marcar hito} en un commit (profesores o quien administre tareas) deja una marca persistente.
+  \item \emph{Identidades de Git} lista autores de commits no asociados a ningún estudiante. Se puede revelar el correo del autor por el flujo permitido, asociarlo a un estudiante y ver una \emph{Vista previa de propagación} antes de aplicar la asociación a otros repositorios, con casillas desmarcadas por defecto.
+  \item \emph{Participación por tramo} compara la actividad de los integrantes en el período elegido.
+\end{itemize}
+
+% =====================================================================
+\section{Paso 8 · Corrección y publicación de notas}
+% =====================================================================
+
+Menú → \ui{Corrección}. La parte superior ofrece tres vistas: \ui{Mi trabajo} (mis asignaciones), \ui{Matriz de corrección} (quién corrige a quién) y \emph{Estado de las entregas}. La matriz se puede leer con \texttt{curso.ver}; el borrador privado de una corrección solo lo ven los profesores y el ayudante asignado.
+
+\subsection{Repartir correcciones}
+
+\begin{enumerate}
+  \item Elegir la entrega y pulsar \ui{Repartir correcciones}.
+  \item Elegir el \emph{Criterio}: equitativo entre correctores, manual, por sección o copiando el reparto de una entrega anterior. Cada corrector tiene un peso de 0 a 10 que se puede editar; un peso fuera de rango se rechaza.
+  \item Revisar la \emph{Propuesta de reparto}. Es solo una previsualización: nada cambia hasta pulsar \ui{Aplicar reparto de correcciones} y confirmar.
+\end{enumerate}
+
+Si después un estudiante cambia de sección o de grupo en Canvas, la sincronización marca las asignaciones desalineadas sin reasignar nada. Volver a \ui{Repartir correcciones} ofrece \emph{realinear solo las filas que requieren revisión} con el criterio original; los casos ambiguos piden decisión docente.
+
+\begin{comprobar}
+Cambiar de corrector no borra borradores. Cada entrega conserva su propio reparto.
+\end{comprobar}
+
+\subsection{Corregir una entrega}
+
+Desde \ui{Mi trabajo} se abre una corrección (ruta \ruta{/correccion/<entrega>/<sujeto>}). La pantalla tiene dos columnas:
+
+\begin{itemize}
+  \item \emph{Versión revisada}: entrega, SHA registrado y el enlace al código exacto en GitHub; además \emph{Entregas anteriores} del mismo sujeto.
+  \item \emph{Rúbrica y calificación}: la rúbrica leída de Canvas (no se edita aquí), selección de niveles, nota y comentario. Debajo, \emph{Notas en Canvas} (lo que Canvas tiene hoy) y \emph{Notas internas y reclamos}.
+\end{itemize}
+
+Flujo normal:
+
+\begin{enumerate}
+  \item Seleccionar niveles de la rúbrica, escribir nota y comentario, y \ui{Guardar borrador}. El pie muestra autor, rol y fecha del servidor, y el comentario completo que se publicará.
+  \item \ui{Marcar lista} cuando la corrección esté terminada.
+  \item En el panel \emph{Publicación en Canvas}, pulsar \ui{Publicar en Canvas} y luego \ui{Confirmar publicación}. La app escribe la nota y el comentario en Canvas, vuelve a leerlos y muestra el resultado de la verificación.
+\end{enumerate}
+
+Los botones \ui{Anterior} y \ui{Siguiente} recorren las asignaciones conservando los filtros. Si hay cambios sin guardar, cualquier salida (otro enlace, Atrás, recarga) pide confirmación.
+
+\begin{comprobar}
+Guardar un borrador \textbf{no} escribe nada en Canvas. Tras publicar, abrir el libro de calificaciones de Canvas del mismo assignment y estudiante: la nota y el comentario deben estar allí. «Publicando» o «Borrador guardado» no equivalen a «Publicada y verificada».
+\end{comprobar}
+
+\subsection{Conflictos, bloqueos y reclamos}
+
+\begin{itemize}
+  \item Si Canvas ya tiene una nota distinta, la publicación ofrece tres decisiones: \emph{dejarlo como está}, \emph{adoptar la de Canvas} o \emph{publicar la mía} (esta última exige confirmación y vuelve a verificar). Se conserva el historial de publicaciones.
+  \item Una corrección puede estar bloqueada (período cerrado o no calificable). La pantalla muestra el motivo sin confundirlo con el estado de la corrección.
+  \item \ui{Reabrir} una corrección publicada exige motivo, conserva la publicación anterior y no vuelve a publicar por sí sola.
+  \item En \emph{Notas internas y reclamos} se añaden notas privadas o un reclamo, que se cierra con desenlace y conserva autoría.
+\end{itemize}
+
+\subsection{Publicación masiva}
+
+Desde \emph{Estado de las entregas}, seleccionar varias correcciones listas y pulsar \ui{Publicar seleccionadas}. Se muestra un resumen, se confirma y la pantalla informa el resultado por sujeto. Las correcciones ya publicadas no se duplican, y un fallo individual no presenta el lote como exitoso. El bloque \emph{Calificaciones sin commits al cierre} permite preparar una nota por falta de entrega, pero solo para los sujetos que se seleccionen explícitamente.
+
+% =====================================================================
+\section{Paso 9 · Informes y comunicaciones}
+% =====================================================================
+
+\subsection{Informe docente diario}
+
+Menú → \ui{Informe diario}. La pestaña \ui{Informe de hoy} resume las situaciones que requieren atención en las tareas activas (inactividad, pendientes, entregas sin corrector, publicaciones fallidas). \ui{Historial} permite abrir informes de fechas anteriores por URL (\ruta{/informes/<fecha>}); cada informe refleja la situación de su día, no se rehace con datos actuales.
+
+Suscripciones: \ui{Suscribirme} o \ui{Suscribirme a todos} (todos mis cursos) para recibirlo por correo; \ui{Darme de baja}; \ui{Enviarme el informe de hoy} para el envío propio inmediato; y, para profesores, \ui{Enviar informe a las personas suscritas}. Sin tareas activas no se envía un informe vacío.
+
+\subsection{Comunicaciones}
+
+Menú → \ui{Comunicaciones}. Arriba, dos acciones y debajo el \emph{Historial}.
+
+\begin{description}[style=nextline,leftmargin=0.6cm]
+  \item[Mensaje dirigido] Pulsar \ui{Escribir un mensaje}, elegir destinatarios (estudiantes o grupos, con filtros de sección), redactar y \ui{Previsualizar comunicación}. La vista previa muestra destinatarios y texto final. \ui{Confirmar y enviar} lo encola para Canvas.
+  \item[Anuncio] Pulsar \ui{Publicar un anuncio}, elegir las secciones destino, redactar y \ui{Confirmar alcance del anuncio} → \ui{Confirmar y publicar anuncio}. Un anuncio publicado ofrece \ui{Retirar anuncio de Canvas}.
+\end{description}
+
+El \emph{Historial} lista todo lo enviado por la app (manual y automático) con filtros por tipo y estado: en cola, enviado, fallido, retirado. Cada entrada muestra el detalle y, cuando corresponde, \ui{Reenviar mensaje} o cancelar.
+
+\subsection{Comunicaciones automáticas de una tarea}
+
+Pestaña \ui{Comunicaciones} de cada tarea: seis reglas activables (aviso de repositorio disponible, recordatorios de cierre, aviso de inactividad, etc.) y el recordatorio de mapeo del curso. Se activan o desactivan y se guardan; los eventos siguientes respetan la opción.
+
+Un ayudante sin reparto puede usar \ui{Solicitar aviso} para avisar a los profesores de entregas sin corrector; no se duplica en 24~h.
+
+\subsection{Mis notificaciones}
+
+Menú → \ui{Mis notificaciones}: bandeja personal con los informes diarios y avisos dirigidos a quien entró, y las bajas de suscripción (\ui{Darme de baja de este curso} / \ui{Darme de baja de todos}).
+
+% =====================================================================
+\section{Paso 10 · Cierre de repositorios y archivo del curso}
+\label{sec:cierre}
+% =====================================================================
+
+\subsection{Cierre de la tarea}
+
+Desde la tarea (bloque \emph{Cierre de la tarea}, accesible desde Entregas), la app muestra cinco guardas que deben cumplirse para archivar los repositorios en GitHub:
+
+\begin{enumerate}
+  \item versiones capturadas para todas las entregas;
+  \item acceso docente a todos los repositorios;
+  \item invitaciones de estudiantes resueltas;
+  \item aviso previo enviado a los estudiantes hace al menos 14 días (\ui{Enviar aviso previo});
+  \item correcciones terminadas (publicadas o excluidas).
+\end{enumerate}
+
+Con todo en verde, \ui{Archivar repositorios} encola el archivo y se comprueba en GitHub. \ui{Desarchivar repositorios} revierte la operación. Las versiones y borradores permanecen.
+
+\subsection{Archivar el curso}
+
+Menú → \ui{Ajustes} → \ui{Archivar el curso}. Antes de confirmar se puede descargar el inventario CSV y revisar la lista de cierres sin captura. La confirmación exige escribir el slug del curso. La casilla \emph{Archivar también los repositorios en GitHub} viene marcada y respeta las cinco guardas de cada tarea.
+
+Un curso archivado queda en solo lectura: se muestra un aviso en todas sus pantallas, los procesos y comunicaciones se pausan y las escrituras se rechazan incluso desde pestañas antiguas. \ui{Reactivar el curso} conserva los datos y restaura el estado previo.
+
+% =====================================================================
+\section{Recorrido rápido de 30 minutos}
+\label{sec:rapido}
+% =====================================================================
+
+Para quien necesite ver lo esencial con datos de prueba ya preparados:
+
+\begin{enumerate}[label=\arabic*., itemsep=4pt]
+  \item \textbf{Entrar} con Google y abrir el curso desde \ui{Mis cursos}. Revisar el panel de \emph{Inicio del curso}.
+  \item \textbf{Configuración}: comprobar que Canvas y GitHub figuran vinculados y abrir \ui{Verificación} para ver el resultado del checklist.
+  \item \textbf{Personas}: \ui{Sincronizar con Canvas}; en \ui{Pendientes}, tomar un estudiante sin cuenta, volver a Personas y \ui{Asociar cuenta} → \ui{Validar y guardar}.
+  \item \textbf{Tareas}: abrir la tarea grupal; ver \ui{Configuración} (parcial y final), \ui{Repositorio base} con un archivo y \ui{Repositorios} con sus estados.
+  \item \textbf{Entregas}: comparar fecha base, de sección y extensión; abrir la versión final y \ui{Ver el código de esta versión} en GitHub.
+  \item \textbf{Tablero}: filtrar período final y una sección; comparar dos integrantes; abrir el timeline de un repositorio.
+  \item \textbf{Corrección}: \ui{Repartir correcciones} y revisar la propuesta (sin aplicar). Abrir una corrección: rúbrica, nota, comentario, \ui{Guardar borrador} → \ui{Marcar lista} → \ui{Publicar en Canvas} → \ui{Confirmar publicación}. Verificar la nota en Canvas.
+  \item \textbf{Informe diario} y \textbf{Comunicaciones}: abrir el informe de hoy; redactar un mensaje y \ui{Previsualizar comunicación}.
+  \item \textbf{Ayudante}: en otro perfil de navegador, entrar como ayudante y abrir \ui{Mi trabajo}. Confirmar que no ve Configuración, Ajustes ni controles de reparto o publicación que no le correspondan.
+\end{enumerate}
+
+% =====================================================================
+\section{Qué esperar y qué no}
+% =====================================================================
+
+\begin{itemize}
+  \item \textbf{Trabajos en cola.} Si una acción queda «en cola» mucho tiempo, el trabajador de fondo puede haberse dormido (plan gratuito de Render). La interfaz sigue mostrando el estado real; al despertar, el trabajo continúa. «Encolado» significa que se solicitó, no que terminó.
+  \item \textbf{Límites por tiempo.} Recordatorios y reenvíos de invitación respetan 24~horas; el aviso previo de archivo exige 14~días. La app explica el bloqueo y cuándo se puede reintentar.
+  \item \textbf{Nada se decide por nombre.} La fusión de identidades de Canvas y la asociación de autores de Git exigen coincidencia de identificadores y confirmación docente; nunca se hace automáticamente por parecido de nombres.
+  \item \textbf{La app no modifica tareas de Canvas.} Puntos, fechas, rúbrica y la opción de nota individual por grupo se cambian en Canvas y se reflejan al sincronizar.
+  \item \textbf{Privacidad de borradores.} Un ayudante no asignado no ve el borrador de otra persona, aunque tenga permiso de publicar.
+  \item \textbf{Aislamiento.} Conocer la URL o el ID de un recurso de otro curso no da acceso; la API rechaza la acción.
+\end{itemize}
+
+\subsection{Documentación complementaria en el repositorio}
+
+\noindent\begin{tabularx}{\textwidth}{L{7.2cm} X}
+\toprule
+\textbf{Archivo} & \textbf{Contenido} \\
+\midrule
+\texttt{README.md} & Arranque local, pruebas y despliegue. \\
+\texttt{docs/frontend/PRUEBAS-MANUALES.md} & 48 casos de prueba manual (M01–M48) con pasos y resultado esperado, trazados a los 59 requisitos. \\
+\texttt{docs/frontend/REQUISITOS.md} & Matriz requisito → pantalla → contrato de API. \\
+\texttt{docs/frontend/LIMITACIONES.md} & Limitaciones corregidas y límites vigentes. \\
+\texttt{docs/frontend/GUION-VIDEO.md} & Recorrido del video de entrega. \\
+\texttt{docs/SPEC/} & Especificación normativa por capítulos. \\
+\texttt{docs/ARQUITECTURA.md} & Arquitectura del backend, frontend e integraciones. \\
+\bottomrule
+\end{tabularx}
+
+\end{document}
