@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.adaptadores import cliente_canvas, outbox_repo, publicacion_repo
 from app.adaptadores.base import ahora_utc
-from app.adaptadores.modelos_aprovisionamiento import MensajeSaliente
+from app.adaptadores.modelos_aprovisionamiento import FechaEfectiva, MensajeSaliente
 from app.adaptadores.modelos_correccion import Correccion, PublicacionNota
 from app.adaptadores.modelos_curso import Curso
 from app.adaptadores.modelos_infraestructura import Incidencia, Trabajo
@@ -124,6 +124,38 @@ def test_publicar_verifica_contra_canvas_y_deja_evidencia(cliente: TestClient):
     fila = next(s for s in matriz["sujetos"] if s["sujeto_id"] == ana)
     assert fila["celdas"][entrega_id]["contraste"] == "CONCUERDA"
     assert matriz["contador"]["con_nota_en_canvas"] == 1
+
+
+def test_fecha_recalculada_no_rompe_pantalla_ni_publicacion(cliente: TestClient):
+    """El historial de FechaEfectiva es append-only: una fila SUPERSEDIDA junto a
+    la VIGENTE no debe tumbar la pantalla, el borrador ni la publicacion, y el
+    pie del comentario usa la fecha VIGENTE."""
+    curso_id, tarea_id, entrega_id, _, _, _ = _preparar(cliente, "pds-f12-sup")
+    ana = _sujeto_de(curso_id, tarea_id, 2001)
+    ruta = _dejar_lista(cliente, curso_id, tarea_id, entrega_id, ana)
+    with fabrica_bd()() as bd:
+        vigente = (
+            bd.query(FechaEfectiva)
+            .filter_by(entrega_id=uuid.UUID(entrega_id), sujeto_id=uuid.UUID(ana))
+            .one()
+        )
+        bd.add(
+            FechaEfectiva(
+                entrega_id=vigente.entrega_id,
+                sujeto_id=vigente.sujeto_id,
+                due_at_utc=vigente.due_at_utc - timedelta(days=7),
+                origen=vigente.origen,
+                ambigua=False,
+                calculada_en=vigente.calculada_en - timedelta(days=1),
+                estado="SUPERSEDIDA",
+            )
+        )
+        bd.commit()
+    assert cliente.get(ruta).status_code == 200
+    respuesta = cliente.post(f"{ruta}/publicar", json={})
+    assert respuesta.status_code == 200, respuesta.text
+    texto = cliente_canvas.publicaciones_doble[0]["comment"]["text_comment"]
+    assert "sin fecha" not in texto
 
 
 def test_sin_permiso_403_y_no_publicable_409_sin_llamar_a_canvas(cliente: TestClient):

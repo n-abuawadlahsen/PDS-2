@@ -807,17 +807,17 @@ def comentario_para_canvas(bd: Session, c: Correccion, entrega: Entrega, curso: 
         )
         rol = miembro.rol if miembro else None
     version = bd.get(VersionEntrega, c.version_entrega_id) if c.version_entrega_id else None
+    # El historial es append-only: solo la fila VIGENTE es unica por sujeto.
     fecha = (
         bd.query(FechaEfectiva)
-        .filter_by(entrega_id=entrega.id, sujeto_id=c.sujeto_id)
+        .filter_by(entrega_id=entrega.id, sujeto_id=c.sujeto_id, estado="VIGENTE")
         .one_or_none()
     )
+    cierre = fecha.due_at_utc if fecha and fecha.due_at_utc else entrega.due_at_base
     return pie_comentario(
         texto=c.comentario or "",
         entrega=entrega.nombre,
-        cierre=formatear_fecha(fecha.due_at_utc, curso.zona_horaria)
-        if fecha and fecha.due_at_utc
-        else "sin fecha",
+        cierre=formatear_fecha(cierre, curso.zona_horaria) if cierre else "sin fecha",
         sha=version.commit_sha if version and version.estado != "SIN_COMMITS" else None,
         repositorio_full_name=version.repositorio_full_name if version else None,
         corrector=autor.get("nombre") or "el equipo docente",

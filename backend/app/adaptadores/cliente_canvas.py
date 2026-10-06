@@ -1508,8 +1508,17 @@ class ClienteCanvasDoble:
     # Relativa al arranque, no fija: una fecha fija termina quedando en el
     # pasado y entonces todas las entregas del doble aparecen ya cerradas
     # (paso el 01-10-2026 y rompio las pruebas que esperan una entrega abierta).
-    _FECHA_CIERRE_DOBLE = (datetime.now(UTC) + timedelta(days=60)).replace(
-        hour=23, minute=59, second=0, microsecond=0
+    # Anclada al dia 1 de dentro de dos meses (31-62 dias por delante): asi no
+    # cambia en cada arranque del proceso, que sincronizaria fechas nuevas y
+    # dejaria una FechaEfectiva SUPERSEDIDA por reinicio.
+    _HOY_DOBLE = datetime.now(UTC)
+    _FECHA_CIERRE_DOBLE = datetime(
+        _HOY_DOBLE.year + (_HOY_DOBLE.month + 1) // 12,
+        (_HOY_DOBLE.month + 1) % 12 + 1,
+        1,
+        23,
+        59,
+        tzinfo=UTC,
     )
 
     def _assignments_doble(self) -> list[AssignmentCanvasCrudo]:
