@@ -336,3 +336,54 @@ def test_pendientes_bloque_2_incluye_conflicto(cliente: TestClient):
     pendientes = cliente.get(f"/api/cursos/{curso['id']}/pendientes")
     nombres_bloque_2 = {f["nombre"] for f in pendientes.json()["bloque_2_en_conflicto"]}
     assert nombres_bloque_2 == {"Ana Soto", "Elena Rojas"}
+
+
+def test_misma_persona_canvas_en_otro_curso_reutiliza_su_cuenta_github(cliente: TestClient):
+    """Un estudiante inscrito en dos cursos de la misma instancia Canvas puede
+    declarar la misma cuenta en ambos; otra persona con esa cuenta sigue
+    rechazada y el motivo viaja en la respuesta."""
+    from app.adaptadores.modelos_curso import Curso
+
+    curso_a = _preparar_curso_con_roster(cliente, slug="mapeo-curso-a", email="prof-a@gmail.com")
+    persona = cliente.get(f"/api/cursos/{curso_a['id']}/personas").json()["estudiantes"][0]
+    r = cliente.post(
+        f"/api/cursos/{curso_a['id']}/personas/{persona['id']}/mapeo",
+        json={"login": "estudiante-valido"},
+    )
+    assert r.status_code == 200, r.text
+
+    curso_b = _crear_curso(cliente, slug="mapeo-curso-b")
+    with fabrica_bd()() as bd:
+        origen = bd.get(Estudiante, uuid.UUID(persona["id"]))
+        bd.get(Curso, uuid.UUID(curso_b["id"])).canvas_base_url = bd.get(
+            Curso, uuid.UUID(curso_a["id"])
+        ).canvas_base_url
+        ahora = ahora_utc()
+        misma, otra = (
+            Estudiante(
+                curso_id=uuid.UUID(curso_b["id"]),
+                canvas_user_id=canvas_user_id,
+                nombre=nombre,
+                primera_vista_en=ahora,
+                ultima_vista_en=ahora,
+            )
+            for canvas_user_id, nombre in (
+                (origen.canvas_user_id, origen.nombre),
+                (origen.canvas_user_id + 90000, "Otra Persona"),
+            )
+        )
+        bd.add_all([misma, otra])
+        bd.commit()
+        misma_id, otra_id = str(misma.id), str(otra.id)
+
+    r = cliente.post(
+        f"/api/cursos/{curso_b['id']}/personas/{misma_id}/mapeo",
+        json={"login": "estudiante-valido"},
+    )
+    assert r.status_code == 200, r.text
+    r = cliente.post(
+        f"/api/cursos/{curso_b['id']}/personas/{otra_id}/mapeo",
+        json={"login": "estudiante-valido"},
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["motivo"] in {"CUENTA_NO_ELEGIBLE", "CUENTA_YA_ASIGNADA"}

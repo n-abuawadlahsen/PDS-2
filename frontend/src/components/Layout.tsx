@@ -15,8 +15,9 @@ import {
   useParams,
   useNavigate,
 } from "react-router-dom";
-import { BookOpen, UserRound, Menu, ChevronDown } from "lucide-react";
+import { BookOpen, UserRound, Menu, ChevronDown, LogOut } from "lucide-react";
 import {
+  apiFetch,
   listarCursos,
   obtenerCapacidades,
   obtenerContexto,
@@ -56,10 +57,54 @@ export function useCurso() {
   return c;
 }
 
-function Icono({ tipo }: { tipo: "cursos" | "cuenta" | "menu" }) {
+function Icono({ tipo }: { tipo: "cursos" | "cuenta" | "menu" | "salir" }) {
   const Icon =
-    tipo === "cursos" ? BookOpen : tipo === "cuenta" ? UserRound : Menu;
+    tipo === "cursos"
+      ? BookOpen
+      : tipo === "cuenta"
+        ? UserRound
+        : tipo === "salir"
+          ? LogOut
+          : Menu;
   return <Icon size={24} strokeWidth={1.6} aria-hidden="true" />;
+}
+/** Cierra solo la sesión de este navegador (las demás siguen activas) y
+ * vuelve al acceso. Si algo falla, igual se sale: la sesión vencida también
+ * termina en /acceso. */
+async function cerrarSesionActual() {
+  try {
+    const r = await apiFetch("/api/perfil/sesiones");
+    if (r.ok) {
+      const sesiones = (await r.json()) as {
+        id: string;
+        es_la_actual: boolean;
+      }[];
+      const actual = sesiones.find((s) => s.es_la_actual);
+      if (actual)
+        await apiFetch(`/api/perfil/sesiones/${actual.id}`, {
+          method: "DELETE",
+        });
+    }
+  } finally {
+    window.location.assign("/acceso");
+  }
+}
+function BotonCerrarSesion({ className }: { className?: string }) {
+  const [saliendo, setSaliendo] = useState(false);
+  return (
+    <button
+      type="button"
+      className={className}
+      disabled={saliendo}
+      onClick={() => {
+        setSaliendo(true);
+        void cerrarSesionActual();
+      }}
+    >
+      {className === "nav-salir" && <Icono tipo="salir" />}
+      {saliendo ? "Saliendo…" : "Cerrar sesión"}
+    </button>
+  );
 }
 export function Publico({ children }: { children?: ReactNode }) {
   return (
@@ -249,6 +294,7 @@ export function Estructura({
           <Icono tipo="cuenta" />
           Cuenta
         </NavLink>
+        <BotonCerrarSesion className="nav-salir" />
       </nav>
       <header className="shell-header">
         <button
@@ -347,6 +393,7 @@ export function Estructura({
           <Link to="/perfil" onClick={cerrarMenu}>
             Mi perfil
           </Link>
+          <BotonCerrarSesion />
         </div>
         {curso && (
           <>

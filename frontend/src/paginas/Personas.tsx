@@ -92,6 +92,31 @@ function HistorialMapeo({ estudianteId }: { estudianteId: string }) {
   );
 }
 
+const MOTIVOS_RECHAZO_MAPEO: Record<string, string> = {
+  CUENTA_NO_EXISTE:
+    "no existe en GitHub como cuenta de usuario. Revisa que el nombre esté bien escrito.",
+  ES_ORGANIZACION:
+    "es una organización de GitHub, no una cuenta personal. Pide al estudiante su usuario.",
+  CUENTA_NO_ELEGIBLE:
+    "no se puede asociar: pertenece a alguien del equipo docente o ya está asociada a otro estudiante en otro curso.",
+  CUENTA_YA_ASIGNADA:
+    "ya está asociada a otro estudiante de este curso. Revisa ese caso en Pendientes.",
+};
+
+// El backend responde {detail: {motivo, detalle}} y `detalle` es el login:
+// sin esta traduccion, el mensaje mostraba solo la cuenta y no la causa.
+function rechazoMapeoLegible(cuerpo: unknown): string {
+  const detail = (cuerpo as { detail?: { motivo?: string; detalle?: string } })
+    ?.detail;
+  const texto = detail?.motivo
+    ? MOTIVOS_RECHAZO_MAPEO[detail.motivo]
+    : undefined;
+  if (!texto) return detalleLegible(cuerpo);
+  const login =
+    detail?.detalle && !/\s/.test(detail.detalle) ? detail.detalle : null;
+  return login ? `La cuenta @${login} ${texto}` : `La cuenta ${texto}`;
+}
+
 function EditorMapeo({
   estudianteId,
   nombre,
@@ -119,7 +144,7 @@ function EditorMapeo({
               estudianteId,
               login.trim(),
             );
-            if (!r.ok) throw new Error(detalleLegible(r.cuerpo));
+            if (!r.ok) throw new Error(rechazoMapeoLegible(r.cuerpo));
             guardado();
           }, "Cuenta asociada. El proceso continuará automáticamente.");
         }}

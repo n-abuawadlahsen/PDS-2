@@ -27,7 +27,8 @@
   font-size: 1.65rem;
   line-height: 1.2;
 }
-.global-nav > a:not(.brand) {
+.global-nav > a:not(.brand),
+.global-nav > .nav-salir {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -38,8 +39,24 @@
   font-size: 0.875rem;
   border-inline-start: 4px solid transparent;
 }
-.global-nav > a:not(.brand):hover {
+.global-nav > a:not(.brand):hover,
+.global-nav > .nav-salir:hover {
   background: var(--color-sidebar-hover);
+}
+.global-nav > .nav-salir {
+  width: 100%;
+  margin: 0 0 0.5rem;
+  border-block: 0;
+  border-inline-end: 0;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.global-nav > .nav-salir:focus-visible {
+  outline-color: var(--color-sidebar-text);
+  outline-offset: -4px;
 }
 .global-nav > a[aria-current="page"] {
   background: var(--color-sidebar-active);

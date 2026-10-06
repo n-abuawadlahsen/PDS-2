@@ -17,12 +17,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import or_
+from sqlalchemy import and_, false, not_, or_
 from sqlalchemy.orm import Session
 
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.cliente_github import ClienteGitHub
-from app.adaptadores.modelos_curso import MembresiaCurso
+from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_identidad import Usuario
 from app.adaptadores.modelos_mapeo import CuentaGithub, MapeoGithub
 from app.adaptadores.modelos_padron import Estudiante
@@ -142,14 +142,30 @@ def construir_contexto_elegibilidad(
         is not None
     )
 
+    # `Estudiante` es por curso: la misma persona de Canvas inscrita en dos
+    # cursos de la misma instancia tiene dos filas y puede usar su cuenta en
+    # ambos. Solo cuenta como "otro lado" un mapeo de otra persona.
+    estudiante_actual = bd.get(Estudiante, estudiante_id)
+    curso_actual = bd.get(Curso, curso_id)
+    misma_persona = (
+        and_(
+            Estudiante.canvas_user_id == estudiante_actual.canvas_user_id,
+            Curso.canvas_base_url.is_not_distinct_from(curso_actual.canvas_base_url),
+        )
+        if estudiante_actual is not None and curso_actual is not None
+        else false()
+    )
     tiene_mapeo_vigente_en_otro_lado = (
         bd.query(MapeoGithub)
         .join(CuentaGithub, CuentaGithub.id == MapeoGithub.cuenta_github_id)
+        .join(Estudiante, Estudiante.id == MapeoGithub.estudiante_id)
+        .join(Curso, Curso.id == MapeoGithub.curso_id)
         .filter(
             CuentaGithub.github_user_id == cuenta.github_user_id,
             MapeoGithub.estado == EstadoMapeoGithub.VIGENTE.value,
             MapeoGithub.estudiante_id != estudiante_id,
             MapeoGithub.curso_id != curso_id,
+            not_(misma_persona),
         )
         .first()
         is not None
