@@ -770,6 +770,9 @@ function textoCierre(
   return `${verbo} entre el ${sinZona} y el ${fechaLegible(ultimo, zona)}`;
 }
 
+const mayuscula = (texto: string) =>
+  texto.charAt(0).toUpperCase() + texto.slice(1);
+
 /** Barras horizontales: la parte de los commits del grupo de cada integrante.
  * Con coautoria la suma puede pasar del 100 %; se escala al mayor. */
 function ComparacionIntegrantes({
@@ -808,14 +811,15 @@ function ComparacionIntegrantes({
                       valor="ADVERTENCIA"
                       texto={
                         i.causa
-                          ? textoCausaParticipacion(i.causa)
+                          ? mayuscula(textoCausaParticipacion(i.causa))
                           : "Sin commits"
                       }
                     />
                   ) : (
                     <>
                       <strong>{i.commits}</strong> · {porcentaje}% ·{" "}
-                      {i.dias_activos} días activos
+                      {i.dias_activos}{" "}
+                      {i.dias_activos === 1 ? "día activo" : "días activos"}
                     </>
                   )}
                 </span>

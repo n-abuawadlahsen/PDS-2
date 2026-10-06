@@ -76,7 +76,7 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
         <section className="panel">
           <h2>Información del curso</h2>
           <dl className="facts">
-            <div>
+            <div className="facts-ancha">
               <dt>Nombre</dt>
               <dd>{curso.nombre}</dd>
             </div>
@@ -99,6 +99,15 @@ export function Vinculacion({ ajustes = false }: { ajustes?: boolean }) {
               </dd>
             </div>
           </dl>
+          {["BORRADOR", "VINCULANDO"].includes(curso.estado) && (
+            <Aviso>
+              El curso se activa cuando Canvas y GitHub están conectados y la
+              verificación no tiene errores bloqueantes.{" "}
+              <Link to={`/cursos/${curso.id}/vinculacion`}>
+                Ir a Conexiones
+              </Link>
+            </Aviso>
+          )}
           <p className="help">
             Los datos generales se fijaron al crear el curso. Aquí puedes
             revisar sus conexiones, instalar GitHub y volver a ejecutar la
