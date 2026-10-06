@@ -1,6 +1,7 @@
-"""Correo transaccional por HTTPS (Resend) o SMTP; fuera de produccion nunca
-envia a terceros."""
+"""Correo transaccional por HTTPS (Resend o API de Gmail) o SMTP; fuera de
+produccion nunca envia a terceros."""
 
+import base64
 import smtplib
 import ssl
 from collections import deque
@@ -132,6 +133,27 @@ class CorreoResend:
         return ResultadoCorreo(id=identificador)
 
 
+def _mensaje_mime(
+    s: Settings,
+    destinatario: str,
+    asunto: str,
+    html: str,
+    texto: str,
+    cabeceras: dict[str, str] | None,
+) -> EmailMessage:
+    mensaje = EmailMessage()
+    mensaje["Subject"] = asunto
+    mensaje["From"] = formataddr((s.email_from_nombre, s.email_from))
+    mensaje["To"] = destinatario
+    mensaje["Reply-To"] = s.email_reply_to
+    mensaje["Message-ID"] = make_msgid(domain=s.email_from.partition("@")[2] or None)
+    for nombre, valor in (cabeceras or {}).items():
+        mensaje[nombre] = valor
+    mensaje.set_content(texto)
+    mensaje.add_alternative(html, subtype="html")
+    return mensaje
+
+
 class CorreoSmtp:
     """SMTP con STARTTLS, para enviar sin dominio propio (p. ej. una cuenta de
     Gmail con contrasena de aplicacion). SMTP no tiene clave de idempotencia:
@@ -152,16 +174,7 @@ class CorreoSmtp:
         cabeceras: dict[str, str] | None = None,
     ) -> ResultadoCorreo:
         s = self.settings
-        mensaje = EmailMessage()
-        mensaje["Subject"] = asunto
-        mensaje["From"] = formataddr((s.email_from_nombre, s.email_from))
-        mensaje["To"] = destinatario
-        mensaje["Reply-To"] = s.email_reply_to
-        mensaje["Message-ID"] = make_msgid(domain=s.email_from.partition("@")[2] or None)
-        for nombre, valor in (cabeceras or {}).items():
-            mensaje[nombre] = valor
-        mensaje.set_content(texto)
-        mensaje.add_alternative(html, subtype="html")
+        mensaje = _mensaje_mime(s, destinatario, asunto, html, texto, cabeceras)
         try:
             with smtplib.SMTP(s.smtp_host, s.smtp_puerto, timeout=20) as conexion:
                 conexion.starttls(context=ssl.create_default_context())
@@ -191,6 +204,75 @@ class CorreoSmtp:
         return ResultadoCorreo(id=str(mensaje["Message-ID"]))
 
 
+class CorreoGmailApi:
+    """Envia desde una cuenta de Gmail por la API HTTPS (puerto 443), para
+    hostings que bloquean los puertos SMTP (p. ej. Render gratuito). Usa un
+    refresh token de esa cuenta con el permiso gmail.send."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    def enviar(
+        self,
+        *,
+        destinatario: str,
+        asunto: str,
+        html: str,
+        texto: str,
+        clave_idempotencia: str,
+        reserva: str,
+        cabeceras: dict[str, str] | None = None,
+    ) -> ResultadoCorreo:
+        s = self.settings
+        mensaje = _mensaje_mime(s, destinatario, asunto, html, texto, cabeceras)
+        try:
+            token = httpx.post(
+                "https://oauth2.googleapis.com/token",
+                timeout=20,
+                data={
+                    "client_id": s.gmail_client_id or s.google_client_id,
+                    "client_secret": s.gmail_client_secret or s.google_client_secret,
+                    "refresh_token": s.gmail_refresh_token or "",
+                    "grant_type": "refresh_token",
+                },
+            )
+            if not token.is_success:
+                # El cuerpo de Google puede repetir credenciales: nunca se propaga.
+                raise FalloCorreo(
+                    f"Google rechazó el permiso para enviar correo (HTTP {token.status_code}).",
+                    reintentable=token.status_code == 429 or token.status_code >= 500,
+                    status=token.status_code,
+                )
+            acceso = token.json()["access_token"]
+            r = httpx.post(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+                timeout=20,
+                headers={"Authorization": f"Bearer {acceso}"},
+                json={"raw": base64.urlsafe_b64encode(mensaje.as_bytes()).decode()},
+            )
+        except httpx.TransportError:
+            raise FalloCorreo("No se pudo contactar con Gmail.", reintentable=True) from None
+        except (ValueError, KeyError, TypeError):
+            raise FalloCorreo(
+                "Google no entregó un token de acceso para enviar correo.", reintentable=True
+            ) from None
+        if not r.is_success:
+            raise FalloCorreo(
+                f"Gmail respondió HTTP {r.status_code}.",
+                reintentable=r.status_code in {408, 429} or r.status_code >= 500,
+                status=r.status_code,
+            )
+        try:
+            identificador = r.json()["id"]
+            if not isinstance(identificador, str) or not identificador:
+                raise ValueError("id ausente")
+        except (ValueError, KeyError, TypeError):
+            raise FalloCorreo(
+                "Gmail no confirmó el identificador del envío.", reintentable=True
+            ) from None
+        return ResultadoCorreo(id=identificador)
+
+
 def motivo_bloqueo(settings: Settings, destinatario: str) -> str | None:
     if settings.comunicaciones_salientes != "activadas":
         return "COMUNICACIONES_PAUSADAS"
@@ -206,6 +288,8 @@ def motivo_bloqueo(settings: Settings, destinatario: str) -> str | None:
             credenciales = bool(
                 (settings.smtp_usuario or "").strip() and (settings.smtp_contrasena or "").strip()
             )
+        elif settings.email_proveedor == "gmail_api":
+            credenciales = bool((settings.gmail_refresh_token or "").strip())
         else:
             return "CORREO_SIN_CONFIGURAR"
         dominio = settings.email_from.partition("@")[2].lower()
@@ -224,4 +308,8 @@ def motivo_bloqueo(settings: Settings, destinatario: str) -> str | None:
 def crear_proveedor_correo(settings: Settings) -> ProveedorCorreo:
     if settings.entorno != "produccion":
         return CorreoConsola()
-    return CorreoSmtp(settings) if settings.email_proveedor == "smtp" else CorreoResend(settings)
+    if settings.email_proveedor == "smtp":
+        return CorreoSmtp(settings)
+    if settings.email_proveedor == "gmail_api":
+        return CorreoGmailApi(settings)
+    return CorreoResend(settings)

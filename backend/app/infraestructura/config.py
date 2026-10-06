@@ -55,9 +55,12 @@ class Settings(BaseSettings):
     email_from_nombre: str = Field(alias="EMAIL_FROM_NOMBRE")
     email_reply_to: str = Field(alias="EMAIL_REPLY_TO")
     email_dominio_verificado: str = Field(alias="EMAIL_DOMINIO_VERIFICADO")
-    email_proveedor: Literal["sin_configurar", "resend", "smtp"] = Field(
+    email_proveedor: Literal["sin_configurar", "resend", "smtp", "gmail_api"] = Field(
         default="sin_configurar", alias="EMAIL_PROVEEDOR"
     )
+    # API de Gmail por HTTPS (EMAIL_PROVEEDOR=gmail_api), para hostings que
+    # bloquean SMTP. Sin GMAIL_CLIENT_ID se usa el cliente del login con Google.
+    gmail_client_id: str | None = Field(default=None, alias="GMAIL_CLIENT_ID")
     # Alternativa sin dominio propio: SMTP con STARTTLS (por defecto Gmail con
     # una contrasena de aplicacion). Solo se usa con EMAIL_PROVEEDOR=smtp.
     smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")
@@ -93,6 +96,8 @@ class Settings(BaseSettings):
     )
     email_provider_api_key: str = Field(alias="EMAIL_PROVIDER_API_KEY")
     smtp_contrasena: str | None = Field(default=None, alias="SMTP_CONTRASENA")
+    gmail_client_secret: str | None = Field(default=None, alias="GMAIL_CLIENT_SECRET")
+    gmail_refresh_token: str | None = Field(default=None, alias="GMAIL_REFRESH_TOKEN")
     signing_key: str = Field(alias="SIGNING_KEY")
     signing_key_anterior: str | None = Field(default=None, alias="SIGNING_KEY_ANTERIOR")
     github_ensayo_app_id: str | None = Field(default=None, alias="GITHUB_ENSAYO_APP_ID")
