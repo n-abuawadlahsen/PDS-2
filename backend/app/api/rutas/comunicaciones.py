@@ -447,9 +447,15 @@ def _valores_de_ejemplo(
         .order_by(Estudiante.nombre_ordenable)
         .first()
     )
+    # Solo un repositorio ya creado tiene URL; uno que espera informacion
+    # dejaria `repositorio.url` vacia y la plantilla no se construiria (500).
     repo = (
         bd.query(Repositorio)
-        .filter(Repositorio.tarea_id == tarea.id)
+        .filter(
+            Repositorio.tarea_id == tarea.id,
+            Repositorio.url_html.isnot(None),
+            Repositorio.url_html != "",
+        )
         .order_by(Repositorio.nombre)
         .first()
         if tarea is not None
@@ -470,8 +476,8 @@ def _valores_de_ejemplo(
             "curso.titular": "el profesor del curso",
             "organizacion.nombre": curso.github_org_login or "organizacion",
             "repositorio.nombre": repo.nombre if repo else "repositorio-de-ejemplo",
-            "repositorio.url": (repo.url_html or "")
-            if repo
+            "repositorio.url": repo.url_html
+            if repo and repo.url_html
             else "https://github.com/organizacion/repositorio",
             "acceso.instrucciones": "Te enviamos una invitación de GitHub para ese repositorio.",
             "entrega.nombre": entrega.nombre if entrega else "Entrega",

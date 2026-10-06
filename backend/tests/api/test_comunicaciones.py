@@ -458,3 +458,38 @@ def test_regla_de_curso_solo_para_recordatorio_de_mapeo(cliente: TestClient):
         with pytest.raises(IntegrityError):
             bd.flush()
         bd.rollback()
+
+
+def test_reglas_de_tarea_con_repositorio_todavia_sin_url_no_fallan(cliente: TestClient):
+    """Un repositorio que aun espera informacion no tiene URL: la vista previa
+    usa uno que si la tenga, o el ejemplo, en vez de responder 500."""
+    from app.adaptadores.modelos_aprovisionamiento import Repositorio
+
+    curso_id, tarea_id = _preparar_curso_con_tarea_activa(
+        cliente, slug="pds-f10-sin-url", email="f10sinurl@gmail.com"
+    )
+    base = f"/api/cursos/{curso_id}/tareas/{tarea_id}/comunicaciones"
+    with fabrica_bd()() as bd:
+        repos = (
+            bd.query(Repositorio)
+            .filter(Repositorio.tarea_id == uuid.UUID(tarea_id))
+            .order_by(Repositorio.nombre)
+            .all()
+        )
+        assert len(repos) >= 2
+        repos[0].url_html = None
+        con_url = repos[1].url_html
+        bd.commit()
+    r = cliente.get(base)
+    assert r.status_code == 200, r.text
+    regla = next(x for x in r.json() if x["evento"] == "repositorio_disponible")
+    assert con_url and con_url in regla["vista_previa_cuerpo"] + regla["vista_previa_asunto"]
+
+    with fabrica_bd()() as bd:
+        for repo in bd.query(Repositorio).filter(Repositorio.tarea_id == uuid.UUID(tarea_id)):
+            repo.url_html = None
+        bd.commit()
+    r = cliente.get(base)
+    assert r.status_code == 200, r.text
+    regla = next(x for x in r.json() if x["evento"] == "repositorio_disponible")
+    assert regla["vista_previa_con_ejemplo"]
