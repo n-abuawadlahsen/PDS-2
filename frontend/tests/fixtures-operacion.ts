@@ -102,6 +102,10 @@ export const tableroOperacion: Tablero = {
     fechas_distintas: 2,
     sujetos: 200,
     versiones_registradas: e.tipo === "FINAL" ? 0 : 198,
+    cierre_desde:
+      e.tipo === "FINAL" ? "2026-10-06T19:00:00Z" : "2026-09-20T02:59:00Z",
+    cierre_hasta:
+      e.tipo === "FINAL" ? "2026-10-08T19:00:00Z" : "2026-09-20T02:59:00Z",
   })),
   repositorios: repositorios.resumen,
   tarjetas: {

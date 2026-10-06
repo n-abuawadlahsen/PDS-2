@@ -25,7 +25,12 @@ from app.adaptadores import aprovisionamiento_repo, metricas_repo, trabajos_repo
 from app.adaptadores.base import ahora_utc
 from app.adaptadores.bitacora_repo import registrar as registrar_bitacora
 from app.adaptadores.modelos_actividad import Commit
-from app.adaptadores.modelos_aprovisionamiento import AccesoRepositorio, Repositorio, Sujeto
+from app.adaptadores.modelos_aprovisionamiento import (
+    AccesoRepositorio,
+    FechaEfectiva,
+    Repositorio,
+    Sujeto,
+)
 from app.adaptadores.modelos_curso import Curso, MembresiaCurso
 from app.adaptadores.modelos_infraestructura import CursorSincronizacion, Incidencia, Trabajo
 from app.adaptadores.modelos_metricas import ResumenTarea
@@ -155,6 +160,38 @@ def _rango(
 def _contadores(bd: Session, tarea: Tarea) -> dict[str, Any]:
     fila = bd.query(ResumenTarea).filter(ResumenTarea.tarea_id == tarea.id).one_or_none()
     return fila.contadores if fila is not None else {}
+
+
+def _entregas_con_fechas(bd: Session, entregas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Agrega a cada entrega del resumen su cierre vigente (el mas temprano y el
+    mas tardio: las excepciones por sujeto pueden separarlos). Se lee al
+    responder, no del resumen, para no esperar al proximo recalculo."""
+    ids = [uuid.UUID(e["entrega_id"]) for e in entregas]
+    rangos = (
+        {
+            entrega_id: (desde, hasta)
+            for entrega_id, desde, hasta in bd.query(
+                FechaEfectiva.entrega_id,
+                func.min(FechaEfectiva.due_at_utc),
+                func.max(FechaEfectiva.due_at_utc),
+            )
+            .filter(FechaEfectiva.entrega_id.in_(ids), FechaEfectiva.estado == "VIGENTE")
+            .group_by(FechaEfectiva.entrega_id)
+        }
+        if ids
+        else {}
+    )
+    salida = []
+    for e in entregas:
+        desde, hasta = rangos.get(uuid.UUID(e["entrega_id"]), (None, None))
+        salida.append(
+            {
+                **e,
+                "cierre_desde": desde.isoformat() if desde else None,
+                "cierre_hasta": hasta.isoformat() if hasta else None,
+            }
+        )
+    return salida
 
 
 # --- Filas del bloque 5 ---
@@ -545,7 +582,7 @@ def tablero(
         },
         periodos=periodos,
         periodo=periodo,
-        entregas=contadores.get("entregas", []),
+        entregas=_entregas_con_fechas(bd, contadores.get("entregas", [])),
         repositorios=resumen.__dict__,
         tarjetas=tarjetas,
         serie=serie,

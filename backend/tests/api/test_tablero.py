@@ -142,6 +142,10 @@ def test_tablero_sin_llamadas_externas_y_con_sus_cinco_bloques(cliente: TestClie
     datos = respuesta.json()
     assert datos["periodo"].startswith("entrega:")  # la entrega vigente, por defecto
     assert [e["estado"] for e in datos["entregas"]] == ["ABIERTA"]
+    # R2.5.6: la tarjeta de la entrega trae su cierre vigente (el del doble de Canvas).
+    [entrega] = datos["entregas"]
+    assert entrega["cierre_desde"] is not None
+    assert entrega["cierre_desde"] <= entrega["cierre_hasta"]
     assert datos["repositorios"]["sujetos_activos"] == 5
     # Bloques 3 y 5 solo cuentan repositorios que existen en GitHub (Ana y Bruno).
     assert datos["tarjetas"]["repositorios_creados"] == 2

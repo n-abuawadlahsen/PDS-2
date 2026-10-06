@@ -8,7 +8,15 @@ import {
 } from "../lib/api";
 import { consultarOperacion, parametrosOperacion } from "../lib/apiOperacion";
 import { useCurso } from "../components/Layout";
-import { Cargando, ErrorCarga, Mensajes, Tabla, Vacio } from "../components/ui";
+import {
+  Aviso,
+  Cargando,
+  ErrorCarga,
+  Estado,
+  Mensajes,
+  Tabla,
+  Vacio,
+} from "../components/ui";
 import { useConsulta, useOperacion } from "../hooks/useConsulta";
 import {
   fechaLegible,
@@ -24,10 +32,6 @@ const ESTILO_MOTIVO = {
   fontSize: "0.85rem",
   color: "var(--color-text-secondary)",
 } as const;
-const ESTILO_AMBAR = {
-  background: "var(--color-warning-background)",
-  padding: "0.5rem 0.75rem",
-} as const;
 
 const GRUPOS_ESTADO: Record<string, string> = {
   LISTOS: "Listos",
@@ -39,6 +43,18 @@ const GRUPOS_ESTADO: Record<string, string> = {
   FUERA_DE_ALCANCE: "Fuera de alcance",
   ARCHIVADO: "Archivado",
   INACCESIBLE: "Inaccesible",
+};
+
+// Estado agregado de una entrega -> valor que `Estado` sabe colorear.
+const TONO_ENTREGA: Record<string, string> = {
+  ABIERTA: "ACTIVA",
+  EN_CIERRE: "ADVERTENCIA",
+  CERRADA_CAPTURANDO: "CREANDO",
+  CERRADA_REGISTRADA: "COMPLETADO",
+  VINCULADA_TRAS_EL_CIERRE: "ADVERTENCIA",
+  SIN_FECHA: "ADVERTENCIA",
+  NO_PUBLICADA: "ADVERTENCIA",
+  ELIMINADA_EN_CANVAS: "ERROR",
 };
 
 /** Tablero de la tarea (SPEC 10 S10.7): una sola página de cinco bloques,
@@ -130,25 +146,47 @@ export function TableroTarea({
     );
   const p = datos.procedencia;
   const t = datos.tarjetas;
+  const r = datos.repositorios;
   const participacion = Object.entries(t.sin_participacion);
+  const totalParticipacion = participacion.reduce((s, [, n]) => s + n, 0);
+  const verRepositoriosConAlertas = () => {
+    cambiar("solo_alertas", "1");
+    document
+      .getElementById("tablero-detalle")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  // Avance de creacion en cuatro tramos: listos, pendientes, en proceso y con error.
+  const segmentos = [
+    { nombre: "Listos", valor: r.operativos, tono: "success" },
+    {
+      nombre: "Accesos o información pendiente",
+      valor: r.degradados + r.esperando_informacion,
+      tono: "warning",
+    },
+    {
+      nombre: "Creándose o esperando",
+      valor:
+        r.listos_para_crear +
+        r.creando +
+        r.esperando_limite +
+        r.bloqueados +
+        r.error_transitorio,
+      tono: "info",
+    },
+    {
+      nombre: "Requieren acción o inaccesibles",
+      valor: r.error_permanente + r.inaccesibles,
+      tono: "error",
+    },
+  ];
+  const totalRepos = segmentos.reduce((s, x) => s + x.valor, 0);
   return (
     <section className="operacion-tablero">
       <h2>Tablero</h2>
       {consulta.error && (
         <ErrorCarga error={consulta.error} reintentar={consulta.recargar} />
       )}
-      <p className="help">
-        Datos actualizados: {fechaLegible(p.ultima_ingesta, curso.zona_horaria)}{" "}
-        · última comprobación:{" "}
-        {fechaLegible(p.ultima_reconciliacion, curso.zona_horaria)}
-      </p>
-      {p.datos_posiblemente_desactualizados && (
-        <p style={ESTILO_AMBAR}>
-          Los datos de actividad pueden estar desactualizados: no hay una
-          lectura correcta en la última hora.
-        </p>
-      )}
-      <div className="filters">
+      <div className="tablero-barra">
         <label>
           Período{" "}
           <select
@@ -161,7 +199,7 @@ export function TableroTarea({
               </option>
             ))}
           </select>
-        </label>{" "}
+        </label>
         <button
           disabled={op.ocupado || espera}
           onClick={() => void onActualizar()}
@@ -171,136 +209,37 @@ export function TableroTarea({
             : actualizando
               ? "Actualización en curso"
               : "Actualizar ahora"}
-        </button>{" "}
+        </button>
         <a
+          className="button"
+          title="Incluye todos los repositorios del período, sin los filtros de la tabla."
           href={urlApi(
             `/api/cursos/${cursoId}/tareas/${tareaId}/tablero.csv?${new URLSearchParams({ periodo: datos.periodo })}`,
           )}
         >
-          Exportar todos en CSV
+          Exportar CSV
         </a>
       </div>
-      <Mensajes {...op} />
-      {espera && disponibleEn && (
-        <p className="help">
-          Puedes solicitar otra actualización el{" "}
-          {fechaLegible(disponibleEn, curso.zona_horaria)}.
-        </p>
-      )}
-      <p className="help">
-        El CSV contiene todos los repositorios del período, sin los filtros de
-        esta tabla.
+      <p className="help tablero-procedencia">
+        Datos al {fechaLegible(p.ultima_ingesta, curso.zona_horaria)} · última
+        comprobación {fechaLegible(p.ultima_reconciliacion, curso.zona_horaria)}
+        {espera &&
+          disponibleEn &&
+          ` · puedes volver a actualizar el ${fechaLegible(disponibleEn, curso.zona_horaria)}`}
       </p>
-
-      <h3>Entregas</h3>
-      {datos.entregas.length === 0 ? (
-        <p>Esta tarea todavía no tiene entregas vinculadas.</p>
-      ) : (
-        <ul>
-          {datos.entregas.map((e) => (
-            <li key={e.entrega_id}>
-              <Link
-                to={`/cursos/${cursoId}/tareas/${tareaId}/entregas?entrega=${e.entrega_id}`}
-              >
-                #{e.orden} {e.nombre}
-              </Link>{" "}
-              · {textoEstadoEntregaAgregado(e.estado)} · {e.sujetos} sujetos ·{" "}
-              {e.versiones_registradas} versiones registradas
-              {e.fechas_distintas > 1 &&
-                ` · ${e.fechas_distintas} fechas distintas`}
-            </li>
-          ))}
-        </ul>
+      {p.datos_posiblemente_desactualizados && (
+        <Aviso tipo="warning">
+          Los datos de actividad pueden estar desactualizados: no hay una
+          lectura correcta en la última hora.
+        </Aviso>
       )}
+      <Mensajes {...op} />
 
-      <h3>Estado de los repositorios</h3>
-      <dl className="operacion-estados">
-        {[
-          {
-            nombre: "Listos",
-            valor: datos.repositorios.operativos,
-            tono: "success",
-          },
-          {
-            nombre: "Accesos pendientes",
-            valor: datos.repositorios.degradados,
-            tono: "warning",
-          },
-          {
-            nombre: "Falta información",
-            valor: datos.repositorios.esperando_informacion,
-            tono: "warning",
-          },
-          {
-            nombre: "En curso",
-            valor:
-              datos.repositorios.creando + datos.repositorios.listos_para_crear,
-            detalle: `${datos.repositorios.listos_para_crear} por crear · ${datos.repositorios.creando} creando`,
-          },
-          {
-            nombre: "Esperando",
-            valor:
-              datos.repositorios.error_transitorio +
-              datos.repositorios.esperando_limite +
-              datos.repositorios.bloqueados,
-            detalle: `${datos.repositorios.esperando_limite} por límite · ${datos.repositorios.bloqueados} bloqueados · ${datos.repositorios.error_transitorio} reintentando`,
-          },
-          {
-            nombre: "Requieren acción",
-            valor: datos.repositorios.error_permanente,
-            tono: "error",
-          },
-          {
-            nombre: "Fuera de alcance",
-            valor: datos.repositorios.fuera_de_alcance,
-          },
-          { nombre: "Archivados", valor: datos.repositorios.archivados },
-          {
-            nombre: "Inaccesibles",
-            valor: datos.repositorios.inaccesibles,
-            tono: "error",
-          },
-        ].map((estado) => (
-          <div
-            key={estado.nombre}
-            className={`operacion-estado ${estado.tono ?? "neutral"}`}
-          >
-            <dt>{estado.nombre}</dt>
-            <dd>{estado.valor}</dd>
-            {estado.detalle && (
-              <dd className="operacion-estado-detalle">{estado.detalle}</dd>
-            )}
-          </div>
-        ))}
-      </dl>
-
-      <details>
-        <summary>Ver todos los estados de creación</summary>
-        <dl className="operacion-subestados">
-          {Object.entries({
-            Operativos: datos.repositorios.operativos,
-            "Accesos pendientes": datos.repositorios.degradados,
-            "Esperando información": datos.repositorios.esperando_informacion,
-            "Listos para crear": datos.repositorios.listos_para_crear,
-            Creándose: datos.repositorios.creando,
-            "Esperando límite de GitHub": datos.repositorios.esperando_limite,
-            Bloqueados: datos.repositorios.bloqueados,
-            "Reintento automático": datos.repositorios.error_transitorio,
-            "Requieren acción": datos.repositorios.error_permanente,
-            "Fuera de alcance": datos.repositorios.fuera_de_alcance,
-            Archivados: datos.repositorios.archivados,
-            Inaccesibles: datos.repositorios.inaccesibles,
-          }).map(([nombre, cantidad]) => (
-            <div key={nombre}>
-              <dt>{nombre}</dt>
-              <dd>{cantidad}</dd>
-            </div>
-          ))}
-        </dl>
-      </details>
       <h3>Atención</h3>
       <div className="operacion-atencion">
-        <div className="operacion-alerta">
+        <div
+          className={`operacion-alerta ${t.sin_actividad > 0 ? "warning" : ""}`}
+        >
           <h4>Sin actividad reciente</h4>
           <p className="operacion-alerta-cantidad">
             {t.sin_actividad}
@@ -314,18 +253,24 @@ export function TableroTarea({
           </p>
           <button
             className="operacion-enlace"
-            onClick={() => cambiar("solo_alertas", "1")}
+            onClick={verRepositoriosConAlertas}
           >
-            Consultar alertas
+            Ver repositorios
           </button>
         </div>
-        <div className="operacion-alerta">
-          <h4>Participación por revisar</h4>
-          {participacion.length === 0 ? (
-            <p className="operacion-alerta-cantidad">
-              0<span>sin casos pendientes</span>
-            </p>
-          ) : (
+        <div
+          className={`operacion-alerta ${totalParticipacion > 0 ? "warning" : ""}`}
+        >
+          <h4>Estudiantes sin participar</h4>
+          <p className="operacion-alerta-cantidad">
+            {totalParticipacion}
+            <span>
+              {totalParticipacion === 0
+                ? "sin casos pendientes"
+                : "por revisar"}
+            </span>
+          </p>
+          {participacion.length > 0 && (
             <dl className="operacion-causas">
               {participacion.map(([causa, cantidad]) => (
                 <div key={causa}>
@@ -343,9 +288,16 @@ export function TableroTarea({
               ))}
             </dl>
           )}
-          <Link to={`/cursos/${cursoId}/pendientes`}>Revisar las causas</Link>
+          <button
+            className="operacion-enlace"
+            onClick={verRepositoriosConAlertas}
+          >
+            Ver repositorios
+          </button>
         </div>
-        <div className="operacion-alerta">
+        <div
+          className={`operacion-alerta ${t.invitaciones_sin_aceptar > 0 ? "warning" : ""}`}
+        >
           <h4>Invitaciones sin aceptar</h4>
           <p className="operacion-alerta-cantidad">
             {t.invitaciones_sin_aceptar}
@@ -353,7 +305,7 @@ export function TableroTarea({
           </p>
           <Link to="?vista=repositorios">Revisar accesos</Link>
         </div>
-        <div className="operacion-alerta">
+        <div className={`operacion-alerta ${t.bloqueantes > 0 ? "error" : ""}`}>
           <h4>Incidencias bloqueantes</h4>
           <p className="operacion-alerta-cantidad">
             {t.bloqueantes}
@@ -363,6 +315,55 @@ export function TableroTarea({
         </div>
       </div>
       <p className="help operacion-alcance">{datos.aviso_alcance}</p>
+
+      <h3>Entregas</h3>
+      {datos.entregas.length === 0 ? (
+        <Vacio>Esta tarea todavía no tiene entregas vinculadas.</Vacio>
+      ) : (
+        <ul className="tablero-entregas">
+          {datos.entregas.map((e) => (
+            <li key={e.entrega_id}>
+              <div className="tablero-entrega-cabecera">
+                <Link
+                  to={`/cursos/${cursoId}/tareas/${tareaId}/entregas?entrega=${e.entrega_id}`}
+                >
+                  #{e.orden} {e.nombre}
+                </Link>
+                <Estado
+                  valor={TONO_ENTREGA[e.estado] ?? "NEUTRAL"}
+                  texto={textoEstadoEntregaAgregado(e.estado)}
+                />
+              </div>
+              <p className="tablero-entrega-fecha">
+                {textoCierre(
+                  e.cierre_desde,
+                  e.cierre_hasta,
+                  curso.zona_horaria,
+                )}
+              </p>
+              <dl className="tablero-entrega-cifras">
+                <div>
+                  <dt>Sujetos</dt>
+                  <dd>{e.sujetos}</dd>
+                </div>
+                <div>
+                  <dt>Versiones registradas</dt>
+                  <dd>
+                    {e.versiones_registradas}
+                    <span> de {e.sujetos}</span>
+                  </dd>
+                </div>
+                {e.fechas_distintas > 1 && (
+                  <div>
+                    <dt>Fechas de cierre</dt>
+                    <dd>{e.fechas_distintas} distintas</dd>
+                  </div>
+                )}
+              </dl>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <h3>Actividad en el tiempo</h3>
       {datos.serie.length === 0 ? (
@@ -409,10 +410,96 @@ export function TableroTarea({
       )}
       <p style={ESTILO_MOTIVO}>{datos.definicion_commit_contable}</p>
 
-      <h3>Detalle por repositorio</h3>
+      <h3>Estado de los repositorios</h3>
+      {totalRepos > 0 && (
+        <div className="tablero-avance">
+          <p>
+            <strong>
+              {r.operativos} de {totalRepos}
+            </strong>{" "}
+            repositorios listos ({Math.round((r.operativos / totalRepos) * 100)}
+            %)
+          </p>
+          <div
+            className="tablero-avance-barra"
+            role="img"
+            aria-label={segmentos
+              .map((s) => `${s.nombre}: ${s.valor}`)
+              .join(", ")}
+          >
+            {segmentos
+              .filter((s) => s.valor > 0)
+              .map((s) => (
+                <span
+                  key={s.nombre}
+                  className={s.tono}
+                  style={{ flexGrow: s.valor }}
+                  title={`${s.nombre}: ${s.valor}`}
+                />
+              ))}
+          </div>
+          <ul className="tablero-avance-leyenda" aria-hidden="true">
+            {segmentos.map((s) => (
+              <li key={s.nombre}>
+                <i className={s.tono} />
+                {s.nombre} <strong>{s.valor}</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <details>
+        <summary>Ver el detalle por estado</summary>
+        <dl className="operacion-estados">
+          {[
+            { nombre: "Listos", valor: r.operativos, tono: "success" },
+            {
+              nombre: "Accesos pendientes",
+              valor: r.degradados,
+              tono: "warning",
+            },
+            {
+              nombre: "Falta información",
+              valor: r.esperando_informacion,
+              tono: "warning",
+            },
+            {
+              nombre: "En curso",
+              valor: r.creando + r.listos_para_crear,
+              detalle: `${r.listos_para_crear} por crear · ${r.creando} creando`,
+            },
+            {
+              nombre: "Esperando",
+              valor: r.error_transitorio + r.esperando_limite + r.bloqueados,
+              detalle: `${r.esperando_limite} por límite · ${r.bloqueados} bloqueados · ${r.error_transitorio} reintentando`,
+            },
+            {
+              nombre: "Requieren acción",
+              valor: r.error_permanente,
+              tono: "error",
+            },
+            { nombre: "Fuera de alcance", valor: r.fuera_de_alcance },
+            { nombre: "Archivados", valor: r.archivados },
+            { nombre: "Inaccesibles", valor: r.inaccesibles, tono: "error" },
+          ].map((estado) => (
+            <div
+              key={estado.nombre}
+              className={`operacion-estado ${estado.tono ?? "neutral"}`}
+            >
+              <dt>{estado.nombre}</dt>
+              <dd>{estado.valor}</dd>
+              {estado.detalle && (
+                <dd className="operacion-estado-detalle">{estado.detalle}</dd>
+              )}
+            </div>
+          ))}
+        </dl>
+      </details>
+
+      <h3 id="tablero-detalle">Detalle por repositorio</h3>
       {datos.posicion_frente_al_curso &&
         datos.posicion_frente_al_curso.commits && (
-          <p>
+          <p className="help">
             Posición frente al curso ({datos.posicion_frente_al_curso.sujetos}{" "}
             sujetos): commits en el periodo, cuartiles{" "}
             {datos.posicion_frente_al_curso.commits.join(" / ")}; días activos{" "}
@@ -570,18 +657,22 @@ function Fila({
           <Sparkline valores={f.sparkline} />
         </td>
         <td>
-          {f.alertas.map((a) => (
-            <div key={a}>
-              {a === "SIN_ACTIVIDAD"
-                ? "sin actividad reciente"
-                : "alguien sin participación"}
-            </div>
-          ))}
-          {f.reparto_concentrado && (
-            <div style={{ color: "var(--color-warning)" }}>
-              reparto concentrado
-            </div>
-          )}
+          <div className="tablero-alertas">
+            {f.alertas.map((a) => (
+              <Estado
+                key={a}
+                valor="ADVERTENCIA"
+                texto={
+                  a === "SIN_ACTIVIDAD"
+                    ? "Sin actividad reciente"
+                    : "Alguien sin participar"
+                }
+              />
+            ))}
+            {f.reparto_concentrado && (
+              <Estado valor="ADVERTENCIA" texto="Reparto concentrado" />
+            )}
+          </div>
           <button aria-expanded={abierta} onClick={() => setAbierta(!abierta)}>
             {abierta
               ? "Ocultar"
@@ -594,6 +685,9 @@ function Fila({
       {abierta && (
         <tr>
           <td colSpan={6}>
+            {f.sujeto_tipo === "GRUPO" && f.integrantes.length > 0 && (
+              <ComparacionIntegrantes integrantes={f.integrantes} />
+            )}
             <table>
               <thead>
                 <tr>
@@ -658,6 +752,78 @@ function Fila({
         </tr>
       )}
     </>
+  );
+}
+
+/** «Cierra el …», «Cerró el …» o un rango cuando hay excepciones por sujeto;
+ * la zona horaria se nombra una sola vez. */
+function textoCierre(
+  desde: string | null | undefined,
+  hasta: string | null | undefined,
+  zona: string,
+) {
+  if (!desde) return "Sin fecha de cierre";
+  const ultimo = hasta ?? desde;
+  const verbo = new Date(ultimo).getTime() < Date.now() ? "Cerró" : "Cierra";
+  if (ultimo === desde) return `${verbo} el ${fechaLegible(desde, zona)}`;
+  const sinZona = fechaLegible(desde, zona).replace(` (${zona})`, "");
+  return `${verbo} entre el ${sinZona} y el ${fechaLegible(ultimo, zona)}`;
+}
+
+/** Barras horizontales: la parte de los commits del grupo de cada integrante.
+ * Con coautoria la suma puede pasar del 100 %; se escala al mayor. */
+function ComparacionIntegrantes({
+  integrantes,
+}: {
+  integrantes: FilaTablero["integrantes"];
+}) {
+  const total = integrantes.reduce((s, i) => s + i.commits, 0);
+  const maximo = Math.max(1, ...integrantes.map((i) => i.commits));
+  return (
+    <figure className="tablero-comparacion">
+      <figcaption>Commits de cada integrante en el período</figcaption>
+      <ul>
+        {[...integrantes]
+          .sort((a, b) => b.commits - a.commits)
+          .map((i) => {
+            const porcentaje = total
+              ? Math.round((i.commits / total) * 100)
+              : 0;
+            const sinAporte = i.commits === 0;
+            return (
+              <li key={i.estudiante_id}>
+                <span className="tablero-comparacion-nombre">
+                  {i.nombre}
+                  {i.retirado && <small> (retirado)</small>}
+                </span>
+                <span className="tablero-comparacion-pista" aria-hidden="true">
+                  <span
+                    className={sinAporte ? "vacia" : ""}
+                    style={{ width: `${(i.commits / maximo) * 100}%` }}
+                  />
+                </span>
+                <span className="tablero-comparacion-valor">
+                  {sinAporte ? (
+                    <Estado
+                      valor="ADVERTENCIA"
+                      texto={
+                        i.causa
+                          ? textoCausaParticipacion(i.causa)
+                          : "Sin commits"
+                      }
+                    />
+                  ) : (
+                    <>
+                      <strong>{i.commits}</strong> · {porcentaje}% ·{" "}
+                      {i.dias_activos} días activos
+                    </>
+                  )}
+                </span>
+              </li>
+            );
+          })}
+      </ul>
+    </figure>
   );
 }
 

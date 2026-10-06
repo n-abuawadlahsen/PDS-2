@@ -1302,6 +1302,9 @@ export interface Tablero {
     fechas_distintas: number;
     sujetos: number;
     versiones_registradas: number;
+    /** Cierre vigente más temprano y más tardío (difieren con excepciones). */
+    cierre_desde?: string | null;
+    cierre_hasta?: string | null;
   }[];
   repositorios: ResumenRepositorios;
   tarjetas: {

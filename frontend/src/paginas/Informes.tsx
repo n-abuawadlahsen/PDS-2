@@ -76,8 +76,10 @@ export function Informes() {
   const lista = useConsulta(`informes:${cursoId}`, () =>
     obtenerInformes(cursoId),
   );
-  // Sin fecha en la URL se muestra el informe más reciente.
-  const seleccionada = fecha ?? lista.datos?.informes[0]?.fecha;
+  // El documento solo se carga al elegir una fecha: el visor vacío ofrece el
+  // más reciente con un clic en vez de abrirlo solo.
+  const seleccionada = fecha;
+  const masReciente = lista.datos?.informes[0]?.fecha;
   const dia = useConsulta(`informe:${cursoId}:${seleccionada}`, () =>
     seleccionada
       ? obtenerInformeDia(cursoId, seleccionada)
@@ -152,7 +154,7 @@ export function Informes() {
                   })
                 }
               >
-                {accion === "vista" ? "Generando…" : "Vista previa"}
+                {accion === "vista" ? "Generando…" : "Vista previa de hoy"}
               </button>
               <button
                 disabled={op.ocupado}
@@ -172,7 +174,9 @@ export function Informes() {
                   })
                 }
               >
-                {accion === "enviarme" ? "Enviando…" : "Enviármelo"}
+                {accion === "enviarme"
+                  ? "Enviando…"
+                  : "Enviarme el informe de hoy"}
               </button>
               {puede("curso.administrar") && (
                 <button
@@ -279,10 +283,23 @@ export function Informes() {
                   <Documento html={vista} />
                 </>
               ) : !seleccionada ? (
-                <Vacio>
-                  Aún no hay informes. Usa «Vista previa» para ver cómo se verá
-                  el de hoy.
-                </Vacio>
+                masReciente ? (
+                  <div className="empty">
+                    <p>Elige un informe del historial.</p>
+                    <Link
+                      className="button primary"
+                      to={`/cursos/${cursoId}/informes/${masReciente}`}
+                    >
+                      Ver el más reciente ({diaSemana(masReciente)}{" "}
+                      {fechaCorta(masReciente)})
+                    </Link>
+                  </div>
+                ) : (
+                  <Vacio>
+                    Aún no hay informes. Usa «Vista previa de hoy» para ver cómo
+                    se verá el de hoy.
+                  </Vacio>
+                )
               ) : dia.error ? (
                 <ErrorCarga error={dia.error} reintentar={dia.recargar} />
               ) : dia.cargando ? (
